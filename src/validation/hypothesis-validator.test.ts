@@ -67,12 +67,21 @@ describe('validateHypothesis', () => {
     expect(r.issues.map((i) => i.code)).toContain('authority_violation');
   });
 
-  it('produces deterministically sorted issues', () => {
+  it('rejects a disallowed action', () => {
     const d = baseDraft();
-    d.invalidationCriteria = [];
-    d.requiredFeatures = ['nope'];
-    const r1 = validateHypothesis(d, { allowedFeatures: allowed });
-    const r2 = validateHypothesis(d, { allowedFeatures: allowed });
-    expect(r1.issues).toEqual(r2.issues);
+    (d.ruleAction.rules[0] as { action: string }).action = 'send_market_order';
+    const r = validateHypothesis(d, { allowedFeatures: allowed });
+    expect(r.issues.map((i) => i.code)).toContain('disallowed_action');
+  });
+
+  it('produces deterministically sorted issues (by path)', () => {
+    const d = baseDraft();
+    d.invalidationCriteria = [];           // -> missing_falsifiability at path 'invalidationCriteria'
+    d.requiredFeatures = ['nope'];         // -> unavailable_feature at path 'requiredFeatures.0'
+    const r = validateHypothesis(d, { allowedFeatures: allowed });
+    const paths = r.issues.map((i) => i.path);
+    // locale-independent ascending order: 'invalidationCriteria' < 'requiredFeatures.0'
+    expect(paths).toEqual([...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+    expect(r.issues.map((i) => i.code)).toEqual(expect.arrayContaining(['missing_falsifiability', 'unavailable_feature']));
   });
 });
