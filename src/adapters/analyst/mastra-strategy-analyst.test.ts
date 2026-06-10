@@ -12,6 +12,9 @@ describe('MastraStrategyAnalyst (unit)', () => {
     expect(a.adapter).toBe('mastra');
     expect(a.model).toBe('anthropic/claude-sonnet-4-6');
   });
+  it('rejects a non-Anthropic model at construction', () => {
+    expect(() => new MastraStrategyAnalyst('openai/gpt-4o')).toThrow(/only supports Anthropic/);
+  });
 });
 
 live('MastraStrategyAnalyst (live LLM)', () => {

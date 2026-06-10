@@ -32,6 +32,11 @@ export class MastraStrategyAnalyst implements StrategyAnalystPort {
     // The full routing string (e.g. 'anthropic/claude-sonnet-4-6') is preserved in
     // this.model for audit purposes.
     const bareModelId = model.replace(/^anthropic\//, '');
+    // This adapter is Anthropic-only. Reject any other provider prefix at construction
+    // time with a clear error rather than passing a wrong id to anthropic() at call time.
+    if (bareModelId.includes('/')) {
+      throw new Error(`MastraStrategyAnalyst only supports Anthropic models; got '${model}'`);
+    }
     this.agent = new Agent({
       id: 'strategy-analyst',
       name: 'Strategy Analyst',
