@@ -15,6 +15,13 @@
       "when": 1781113281469,
       "tag": "0001_flawless_snowbird",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781122175007,
+      "tag": "0002_luxuriant_energizer",
+      "breakpoints": true
     }
   ]
 }
