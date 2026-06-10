@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { agentEvent } from '../../db/schema.ts';
 import type { AgentEvent, AgentEventRepository } from '../../ports/agent-event.repository.ts';
@@ -29,7 +29,13 @@ export class DrizzleAgentEventRepository implements AgentEventRepository {
   }
 
   async listByTask(taskId: string): Promise<AgentEvent[]> {
-    const rows = await this.db.select().from(agentEvent).where(eq(agentEvent.taskId, taskId));
+    // ORDER BY created_at to match the in-memory adapter's insertion-order contract
+    // (an audit log is read chronologically; without this, Postgres row order is undefined).
+    const rows = await this.db
+      .select()
+      .from(agentEvent)
+      .where(eq(agentEvent.taskId, taskId))
+      .orderBy(asc(agentEvent.createdAt));
     return rows.map(toDomain);
   }
 }
