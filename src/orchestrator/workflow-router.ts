@@ -1,9 +1,7 @@
 import type { AgentTaskType, ResearchTask } from '../domain/types.ts';
-import type { ResearchTaskRepository } from '../ports/research-task.repository.ts';
+import type { AppServices } from './app-services.ts';
 
-export interface HandlerDeps {
-  repo: ResearchTaskRepository;
-}
+export type HandlerDeps = AppServices;
 
 export type WorkflowHandler = (task: ResearchTask, deps: HandlerDeps) => Promise<void>;
 

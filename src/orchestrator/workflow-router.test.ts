@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { WorkflowRouter, type HandlerDeps, type WorkflowHandler } from './workflow-router.ts';
+import { WorkflowRouter, type WorkflowHandler } from './workflow-router.ts';
 import { echoHandler } from './handlers/echo.handler.ts';
-import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
+import { makeServices } from '../../test/support/make-services.ts';
 import type { ResearchTask } from '../domain/types.ts';
 
 const task = (over: Partial<ResearchTask> = {}): ResearchTask => ({
@@ -11,20 +11,17 @@ const task = (over: Partial<ResearchTask> = {}): ResearchTask => ({
 
 describe('WorkflowRouter', () => {
   it('dispatches a task to its registered handler', async () => {
-    const repo = new InMemoryResearchTaskRepository();
-    const t = task();
-    const deps: HandlerDeps = { repo };
+    const services = makeServices();
     const seen: string[] = [];
     const router = new WorkflowRouter();
-    router.register('strategy.onboard', async (task) => { seen.push(task.id); });
-    await router.dispatch(t, deps);
+    router.register('strategy.onboard', async (t) => { seen.push(t.id); });
+    await router.dispatch(task(), services);
     expect(seen).toEqual(['id-1']);
   });
 
   it('throws on an unregistered task type', async () => {
     const router = new WorkflowRouter();
-    const repo = new InMemoryResearchTaskRepository();
-    await expect(router.dispatch(task({ taskType: 'paper.monitor' }), { repo })).rejects.toThrow(/no handler/i);
+    await expect(router.dispatch(task({ taskType: 'paper.monitor' }), makeServices())).rejects.toThrow(/no handler/i);
   });
 
   it('throws when the same task type is registered twice', () => {
@@ -37,10 +34,10 @@ describe('WorkflowRouter', () => {
 
 describe('echoHandler', () => {
   it('is a no-op stub: it does NOT own the status transition (the worker does)', async () => {
-    const repo = new InMemoryResearchTaskRepository();
+    const services = makeServices();
     const t = task({ status: 'running' });
-    await repo.create(t);
-    await echoHandler(t, { repo });
-    expect((await repo.findById('id-1'))?.status).toBe('running'); // unchanged by the handler
+    await services.researchTasks.create(t);
+    await echoHandler(t, services);
+    expect((await services.researchTasks.findById('id-1'))?.status).toBe('running');
   });
 });
