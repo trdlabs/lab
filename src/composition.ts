@@ -1,14 +1,24 @@
 import { loadEnv } from './config/env.ts';
 import { BullMqQueueAdapter } from './adapters/queue/bullmq-queue.adapter.ts';
 import { DrizzleResearchTaskRepository } from './adapters/repository/drizzle-research-task.repository.ts';
+import { DrizzleStrategyProfileRepository } from './adapters/repository/drizzle-strategy-profile.repository.ts';
+import { DrizzleAgentEventRepository } from './adapters/repository/drizzle-agent-event.repository.ts';
 import { LocalFileArtifactStore } from './adapters/artifact/local-file-artifact-store.adapter.ts';
+import { FakeStrategyAnalyst } from './adapters/analyst/fake-strategy-analyst.ts';
+import { MastraStrategyAnalyst } from './adapters/analyst/mastra-strategy-analyst.ts';
 import { createDbClient } from './db/client.ts';
 import { WorkflowRouter } from './orchestrator/workflow-router.ts';
-import { echoHandler } from './orchestrator/handlers/echo.handler.ts';
-import { FakeStrategyAnalyst } from './adapters/analyst/fake-strategy-analyst.ts';
-import { InMemoryStrategyProfileRepository } from './adapters/repository/in-memory-strategy-profile.repository.ts';
-import { InMemoryAgentEventRepository } from './adapters/repository/in-memory-agent-event.repository.ts';
+import { strategyOnboardHandler } from './orchestrator/handlers/strategy-onboard.handler.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
+import type { StrategyAnalystPort } from './ports/strategy-analyst.port.ts';
+
+function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
+  if (env.STRATEGY_ANALYST_ADAPTER === 'mastra') {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when STRATEGY_ANALYST_ADAPTER=mastra');
+    return new MastraStrategyAnalyst(env.STRATEGY_ANALYST_MODEL);
+  }
+  return new FakeStrategyAnalyst();
+}
 
 export function composeRuntime() {
   const env = loadEnv();
@@ -20,14 +30,14 @@ export function composeRuntime() {
 
   const services: AppServices = {
     researchTasks: new DrizzleResearchTaskRepository(db),
-    strategyProfiles: new InMemoryStrategyProfileRepository(), // replaced with Drizzle in Task 14
-    analyst: new FakeStrategyAnalyst(),                        // adapter selection added in Task 14
+    strategyProfiles: new DrizzleStrategyProfileRepository(db),
+    analyst: buildAnalyst(env),
     artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
-    events: new InMemoryAgentEventRepository(),                // replaced with Drizzle in Task 14
+    events: new DrizzleAgentEventRepository(db),
   };
 
   const router = new WorkflowRouter();
-  router.register('strategy.onboard', echoHandler); // replaced with strategyOnboardHandler in Task 14
+  router.register('strategy.onboard', strategyOnboardHandler);
 
   return { env, db, pool, queue, router, services };
 }
