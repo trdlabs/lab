@@ -38,4 +38,27 @@ describe('startWorker', () => {
     await expect(queue.drain()).rejects.toThrow('boom');
     expect((await repo.findById('id-1'))?.status).toBe('failed');
   });
+
+  it('rethrows the original handler error even if recording failed status throws', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const base = new InMemoryResearchTaskRepository();
+    await base.create(task());
+    // Repo whose updateStatus throws specifically on the 'failed' transition,
+    // simulating e.g. a dropped DB connection while recording failure.
+    const repo = {
+      findById: (id: string) => base.findById(id),
+      findByDedupeKey: (k: string) => base.findByDedupeKey(k),
+      create: (t: ResearchTask) => base.create(t),
+      updateStatus: async (id: string, status: ResearchTask['status']) => {
+        if (status === 'failed') throw new Error('db down');
+        return base.updateStatus(id, status);
+      },
+    };
+    const router = new WorkflowRouter();
+    router.register('strategy.onboard', async () => { throw new Error('boom'); });
+    startWorker({ queue, repo, router });
+    await queue.enqueue(env());
+    // The ORIGINAL handler error must surface, not the 'db down' masking error.
+    await expect(queue.drain()).rejects.toThrow('boom');
+  });
 });

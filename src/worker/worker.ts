@@ -20,7 +20,13 @@ export function startWorker(deps: WorkerDeps): void {
       await deps.router.dispatch({ ...task, status: 'running' }, { repo: deps.repo });
       await deps.repo.updateStatus(task.id, 'completed');
     } catch (err) {
-      await deps.repo.updateStatus(task.id, 'failed');
+      // Best-effort: never let a failure to record 'failed' mask the original
+      // handler error — the queue adapter must see the real error to drive retry/backoff.
+      try {
+        await deps.repo.updateStatus(task.id, 'failed');
+      } catch {
+        // swallow: the original error below is what matters
+      }
       throw err; // let the queue adapter apply its retry/backoff policy
     }
   });
