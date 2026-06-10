@@ -1152,6 +1152,15 @@ describe('InMemoryHypothesisProposalRepository', () => {
     await expect(repo.create(hyp('h1', 'p1', 'sha256:b'))).rejects.toThrow();
   });
 
+  it('throws on duplicate (strategyProfileId, fingerprint) — mirrors the DB unique guard', async () => {
+    const repo = new InMemoryHypothesisProposalRepository();
+    await repo.create(hyp('h1', 'p1', 'sha256:dup'));
+    // Same profile + same fingerprint, different id -> must still throw.
+    await expect(repo.create(hyp('h2', 'p1', 'sha256:dup'))).rejects.toThrow();
+    // Same fingerprint under a DIFFERENT profile is allowed (dedupe is per profile).
+    await expect(repo.create(hyp('h3', 'p2', 'sha256:dup'))).resolves.toBeUndefined();
+  });
+
   it('lists by strategy profile in insertion order', async () => {
     const repo = new InMemoryHypothesisProposalRepository();
     await repo.create(hyp('h1', 'p1', 'sha256:a'));
@@ -1198,6 +1207,13 @@ export class InMemoryHypothesisProposalRepository implements HypothesisProposalR
 
   async create(proposal: HypothesisProposal): Promise<void> {
     if (this.byId.has(proposal.id)) throw new Error(`hypothesis_proposal already exists: ${proposal.id}`);
+    // Mirror the DB unique (strategy_profile_id, fingerprint) guard so both adapters behave
+    // identically. The handler dedupes via `seen` before insert, so this is a race backstop.
+    for (const p of this.byId.values()) {
+      if (p.strategyProfileId === proposal.strategyProfileId && p.fingerprint === proposal.fingerprint) {
+        throw new Error(`hypothesis_proposal already exists for fingerprint: ${proposal.fingerprint} (profile ${proposal.strategyProfileId})`);
+      }
+    }
     this.byId.set(proposal.id, { ...proposal });
   }
 
@@ -1530,7 +1546,8 @@ git commit -m "feat(sp3): hypothesis_proposal + hypothesis_review tables and mig
 
 ```ts
 // src/adapters/repository/drizzle-hypothesis.repository.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { Pool } from 'pg';
 import { createDbClient } from '../../db/client.ts';
 import { DrizzleHypothesisProposalRepository } from './drizzle-hypothesis-proposal.repository.ts';
 import { DrizzleHypothesisReviewRepository } from './drizzle-hypothesis-review.repository.ts';
@@ -1553,11 +1570,17 @@ function hyp(id: string, fp: string, status: 'validated' | 'rejected' = 'validat
 (url ? describe : describe.skip)('Drizzle hypothesis repositories (integration)', () => {
   let proposals: DrizzleHypothesisProposalRepository;
   let reviews: DrizzleHypothesisReviewRepository;
+  let pool: Pool;
 
   beforeAll(() => {
-    const { db } = createDbClient(url as string);
-    proposals = new DrizzleHypothesisProposalRepository(db);
-    reviews = new DrizzleHypothesisReviewRepository(db);
+    const client = createDbClient(url as string);
+    pool = client.pool;
+    proposals = new DrizzleHypothesisProposalRepository(client.db);
+    reviews = new DrizzleHypothesisReviewRepository(client.db);
+  });
+
+  afterAll(async () => {
+    await pool.end(); // close the Postgres pool so the test process exits cleanly
   });
 
   it('persists and reads back a proposal', async () => {
@@ -1736,12 +1759,15 @@ git commit -m "feat(sp3): Drizzle hypothesis proposal + review repositories"
 
 ---
 
-## Task 13: env additions + AppServices extension + make-services
+## Task 13: env additions + AppServices extension + make-services + composition service wiring
+
+> This task extends `AppServices` with new **required** fields. To keep `pnpm typecheck` green after this commit (a hard requirement for Subagent-Driven), it ALSO wires those fields into `src/composition.ts` in the same task — populating every new service field with its real adapter. Only the `research.run_cycle` handler *registration* is deferred to Task 15 (the handler does not exist until Task 14).
 
 **Files:**
 - Modify: `src/config/env.ts`
 - Modify: `src/orchestrator/app-services.ts`
 - Modify: `test/support/make-services.ts`
+- Modify: `src/composition.ts`
 - Test: `src/config/env.test.ts` (extend if it exists, else create)
 
 - [ ] **Step 1: Write the failing env test**
@@ -1864,19 +1890,81 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
 }
 ```
 
-- [ ] **Step 5: Run tests, typecheck, commit**
+- [ ] **Step 5: Wire the new service fields into `src/composition.ts` (no handler registration yet)**
+
+`AppServices` now has new required fields, so `composeRuntime` must populate them or the project will not typecheck. Add these imports to `src/composition.ts`:
+
+```ts
+import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-gateway.adapter.ts';
+import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
+import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
+import { FakeCritic } from './adapters/critic/fake-critic.ts';
+import { MastraCritic } from './adapters/critic/mastra-critic.ts';
+import { DrizzleHypothesisProposalRepository } from './adapters/repository/drizzle-hypothesis-proposal.repository.ts';
+import { DrizzleHypothesisReviewRepository } from './adapters/repository/drizzle-hypothesis-review.repository.ts';
+import { InMemoryLexicalSimilarHypothesisSearch } from './adapters/similarity/in-memory-lexical-similar-hypothesis-search.ts';
+import type { ResearcherPort } from './ports/researcher.port.ts';
+import type { CriticPort } from './ports/critic.port.ts';
+```
+
+Add the two builder functions next to the existing `buildAnalyst`:
+
+```ts
+function buildResearcher(env: ReturnType<typeof loadEnv>): ResearcherPort {
+  if (env.RESEARCHER_ADAPTER === 'mastra') {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when RESEARCHER_ADAPTER=mastra');
+    return new MastraResearcher(env.RESEARCHER_MODEL);
+  }
+  console.warn('[composition] RESEARCHER_ADAPTER is not "mastra"; using FakeResearcher (stub hypotheses)');
+  return new FakeResearcher();
+}
+
+function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
+  if (!env.ENABLE_CRITIC_AGENT) return null; // advisory; off by default
+  if (env.CRITIC_ADAPTER === 'mastra') {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when CRITIC_ADAPTER=mastra');
+    return new MastraCritic(env.CRITIC_MODEL);
+  }
+  console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
+  return new FakeCritic();
+}
+```
+
+In `composeRuntime`, replace the `services` construction so it includes the new fields (build `hypotheses` first so the lexical search can wrap it):
+
+```ts
+  const hypotheses = new DrizzleHypothesisProposalRepository(db);
+
+  const services: AppServices = {
+    researchTasks: new DrizzleResearchTaskRepository(db),
+    strategyProfiles: new DrizzleStrategyProfileRepository(db),
+    analyst: buildAnalyst(env),
+    artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
+    events: new DrizzleAgentEventRepository(db),
+    platform: new MockPlatformGatewayAdapter(),
+    researcher: buildResearcher(env),
+    critic: buildCritic(env),
+    hypotheses,
+    hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
+    similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
+    maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
+  };
+```
+
+Do **not** add `router.register('research.run_cycle', ...)` yet — the handler is created in Task 14 and registered in Task 15. The existing `strategy.onboard` registration stays as-is.
+
+- [ ] **Step 6: Run tests, typecheck (must be green), commit**
 
 Run: `pnpm vitest run src/config/env.test.ts`
 Expected: PASS.
 
-Run: `pnpm typecheck` (the whole project — AppServices now has new required fields; `makeServices` satisfies them, and `composition.ts` will be updated in Task 15. If `composition.ts` fails to typecheck here because it doesn't yet provide the new fields, that is expected — proceed to commit the env/services changes and resolve composition in Task 15. To keep the tree green, do Task 15 before running a full typecheck gate, OR temporarily run only the targeted tests here.)
+Run: `pnpm typecheck`
+Expected: PASS for the **whole project** — `AppServices`, `makeServices`, and `composition.ts` are now all consistent.
 
 ```bash
-git add src/config/env.ts src/config/env.test.ts src/orchestrator/app-services.ts test/support/make-services.ts
-git commit -m "feat(sp3): env fields, AppServices extension, make-services wiring"
+git add src/config/env.ts src/config/env.test.ts src/orchestrator/app-services.ts test/support/make-services.ts src/composition.ts
+git commit -m "feat(sp3): env fields, AppServices extension, make-services + composition service wiring"
 ```
-
-> Sequencing note: `AppServices` now requires the new fields, so `src/composition.ts` will not typecheck until Task 15. Run Task 14's targeted tests with `pnpm vitest run <file>` (Vitest type-strips per-file and does not fail on unrelated composition types), and run the full `pnpm typecheck` gate at the end of Task 15.
 
 ---
 
@@ -2241,13 +2329,15 @@ git commit -m "feat(sp3): research.run_cycle handler (validate, dedupe, advisory
 
 ---
 
-## Task 15: Composition wiring + e2e
+## Task 15: Register research.run_cycle handler in composition + e2e
+
+> The new service fields were already wired into `src/composition.ts` in Task 13. This task only adds the handler *registration* (now that the handler exists from Task 14) and the end-to-end test. The e2e itself uses `makeServices` + a manually-constructed `WorkflowRouter`, so it does not depend on composition.
 
 **Files:**
-- Modify: `src/composition.ts`
+- Modify: `src/composition.ts` (register the handler — one import + one line)
 - Create: `test/e2e/research-run-cycle.test.ts`
 
-- [ ] **Step 1: Write the failing e2e test**
+- [ ] **Step 1: Write the e2e test** (the handler and services already exist from Tasks 13–14, so this verifies the full path rather than driving red-first)
 
 ```ts
 // test/e2e/research-run-cycle.test.ts
@@ -2301,74 +2391,20 @@ describe('E2E: research.run_cycle ingress -> worker -> persisted hypotheses', ()
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it passes** (the e2e is self-contained via `makeServices` + manual router)
 
 Run: `pnpm vitest run test/e2e/research-run-cycle.test.ts`
-Expected: FAIL — `no handler registered` is not the failure; it should pass handler import but fail because `research.run_cycle` flows end-to-end only once wiring exists. (If it already passes via `makeServices`, that's fine — the e2e doesn't depend on composition. Continue to wire composition for the real runtime.)
+Expected: PASS. (The e2e wires its own `WorkflowRouter` and `makeServices`, so it works without touching composition. If it fails, fix the handler/wiring before proceeding.)
 
-- [ ] **Step 3: Extend `src/composition.ts`**
+- [ ] **Step 3: Register the handler in `src/composition.ts`**
 
-Add imports:
+The service fields are already wired (Task 13). Add the handler import:
 
 ```ts
-import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-gateway.adapter.ts';
-import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
-import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
-import { FakeCritic } from './adapters/critic/fake-critic.ts';
-import { MastraCritic } from './adapters/critic/mastra-critic.ts';
-import { DrizzleHypothesisProposalRepository } from './adapters/repository/drizzle-hypothesis-proposal.repository.ts';
-import { DrizzleHypothesisReviewRepository } from './adapters/repository/drizzle-hypothesis-review.repository.ts';
-import { InMemoryLexicalSimilarHypothesisSearch } from './adapters/similarity/in-memory-lexical-similar-hypothesis-search.ts';
 import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cycle.handler.ts';
-import type { ResearcherPort } from './ports/researcher.port.ts';
-import type { CriticPort } from './ports/critic.port.ts';
 ```
 
-Add builders next to `buildAnalyst`:
-
-```ts
-function buildResearcher(env: ReturnType<typeof loadEnv>): ResearcherPort {
-  if (env.RESEARCHER_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when RESEARCHER_ADAPTER=mastra');
-    return new MastraResearcher(env.RESEARCHER_MODEL);
-  }
-  console.warn('[composition] RESEARCHER_ADAPTER is not "mastra"; using FakeResearcher (stub hypotheses)');
-  return new FakeResearcher();
-}
-
-function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
-  if (!env.ENABLE_CRITIC_AGENT) return null; // advisory; off by default
-  if (env.CRITIC_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when CRITIC_ADAPTER=mastra');
-    return new MastraCritic(env.CRITIC_MODEL);
-  }
-  console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
-  return new FakeCritic();
-}
-```
-
-In `composeRuntime`, build the new repos and extend the `services` object. Replace the `services` construction with:
-
-```ts
-  const hypotheses = new DrizzleHypothesisProposalRepository(db);
-
-  const services: AppServices = {
-    researchTasks: new DrizzleResearchTaskRepository(db),
-    strategyProfiles: new DrizzleStrategyProfileRepository(db),
-    analyst: buildAnalyst(env),
-    artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
-    events: new DrizzleAgentEventRepository(db),
-    platform: new MockPlatformGatewayAdapter(),
-    researcher: buildResearcher(env),
-    critic: buildCritic(env),
-    hypotheses,
-    hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
-    similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
-    maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
-  };
-```
-
-And register the handler next to the existing `strategy.onboard` registration:
+And register it next to the existing `strategy.onboard` registration in `composeRuntime`:
 
 ```ts
   router.register('research.run_cycle', researchRunCycleHandler);
@@ -2376,11 +2412,8 @@ And register the handler next to the existing `strategy.onboard` registration:
 
 - [ ] **Step 4: Run the full gate**
 
-Run: `pnpm vitest run test/e2e/research-run-cycle.test.ts`
-Expected: PASS.
-
 Run: `pnpm typecheck`
-Expected: PASS (whole project now consistent).
+Expected: PASS (whole project consistent).
 
 Run: `pnpm test`
 Expected: all suites green; integration + live-LLM suites skipped unless their env vars are set.
@@ -2389,7 +2422,7 @@ Expected: all suites green; integration + live-LLM suites skipped unless their e
 
 ```bash
 git add src/composition.ts test/e2e/research-run-cycle.test.ts
-git commit -m "feat(sp3): wire researcher/critic/repos into composition + research.run_cycle e2e"
+git commit -m "feat(sp3): register research.run_cycle handler + e2e"
 ```
 
 ---
