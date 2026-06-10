@@ -12,7 +12,10 @@ function parseRedisUrl(url: string): { host: string; port: number; password?: st
   };
   if (u.password) opts.password = decodeURIComponent(u.password);
   const db = u.pathname.replace(/^\//, '');
-  if (db) opts.db = parseInt(db, 10);
+  if (db) {
+    const parsed = parseInt(db, 10);
+    if (Number.isInteger(parsed)) opts.db = parsed;
+  }
   return opts;
 }
 
