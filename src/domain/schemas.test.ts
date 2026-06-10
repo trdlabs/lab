@@ -23,4 +23,10 @@ describe('QueueEnvelopeSchema', () => {
     const env = { taskId: 't1', taskType: 'backtest.submit', correlationId: 'c1', source: 'platform', attempt: 1 };
     expect(QueueEnvelopeSchema.parse(env)).toEqual(env);
   });
+  it('rejects an envelope with attempt < 1 and a missing taskId', () => {
+    const r = QueueEnvelopeSchema.safeParse({
+      taskId: '', taskType: 'backtest.submit', correlationId: 'c1', source: 'platform', attempt: 0,
+    });
+    expect(r.success).toBe(false);
+  });
 });

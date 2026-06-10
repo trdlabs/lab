@@ -1,19 +1,7 @@
-export type AgentTaskType =
-  | 'strategy.onboard'
-  | 'strategy.analyze_source'
-  | 'research.generate_hypotheses'
-  | 'research.run_cycle'
-  | 'hypothesis.build'
-  | 'backtest.submit'
-  | 'backtest.completed'
-  | 'sweep.run'
-  | 'paper.start'
-  | 'paper.monitor'
-  | 'performance.review'
-  | 'research.pause'
-  | 'research.wake_check';
+import type { AGENT_TASK_TYPES, TASK_SOURCES } from './schemas.ts';
 
-export type TaskSource = 'telegram' | 'web' | 'crawler' | 'cron' | 'platform' | 'operator';
+export type AgentTaskType = (typeof AGENT_TASK_TYPES)[number];
+export type TaskSource = (typeof TASK_SOURCES)[number];
 
 export type TaskStatus = 'accepted' | 'queued' | 'running' | 'completed' | 'failed' | 'rejected';
 
