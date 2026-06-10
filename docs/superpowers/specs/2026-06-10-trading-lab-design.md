@@ -227,7 +227,7 @@ Mastra предоставляет: agents, workflows, tools, typed inputs/output
 |---|---|---|---|
 | **Strategy Analyst** | LLM | source (код/README/NotebookLM/article/manual/crawler) → `StrategyProfile` JSON + confidence + unknowns + evidence | Структурное понимание стратегии до генерации гипотез. |
 | **Researcher** | LLM | profile + trades + decision logs + market context + прошлые бэктесты + similar hypotheses + regime → `HypothesisProposal[]` | Falsifiable гипотезы. **Не генерирует код** — гипотеза это контракт между Researcher и Builder. |
-| **Critic / Risk Reviewer** | LLM (опц. в MVP, за флагом) | hypothesis → review | Falsifiable? overfit? lookahead? data-availability? sample size? дубликат прошлого fail? нарушение boundaries? измеримость эффекта? |
+| **Critic / Risk Reviewer** | LLM (опц., за `ENABLE_CRITIC_AGENT`, default `false`) | hypothesis → review | Falsifiable? overfit? lookahead? data-availability? sample size? дубликат прошлого fail? нарушение boundaries? измеримость эффекта? **Не gate** — обязательный gate всегда deterministic Validator. |
 | **Validator** | **детерминированный (не LLM)** | proposal → pass/fail + reasons | Schema, required fields, allowed features/actions, parameter ranges, no exact-dup, no unavailable features, no authority violation, no live intent, no lookahead markers. **Бежит до Builder.** |
 | **Builder** | LLM (полная кодогенерация) | valid `HypothesisProposal` → `ModuleBundle` candidate | Через RAG над Builder SDK 021. **Не submit'ит на платформу, не исполняет код в lab.** Выход — build-artifact candidate с manifest/hash. |
 | **Build Validator** | **детерминированный (не LLM)** | bundle → pass/fail | Syntax, TS-compile, SDK-contract conformance (017/021), restricted imports, manifest/bundle layout, `bundleHash`, capability constraints. **Fast-fail gate, НЕ security boundary** (см. §12). |
@@ -384,6 +384,24 @@ embedding, contract_version  // версия lab-схемы HypothesisProposal
 - **Redis** — task delivery, **не durable storage**.
 - Тяжёлые артефакты (equity curve, decision trace, full logs) — `artifact_ref` (content-addressable `sha256:<hex>`, как 022), **не JSONB-блобы**.
 - Mastra storage — отдельная схема `mastra_*` (операционное состояние).
+- Хранение payload'ов артефактов — за **`ArtifactStorePort`** (см. ниже), чтобы менять backend без изменения доменной модели.
+
+### ArtifactStorePort
+
+```ts
+interface ArtifactStorePort {
+  put(content: Buffer | string, meta: { kind: string; mime_type: string; producer: string; metadata?: Record<string, unknown> }): Promise<ArtifactRef>;
+  get(ref: ArtifactRef): Promise<Buffer>;
+  resolveUri(ref: ArtifactRef): string;
+}
+```
+
+| Адаптер | Назначение | Когда |
+|---|---|---|
+| **LocalFileArtifactStore** | `file://`-рефы на локальной ФС | MVP (SP-1…SP-4) |
+| **S3ArtifactStore** | S3-совместимое хранилище | SP-5 или при реальной необходимости |
+
+`put()` сам считает `content_hash = sha256:<hex>` от canonical-контента (content-addressable, идемпотентно). Доменная модель работает только с `ArtifactRef`, не зная о backend.
 
 ### Core tables / entities
 
@@ -607,11 +625,11 @@ queued
 
 | Фаза | Содержание |
 |---|---|
-| **SP-1 Foundation** | TS skeleton; Mastra setup; Postgres schema draft; `TaskQueuePort`; **BullMQ** adapter; Ingress API minimal endpoint; domain types; **Mock + Fixture** PlatformGateway; basic Workflow Router; deterministic validators; Vitest. |
+| **SP-1 Foundation** | TS skeleton; Mastra setup; Postgres schema draft; `TaskQueuePort`; **BullMQ** adapter; Ingress API minimal endpoint; domain types; **Mock + Fixture** PlatformGateway; `ArtifactStorePort` + **LocalFileArtifactStore**; basic Workflow Router; deterministic validators; Critic — только типы/интерфейс/место в workflow (без LLM); Vitest. |
 | **SP-2 Strategy onboarding** | Strategy Analyst Agent; `StrategyProfile` schema; profile validator; source fingerprint; persistence; embeddings/dedupe (опц.). |
-| **SP-3 Research cycle** | Researcher Agent; `HypothesisProposal` schema; Critic (опц., за флагом); deterministic hypothesis validator; persistence; `search_similar_hypotheses` (pgvector или mock). |
+| **SP-3 Research cycle** | Researcher Agent; `HypothesisProposal` schema; **deterministic hypothesis Validator (обязательный gate)**; Critic Agent — за `ENABLE_CRITIC_AGENT=true` (default off); persistence; `search_similar_hypotheses` (pgvector или mock). |
 | **SP-4 Build + mock backtest** | Builder Agent; SDK-docs RAG (placeholder/fixture); build-artifact model; Build Validator; **MockBacktestGateway**; Orchestrator-owned submit; Evaluator. |
-| **SP-5 Platform integration** | **McpPlatformGatewayAdapter** когда готов platform 030/031; real `submitBacktest`; suspend/resume на platform callback; нормализованный ingest результата. |
+| **SP-5 Platform integration** | **McpPlatformGatewayAdapter** когда готов platform 030/031; real `submitBacktest`; suspend/resume на platform callback; нормализованный ingest результата; при необходимости — **S3ArtifactStore**. |
 | **SP-6 Paper + perf monitor** | paper workflow (state-machine re-entry); performance review workflow; research pause/wake policy; budget governor. |
 
 **Fixtures-first** до появления платформенного MCP. MVP остаётся **архитектурно мультиагентским**, но без полной автономии сразу.
@@ -631,10 +649,13 @@ queued
 ## 20. Open questions
 
 1. Точная форма платформенной MCP-фичи (роадмапный «030») ещё не написана → Mock/Fixture-first, финализация маппинга McpPlatformGatewayAdapter позже.
-2. Нужен ли Critic в MVP — склоняемся к **опционально, за флагом** (включить в target-архитектуре).
-3. Где провести точную границу `MarketContext` features v1 vs позже (зависит от 023/027 платформы).
-4. Формат shared-пакета контрактов, если/когда дублирование типов станет дорогим.
-5. Нужен ли отдельный artifact storage (S3-совместимый) в MVP или достаточно file://-рефов до SP-5.
+2. Где провести точную границу `MarketContext` features v1 vs позже (зависит от 023/027 платформы).
+3. Формат shared-пакета контрактов, если/когда дублирование типов станет дорогим.
+
+### Закрытые решения (ранее open)
+
+- **Critic в MVP** → часть target-архитектуры, но **опционален и выключен по умолчанию** за `ENABLE_CRITIC_AGENT` (default `false`). В SP-1/SP-2 — только типы/интерфейс/место в workflow, без реального LLM. В SP-3 — допускается включение за флагом. Обязательный gate всегда — **deterministic Validator**.
+- **Artifact storage в MVP** → **`LocalFileArtifactStore` + `file://`-рефы** через `ArtifactStorePort`. `S3ArtifactStore` — не раньше SP-5 / реальной необходимости. `artifact_ref` остаётся content-addressable (`content_hash = sha256:<hex>`).
 
 ---
 
