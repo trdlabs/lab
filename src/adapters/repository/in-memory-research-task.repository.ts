@@ -5,6 +5,7 @@ export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
   private readonly byId = new Map<string, ResearchTask>();
 
   async create(task: ResearchTask): Promise<void> {
+    if (this.byId.has(task.id)) throw new Error(`research_task already exists: ${task.id}`);
     this.byId.set(task.id, { ...task });
   }
 
@@ -22,7 +23,6 @@ export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
   async updateStatus(id: string, status: TaskStatus): Promise<void> {
     const existing = this.byId.get(id);
     if (!existing) throw new Error(`research_task not found: ${id}`);
-    existing.status = status;
-    existing.updatedAt = new Date().toISOString();
+    this.byId.set(id, { ...existing, status, updatedAt: new Date().toISOString() });
   }
 }

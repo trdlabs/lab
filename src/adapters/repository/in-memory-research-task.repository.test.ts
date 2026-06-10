@@ -28,4 +28,22 @@ describe('InMemoryResearchTaskRepository', () => {
     await repo.updateStatus('a', 'completed');
     expect((await repo.findById('a'))?.status).toBe('completed');
   });
+
+  it('throws when creating a duplicate id', async () => {
+    const repo = new InMemoryResearchTaskRepository();
+    await repo.create(task({ id: 'a' }));
+    await expect(repo.create(task({ id: 'a' }))).rejects.toThrow(/already exists/);
+  });
+
+  it('throws when updating a missing id', async () => {
+    const repo = new InMemoryResearchTaskRepository();
+    await expect(repo.updateStatus('missing', 'completed')).rejects.toThrow(/not found/);
+  });
+
+  it('refreshes updatedAt on status change', async () => {
+    const repo = new InMemoryResearchTaskRepository();
+    await repo.create(task({ id: 'a', updatedAt: '2026-06-10T00:00:00Z' }));
+    await repo.updateStatus('a', 'completed');
+    expect((await repo.findById('a'))?.updatedAt).not.toBe('2026-06-10T00:00:00Z');
+  });
 });
