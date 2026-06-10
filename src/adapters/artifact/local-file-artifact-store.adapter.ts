@@ -12,6 +12,9 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     this.baseDir = resolve(baseDir);
   }
 
+  // Only the bytes are written to disk (file named by content hash). The metadata
+  // (kind/producer/created_at/metadata) is NOT persisted here — callers are
+  // responsible for persisting the returned ArtifactRef (e.g. the artifact_ref table).
   async put(content: Buffer | string, meta: PutArtifactMeta): Promise<ArtifactRef> {
     const buf = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
     const hex = createHash('sha256').update(buf).digest('hex');
