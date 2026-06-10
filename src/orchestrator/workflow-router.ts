@@ -11,6 +11,11 @@ export class WorkflowRouter {
   private readonly handlers = new Map<AgentTaskType, WorkflowHandler>();
 
   register(taskType: AgentTaskType, handler: WorkflowHandler): void {
+    // Fail loudly on double-registration rather than silently overwriting — a
+    // duplicate registration during composition almost always indicates a bug.
+    if (this.handlers.has(taskType)) {
+      throw new Error(`handler already registered for task type: ${taskType}`);
+    }
     this.handlers.set(taskType, handler);
   }
 

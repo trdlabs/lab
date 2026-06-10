@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { WorkflowRouter, type HandlerDeps } from './workflow-router.ts';
+import { WorkflowRouter, type HandlerDeps, type WorkflowHandler } from './workflow-router.ts';
 import { echoHandler } from './handlers/echo.handler.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
 import type { ResearchTask } from '../domain/types.ts';
@@ -25,6 +25,13 @@ describe('WorkflowRouter', () => {
     const router = new WorkflowRouter();
     const repo = new InMemoryResearchTaskRepository();
     await expect(router.dispatch(task({ taskType: 'paper.monitor' }), { repo })).rejects.toThrow(/no handler/i);
+  });
+
+  it('throws when the same task type is registered twice', () => {
+    const router = new WorkflowRouter();
+    const noop: WorkflowHandler = async () => {};
+    router.register('strategy.onboard', noop);
+    expect(() => router.register('strategy.onboard', noop)).toThrow(/already registered/i);
   });
 });
 
