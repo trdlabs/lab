@@ -9,8 +9,19 @@ import { MastraStrategyAnalyst } from './adapters/analyst/mastra-strategy-analys
 import { createDbClient } from './db/client.ts';
 import { WorkflowRouter } from './orchestrator/workflow-router.ts';
 import { strategyOnboardHandler } from './orchestrator/handlers/strategy-onboard.handler.ts';
+import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cycle.handler.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
 import type { StrategyAnalystPort } from './ports/strategy-analyst.port.ts';
+import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-gateway.adapter.ts';
+import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
+import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
+import { FakeCritic } from './adapters/critic/fake-critic.ts';
+import { MastraCritic } from './adapters/critic/mastra-critic.ts';
+import { DrizzleHypothesisProposalRepository } from './adapters/repository/drizzle-hypothesis-proposal.repository.ts';
+import { DrizzleHypothesisReviewRepository } from './adapters/repository/drizzle-hypothesis-review.repository.ts';
+import { InMemoryLexicalSimilarHypothesisSearch } from './adapters/similarity/in-memory-lexical-similar-hypothesis-search.ts';
+import type { ResearcherPort } from './ports/researcher.port.ts';
+import type { CriticPort } from './ports/critic.port.ts';
 
 function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
   if (env.STRATEGY_ANALYST_ADAPTER === 'mastra') {
@@ -23,6 +34,25 @@ function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
   return new FakeStrategyAnalyst();
 }
 
+function buildResearcher(env: ReturnType<typeof loadEnv>): ResearcherPort {
+  if (env.RESEARCHER_ADAPTER === 'mastra') {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when RESEARCHER_ADAPTER=mastra');
+    return new MastraResearcher(env.RESEARCHER_MODEL);
+  }
+  console.warn('[composition] RESEARCHER_ADAPTER is not "mastra"; using FakeResearcher (stub hypotheses)');
+  return new FakeResearcher();
+}
+
+function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
+  if (!env.ENABLE_CRITIC_AGENT) return null; // advisory; off by default
+  if (env.CRITIC_ADAPTER === 'mastra') {
+    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when CRITIC_ADAPTER=mastra');
+    return new MastraCritic(env.CRITIC_MODEL);
+  }
+  console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
+  return new FakeCritic();
+}
+
 export function composeRuntime() {
   const env = loadEnv();
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
@@ -31,16 +61,26 @@ export function composeRuntime() {
   const { db, pool } = createDbClient(env.DATABASE_URL);
   const queue = new BullMqQueueAdapter(env.REDIS_URL);
 
+  const hypotheses = new DrizzleHypothesisProposalRepository(db);
+
   const services: AppServices = {
     researchTasks: new DrizzleResearchTaskRepository(db),
     strategyProfiles: new DrizzleStrategyProfileRepository(db),
     analyst: buildAnalyst(env),
     artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
     events: new DrizzleAgentEventRepository(db),
+    platform: new MockPlatformGatewayAdapter(),
+    researcher: buildResearcher(env),
+    critic: buildCritic(env),
+    hypotheses,
+    hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
+    similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
+    maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
   };
 
   const router = new WorkflowRouter();
   router.register('strategy.onboard', strategyOnboardHandler);
+  router.register('research.run_cycle', researchRunCycleHandler);
 
   return { env, db, pool, queue, router, services };
 }
