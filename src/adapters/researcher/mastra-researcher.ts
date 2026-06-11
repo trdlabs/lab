@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { anthropic } from '@ai-sdk/anthropic';
+import type { ProviderModel } from '../llm/model-provider.ts';
 import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.port.ts';
 import { ResearcherOutputSchema, type ResearcherOutput } from '../../domain/hypothesis.ts';
 import { OVERLAY_ACTIONS, LAB_FEATURE_CATALOG } from '../../domain/hypothesis-rules.ts';
@@ -36,22 +36,13 @@ export class MastraResearcher implements ResearcherPort {
   readonly model: string;
   private readonly agent: Agent;
 
-  constructor(model: string) {
-    this.model = model;
-    // Strip the provider prefix for @ai-sdk/anthropic, which accepts bare model IDs.
-    // The full routing string (e.g. 'anthropic/claude-sonnet-4-6') is preserved in
-    // this.model for audit purposes.
-    const bareModelId = model.replace(/^anthropic\//, '');
-    // This adapter is Anthropic-only. Reject any other provider prefix at construction
-    // time with a clear error rather than passing a wrong id to anthropic() at call time.
-    if (bareModelId.includes('/')) {
-      throw new Error(`MastraResearcher only supports Anthropic models; got '${model}'`);
-    }
+  constructor(model: ProviderModel, label: string) {
+    this.model = label;
     this.agent = new Agent({
       id: 'researcher',
       name: 'Researcher',
       instructions: INSTRUCTIONS,
-      model: anthropic(bareModelId),
+      model,
     });
   }
 

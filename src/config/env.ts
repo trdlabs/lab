@@ -1,4 +1,5 @@
 import { DEFAULT_EVALUATOR_THRESHOLDS, type EvaluatorThresholds } from '../validation/evaluator.ts';
+import { MODEL_PROVIDERS, type ModelProvider } from '../adapters/llm/model-provider.ts';
 
 export interface Env {
   DATABASE_URL?: string;
@@ -18,6 +19,13 @@ export interface Env {
   BUILDER_ADAPTER: 'fake' | 'mastra';
   BUILDER_MODEL: string;
   evaluatorThresholds: EvaluatorThresholds;
+  MODEL_PROVIDER: ModelProvider;
+  OPENAI_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+}
+
+function parseModelProvider(value: string | undefined): ModelProvider {
+  return (MODEL_PROVIDERS as readonly string[]).includes(value ?? '') ? (value as ModelProvider) : 'anthropic';
 }
 
 function parsePort(value: string | undefined, fallback: number): number {
@@ -64,5 +72,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       strongPnlDeltaUsd: parseFloatOr(source.EVAL_STRONG_PNL_DELTA_USD, DEFAULT_EVALUATOR_THRESHOLDS.strongPnlDeltaUsd),
       minProfitFactor: parseFloatOr(source.EVAL_MIN_PROFIT_FACTOR, DEFAULT_EVALUATOR_THRESHOLDS.minProfitFactor),
     },
+    MODEL_PROVIDER: parseModelProvider(source.MODEL_PROVIDER),
+    OPENAI_API_KEY: source.OPENAI_API_KEY,
+    OPENROUTER_API_KEY: source.OPENROUTER_API_KEY,
   };
 }

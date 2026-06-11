@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { anthropic } from '@ai-sdk/anthropic';
+import type { ProviderModel } from '../llm/model-provider.ts';
 import type { CriticPort } from '../../ports/critic.port.ts';
 import { CriticOutputSchema, type CriticInput, type CriticOutput } from '../../domain/critic.ts';
 
@@ -27,17 +27,13 @@ export class MastraCritic implements CriticPort {
   readonly model: string;
   private readonly agent: Agent;
 
-  constructor(model: string) {
-    this.model = model;
-    const bareModelId = model.replace(/^anthropic\//, '');
-    if (bareModelId.includes('/')) {
-      throw new Error(`MastraCritic only supports Anthropic models; got '${model}'`);
-    }
+  constructor(model: ProviderModel, label: string) {
+    this.model = label;
     this.agent = new Agent({
       id: 'critic',
       name: 'Critic',
       instructions: INSTRUCTIONS,
-      model: anthropic(bareModelId),
+      model,
     });
   }
 

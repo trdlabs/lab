@@ -33,3 +33,23 @@ describe('SP-4 env', () => {
     expect(env.evaluatorThresholds.minProfitFactor).toBe(1.8);
   });
 });
+
+describe('SP-4.5 model provider env', () => {
+  it('defaults MODEL_PROVIDER to anthropic, keys undefined', () => {
+    const env = loadEnv({});
+    expect(env.MODEL_PROVIDER).toBe('anthropic');
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+  });
+
+  it('reads MODEL_PROVIDER + provider keys', () => {
+    const env = loadEnv({ MODEL_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-o', OPENROUTER_API_KEY: 'sk-or' });
+    expect(env.MODEL_PROVIDER).toBe('openai');
+    expect(env.OPENAI_API_KEY).toBe('sk-o');
+    expect(env.OPENROUTER_API_KEY).toBe('sk-or');
+  });
+
+  it('falls back to anthropic for an unknown MODEL_PROVIDER value', () => {
+    expect(loadEnv({ MODEL_PROVIDER: 'bogus' }).MODEL_PROVIDER).toBe('anthropic');
+  });
+});

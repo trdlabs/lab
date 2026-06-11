@@ -29,32 +29,31 @@ import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
+import { resolveLanguageModel } from './adapters/llm/model-provider.ts';
 
 function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
   if (env.STRATEGY_ANALYST_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when STRATEGY_ANALYST_ADAPTER=mastra');
-    return new MastraStrategyAnalyst(env.STRATEGY_ANALYST_MODEL);
+    const r = resolveLanguageModel(env, env.STRATEGY_ANALYST_MODEL);
+    return new MastraStrategyAnalyst(r.model, r.label);
   }
-  // Make the no-op default loud: a deploy that forgot STRATEGY_ANALYST_ADAPTER=mastra
-  // would otherwise silently return stub profiles for every onboarding.
   console.warn('[composition] STRATEGY_ANALYST_ADAPTER is not "mastra"; using FakeStrategyAnalyst (stub analysis)');
   return new FakeStrategyAnalyst();
 }
 
 function buildResearcher(env: ReturnType<typeof loadEnv>): ResearcherPort {
   if (env.RESEARCHER_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when RESEARCHER_ADAPTER=mastra');
-    return new MastraResearcher(env.RESEARCHER_MODEL);
+    const r = resolveLanguageModel(env, env.RESEARCHER_MODEL);
+    return new MastraResearcher(r.model, r.label);
   }
   console.warn('[composition] RESEARCHER_ADAPTER is not "mastra"; using FakeResearcher (stub hypotheses)');
   return new FakeResearcher();
 }
 
 function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
-  if (!env.ENABLE_CRITIC_AGENT) return null; // advisory; off by default
+  if (!env.ENABLE_CRITIC_AGENT) return null;
   if (env.CRITIC_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when CRITIC_ADAPTER=mastra');
-    return new MastraCritic(env.CRITIC_MODEL);
+    const r = resolveLanguageModel(env, env.CRITIC_MODEL);
+    return new MastraCritic(r.model, r.label);
   }
   console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
   return new FakeCritic();
@@ -62,8 +61,8 @@ function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
 
 function buildBuilder(env: ReturnType<typeof loadEnv>): BuilderPort {
   if (env.BUILDER_ADAPTER === 'mastra') {
-    if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is required when BUILDER_ADAPTER=mastra');
-    return new MastraBuilder(env.BUILDER_MODEL);
+    const r = resolveLanguageModel(env, env.BUILDER_MODEL);
+    return new MastraBuilder(r.model, r.label);
   }
   console.warn('[composition] BUILDER_ADAPTER is not "mastra"; using FakeBuilder (template bundles)');
   return new FakeBuilder();

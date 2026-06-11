@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { anthropic } from '@ai-sdk/anthropic';
+import type { ProviderModel } from '../llm/model-provider.ts';
 import type { StrategyAnalystInput } from '../../domain/strategy-source.ts';
 import { AnalystProfileOutputSchema, type AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
@@ -26,22 +26,13 @@ export class MastraStrategyAnalyst implements StrategyAnalystPort {
   readonly model: string;
   private readonly agent: Agent;
 
-  constructor(model: string) {
-    this.model = model;
-    // Strip the provider prefix for @ai-sdk/anthropic, which accepts bare model IDs.
-    // The full routing string (e.g. 'anthropic/claude-sonnet-4-6') is preserved in
-    // this.model for audit purposes.
-    const bareModelId = model.replace(/^anthropic\//, '');
-    // This adapter is Anthropic-only. Reject any other provider prefix at construction
-    // time with a clear error rather than passing a wrong id to anthropic() at call time.
-    if (bareModelId.includes('/')) {
-      throw new Error(`MastraStrategyAnalyst only supports Anthropic models; got '${model}'`);
-    }
+  constructor(model: ProviderModel, label: string) {
+    this.model = label;
     this.agent = new Agent({
       id: 'strategy-analyst',
       name: 'Strategy Analyst',
       instructions: INSTRUCTIONS,
-      model: anthropic(bareModelId),
+      model,
     });
   }
 
