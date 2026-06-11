@@ -10,6 +10,7 @@ import { createDbClient } from './db/client.ts';
 import { WorkflowRouter } from './orchestrator/workflow-router.ts';
 import { strategyOnboardHandler } from './orchestrator/handlers/strategy-onboard.handler.ts';
 import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cycle.handler.ts';
+import { hypothesisBuildHandler } from './orchestrator/handlers/hypothesis-build.handler.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
 import type { StrategyAnalystPort } from './ports/strategy-analyst.port.ts';
 import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-gateway.adapter.ts';
@@ -101,6 +102,7 @@ export function composeRuntime() {
   const router = new WorkflowRouter();
   router.register('strategy.onboard', strategyOnboardHandler);
   router.register('research.run_cycle', researchRunCycleHandler);
+  router.register('hypothesis.build', hypothesisBuildHandler);
 
   return { env, db, pool, queue, router, services };
 }
