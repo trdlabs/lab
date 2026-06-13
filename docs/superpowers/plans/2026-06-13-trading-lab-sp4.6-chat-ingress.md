@@ -520,6 +520,17 @@ describe('ChatMessageRequestSchema', () => {
     expect(ChatMessageRequestSchema.safeParse({ message: '' }).success).toBe(false);
   });
 
+  it('rejects a whitespace-only message (trimmed to empty)', () => {
+    expect(ChatMessageRequestSchema.safeParse({ message: '   ' }).success).toBe(false);
+    expect(ChatMessageRequestSchema.safeParse({ message: '\n\t  ' }).success).toBe(false);
+  });
+
+  it('trims surrounding whitespace on a valid message', () => {
+    const r = ChatMessageRequestSchema.safeParse({ message: '  покажи статус  ' });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.message).toBe('покажи статус');
+  });
+
   it('rejects an unknown channel', () => {
     expect(ChatMessageRequestSchema.safeParse({ message: 'x', channel: 'sms' }).success).toBe(false);
   });
@@ -536,10 +547,12 @@ Expected: FAIL — `Cannot find module './request.ts'`.
 ```ts
 import { z } from 'zod';
 
-// Shape + non-empty only. The max-length cap is enforced by the app prefilter
-// using CHAT_MAX_MESSAGE_CHARS, so the schema stays config-free.
+// Shape + non-blank only. `.trim()` runs before `.min(1)`, so "" AND whitespace-only
+// ("   ", "\n\t ") both fail validation -> the app returns 400 BEFORE the classifier
+// is called. The max-length cap is enforced by the app prefilter using
+// CHAT_MAX_MESSAGE_CHARS, so the schema stays config-free.
 export const ChatMessageRequestSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().trim().min(1),
   sessionId: z.string().min(1).optional(),
   channel: z.enum(['web', 'telegram']).default('web'),
 });
@@ -2446,6 +2459,19 @@ describe('POST /chat/messages', () => {
     const app = createChatApp(appDeps());
     const res = await post(app, { message: '' });
     expect(res.status).toBe(400);
+  });
+
+  it('rejects a whitespace-only message with 400 and never calls the classifier', async () => {
+    let calls = 0;
+    const spy = {
+      adapter: 'fake' as const,
+      model: 'fake',
+      classify: async () => { calls += 1; return { intent: 'help', confidence: 1 }; },
+    };
+    const app = createChatApp(appDeps({ classifier: spy }));
+    const res = await post(app, { message: '   ' });
+    expect(res.status).toBe(400);
+    expect(calls).toBe(0); // schema gate rejects before handler/classifier runs
   });
 
   it('rejects an oversize message with 400', async () => {
