@@ -50,4 +50,22 @@ describe('InMemoryHypothesisProposalRepository', () => {
     await repo.create(hyp('h2', 'p1', 'sha256:c'));
     expect((await repo.listFingerprints('p1')).sort()).toEqual(['sha256:a', 'sha256:c']);
   });
+
+  it('findLatestValidatedByProfile returns the newest validated row for the profile', async () => {
+    const repo = new InMemoryHypothesisProposalRepository();
+    const older: HypothesisProposal = { ...hyp('h1', 'p1', 'sha256:a'), createdAt: '2026-01-01T00:00:00Z' };
+    const newer: HypothesisProposal = { ...hyp('h2', 'p1', 'sha256:b'), createdAt: '2026-02-01T00:00:00Z' };
+    await repo.create(older);
+    await repo.create(newer);
+    expect((await repo.findLatestValidatedByProfile('p1'))?.id).toBe('h2');
+  });
+
+  it('findLatestValidatedByProfile ignores non-validated rows and other profiles', async () => {
+    const repo = new InMemoryHypothesisProposalRepository();
+    const rejected: HypothesisProposal = { ...hyp('h1', 'p1', 'sha256:a'), status: 'rejected' };
+    const otherProfile: HypothesisProposal = { ...hyp('h2', 'p2', 'sha256:b') };
+    await repo.create(rejected);
+    await repo.create(otherProfile);
+    expect(await repo.findLatestValidatedByProfile('p1')).toBeNull();
+  });
 });

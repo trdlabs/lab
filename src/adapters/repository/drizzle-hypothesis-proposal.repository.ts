@@ -1,4 +1,4 @@
-import { eq, asc } from 'drizzle-orm';
+import { eq, and, desc, asc } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { hypothesisProposal } from '../../db/schema.ts';
 import type {
@@ -66,5 +66,18 @@ export class DrizzleHypothesisProposalRepository implements HypothesisProposalRe
       .from(hypothesisProposal)
       .where(eq(hypothesisProposal.strategyProfileId, strategyProfileId));
     return rows.map((r) => r.fingerprint);
+  }
+
+  async findLatestValidatedByProfile(strategyProfileId: string): Promise<HypothesisProposal | null> {
+    const rows = await this.db
+      .select()
+      .from(hypothesisProposal)
+      .where(and(
+        eq(hypothesisProposal.strategyProfileId, strategyProfileId),
+        eq(hypothesisProposal.status, 'validated'),
+      ))
+      .orderBy(desc(hypothesisProposal.createdAt), desc(hypothesisProposal.id))
+      .limit(1);
+    return rows[0] ? toDomain(rows[0]) : null;
   }
 }

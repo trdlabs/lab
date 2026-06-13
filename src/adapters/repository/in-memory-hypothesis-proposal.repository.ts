@@ -33,4 +33,14 @@ export class InMemoryHypothesisProposalRepository implements HypothesisProposalR
       .filter((h) => h.strategyProfileId === strategyProfileId)
       .map((h) => h.fingerprint);
   }
+
+  async findLatestValidatedByProfile(strategyProfileId: string): Promise<HypothesisProposal | null> {
+    const candidates = [...this.byId.values()]
+      .filter((h) => h.strategyProfileId === strategyProfileId && h.status === 'validated')
+      .sort((a, b) => {
+        if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1; // createdAt DESC
+        return a.id < b.id ? 1 : -1; // id DESC tiebreak
+      });
+    return candidates[0] ?? null;
+  }
 }
