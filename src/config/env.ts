@@ -22,6 +22,10 @@ export interface Env {
   MODEL_PROVIDER: ModelProvider;
   OPENAI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  INTENT_CLASSIFIER_ADAPTER: 'fake' | 'mastra';
+  INTENT_CLASSIFIER_MODEL: string;
+  INTENT_CLASSIFIER_MIN_CONFIDENCE: number;
+  CHAT_MAX_MESSAGE_CHARS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -75,5 +79,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     MODEL_PROVIDER: parseModelProvider(source.MODEL_PROVIDER),
     OPENAI_API_KEY: source.OPENAI_API_KEY,
     OPENROUTER_API_KEY: source.OPENROUTER_API_KEY,
+    INTENT_CLASSIFIER_ADAPTER: source.INTENT_CLASSIFIER_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    INTENT_CLASSIFIER_MODEL: source.INTENT_CLASSIFIER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
+    INTENT_CLASSIFIER_MIN_CONFIDENCE: parseFloatOr(source.INTENT_CLASSIFIER_MIN_CONFIDENCE, 0.6),
+    CHAT_MAX_MESSAGE_CHARS: parsePositiveInt(source.CHAT_MAX_MESSAGE_CHARS, 4000),
   };
 }
