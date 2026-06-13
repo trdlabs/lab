@@ -36,6 +36,11 @@ import { DrizzleChatSessionRepository } from './adapters/repository/drizzle-chat
 import { DrizzleChatPlanRepository } from './adapters/repository/drizzle-chat-plan.repository.ts';
 import type { IntentClassifierPort } from './ports/intent-classifier.port.ts';
 import type { ChatAppDeps } from './chat/chat-app.ts';
+import { sql } from 'drizzle-orm';
+import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis-read.adapter.ts';
+import { DrizzleBacktestReadAdapter } from './adapters/read/drizzle-backtest-read.adapter.ts';
+import { DrizzleAgentEventReadAdapter } from './adapters/read/drizzle-agent-event-read.adapter.ts';
+import type { ReadApiDeps } from './read-api/deps.ts';
 
 function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
   if (env.STRATEGY_ANALYST_ADAPTER === 'mastra') {
@@ -133,5 +138,15 @@ export function composeRuntime() {
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
   };
 
-  return { env, db, pool, queue, router, services, chat };
+  const read: ReadApiDeps = {
+    hypotheses: new DrizzleHypothesisReadAdapter(db),
+    backtests: new DrizzleBacktestReadAdapter(db),
+    agentEvents: new DrizzleAgentEventReadAdapter(db),
+    checkReadiness: async () => {
+      try { await db.execute(sql`select 1`); return true; } catch { return false; }
+    },
+    token: env.TRADING_LAB_READ_TOKEN ?? '',
+  };
+
+  return { env, db, pool, queue, router, services, chat, read };
 }
