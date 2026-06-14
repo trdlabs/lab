@@ -77,7 +77,7 @@ The SDK ships **no** packing helper (`contentBase64` ⇒ 0 hits in `packages/sdk
 
 **Structurally-valid invariant (the SP-7.1 guarantee).** As long as the `SubmittedBundle` materializes and loads (valid base64, path-safe entries, `manifest.json` + `bundle.json` parse), 017 manifest shortfalls surface as a **`rejected` `ValidationReport` (`ok:true`)**, never an `ok:false` gateway error. SP-7.1 guarantees that structural correctness; the report's `status` (`accepted` / `accepted_with_warnings` / `rejected`) is platform-domain and may legitimately be `rejected` until the 017 overlay manifest is built in a follow-up.
 
-The exact `canonicalJson` byte-equivalence and the precise `descriptor.files` set (module/** only vs. incl. `manifest.json`) are pinned by Task 1's round-trip before the mapper is frozen. Treat any mismatch as a finding, not a silent workaround.
+**Resolved by Task 1 (verify spike):** `descriptor.files` lists **`manifest.json` + all `module/**`** (sorted, per-file `sha256`), per the 019 `BundleDescriptor` contract; `manifestSha256` is *also* hashed separately, so the platform formula counts the manifest in two places and stays self-consistent. The acceptance-gate recomputes `bundleHash` over exactly the declared `descriptor.files`, so the mapper is correct as long as its own `descriptor.bundleHash` is computed over the same set. `CONTRACT_VERSION` is `"017.2"` (use it for `descriptor.contractVersion`). The remaining `canonicalJson` byte-equivalence is pinned by Task 7's real-gateway round-trip; treat any `bundle_integrity_violation` as a finding, not a silent workaround.
 
 ## 6. Files
 

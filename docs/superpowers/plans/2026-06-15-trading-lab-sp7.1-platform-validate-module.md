@@ -176,7 +176,7 @@ git commit -m "feat(sp7.1): GatewayValidationError for the ok:false validate env
 - Create: `src/adapters/platform/submitted-bundle.ts`
 - Test: `src/adapters/platform/submitted-bundle.test.ts`
 
-**Contract (spec §5):** re-root lab files under `module/`; `manifest.json` at root (in `files[]`, base64); `descriptor.files` = the `module/**` entries only (sorted, per-file `sha256`); `descriptor.bundleHash` replicates the platform formula; `entryPoint = "module/" + manifest.entry`; `kind = 'overlay'`. The mapper guarantees **structural validity** (decodable base64, safe relative paths, parseable `manifest.json` + `bundle.json`); semantic acceptance (`accepted` vs `rejected`) is the platform's call.
+**Contract (spec §5, confirmed by Task 1):** re-root lab files under `module/`; `manifest.json` at root; `descriptor.files` = **`manifest.json` + all `module/**`** entries (sorted, per-file `sha256`) per the 019 `BundleDescriptor` contract; `descriptor.bundleHash` replicates the platform formula (`manifestSha256` is also hashed separately — the platform counts the manifest twice and is self-consistent); `entryPoint = "module/" + manifest.entry`; `kind = 'overlay'`; `descriptor.contractVersion = CONTRACT_VERSION` (`"017.2"`). The mapper guarantees **structural validity** (decodable base64, safe relative paths, parseable `manifest.json` + `bundle.json`); semantic acceptance (`accepted` vs `rejected`) is the platform's call.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -213,10 +213,11 @@ describe('toSubmittedBundle', () => {
     expect(JSON.parse(Buffer.from(man.contentBase64, 'base64').toString('utf8')).moduleId).toBe('m1');
   });
 
-  it('descriptor.files lists only module/** entries, sorted, with per-file sha256; manifest.json is not among them', () => {
+  it('descriptor.files lists manifest.json + module/** entries, sorted, with per-file sha256', () => {
     const d = sub.descriptor as { files: { path: string; sha256: string }[]; entryPoint: string; kind: string; contractVersion: string; bundleHash: string };
-    expect(d.files.map((f) => f.path)).toEqual(['module/helpers/util.ts', 'module/index.ts']);
+    expect(d.files.map((f) => f.path)).toEqual(['manifest.json', 'module/helpers/util.ts', 'module/index.ts']);
     expect(d.files.find((f) => f.path === 'module/index.ts')!.sha256).toBe(sha256Hex(files['index.ts']));
+    expect(d.files.find((f) => f.path === 'manifest.json')!.sha256).toBe(sha256Hex(JSON.stringify(manifest)));
     expect(d.kind).toBe('overlay');
     expect(d.entryPoint).toBe('module/index.ts');
     expect(typeof d.contractVersion).toBe('string');
@@ -269,18 +270,20 @@ function canonicalJson(value: unknown): string {
 /**
  * Map a lab ModuleBundle to the platform's submitted-bundle wire shape (spec §5).
  *  - lab `files` keys are bare relative paths → re-rooted under `module/`; `manifest.json` at root
- *  - `descriptor.files` = the `module/**` payload entries only (manifest.json hashes separately into bundleHash)
+ *  - `descriptor.files` = `manifest.json` + all `module/**` payload entries (sorted, per-file sha256), per the 019 contract
  *  - `bundleHash` replicates `trading-platform/.../bundle-hash.ts::computeBundleHash`
  */
 export function toSubmittedBundle(bundle: ModuleBundle): SubmittedBundle {
   const manifestJson = JSON.stringify(bundle.manifest);
   const manifestSha256 = sha256Hex(manifestJson);
 
-  const moduleFiles = Object.entries(bundle.files)
-    .map(([rel, source]) => ({ path: `${MODULE_DIR}/${rel}`, source }))
-    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  // One sorted payload list (manifest.json + module/**) drives both descriptor.files and files[].
+  const payload = [
+    { path: 'manifest.json', source: manifestJson },
+    ...Object.entries(bundle.files).map(([rel, source]) => ({ path: `${MODULE_DIR}/${rel}`, source })),
+  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 
-  const descriptorFiles = moduleFiles.map((f) => ({ path: f.path, sha256: sha256Hex(f.source) }));
+  const descriptorFiles = payload.map((f) => ({ path: f.path, sha256: sha256Hex(f.source) }));
   const bundleHash = `sha256:${sha256Hex(canonicalJson({ manifestSha256, files: descriptorFiles }))}`;
 
   const descriptor = {
@@ -291,10 +294,7 @@ export function toSubmittedBundle(bundle: ModuleBundle): SubmittedBundle {
     bundleHash,
   };
 
-  const files = [
-    { path: 'manifest.json', contentBase64: Buffer.from(manifestJson, 'utf8').toString('base64') },
-    ...moduleFiles.map((f) => ({ path: f.path, contentBase64: Buffer.from(f.source, 'utf8').toString('base64') })),
-  ];
+  const files = payload.map((f) => ({ path: f.path, contentBase64: Buffer.from(f.source, 'utf8').toString('base64') }));
 
   return { manifest: bundle.manifest, files, descriptor };
 }
