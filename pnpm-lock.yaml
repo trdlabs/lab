@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  trading-bot-platform@workspace:*: link:../trading-platform
+
 importers:
 
   .:
@@ -19,10 +22,16 @@ importers:
         version: 1.19.14(hono@4.12.25)
       '@mastra/core':
         specifier: ^1.41.0
-        version: 1.41.0(ai@6.0.201(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.41.0(ai@6.0.201(zod@3.25.76))(bufferutil@4.1.0)(express@5.2.1)(zod@3.25.76)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
+      '@trading-platform/sdk':
+        specifier: file:../trading-platform/packages/sdk
+        version: file:../trading-platform/packages/sdk(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       bullmq:
         specifier: ^5.21.0
         version: 5.78.0
@@ -765,6 +774,14 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@trading-platform/sdk@file:../trading-platform/packages/sdk':
+    resolution: {directory: ../trading-platform/packages/sdk, type: directory}
+    peerDependencies:
+      '@modelcontextprotocol/sdk': ^1.29.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/sdk':
+        optional: true
+
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
 
@@ -859,6 +876,10 @@ packages:
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
+
+  bufferutil@4.1.0:
+    resolution: {integrity: sha512-ZMANVnAixE6AWWnPzlW2KpUrxhm9woycYvPOo67jWHyFowASTEd9s+QN1EIMsSDtwhIxN4sWE1jotpuDUIgyIw==}
+    engines: {node: '>=6.14.2'}
 
   bullmq@5.78.0:
     resolution: {integrity: sha512-tT9jJmbobk9ueEfFc22egLmgwCcMGgOjZ5Y1cvgczBPv1JUmC7iHQVbQtqku2YBE5dE9uzdVpxIrBvL/YAjGwA==}
@@ -1520,6 +1541,10 @@ packages:
 
   node-gyp-build-optional-packages@5.2.2:
     resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
+    hasBin: true
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
     hasBin: true
 
   npm-run-path@6.0.0:
@@ -2280,7 +2305,7 @@ snapshots:
     dependencies:
       '@lukeed/csprng': 1.1.0
 
-  '@mastra/core@1.41.0(ai@6.0.201(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.41.0(ai@6.0.201(zod@3.25.76))(bufferutil@4.1.0)(express@5.2.1)(zod@3.25.76)':
     dependencies:
       '@a2a-js/sdk': 0.3.13(express@5.2.1)
       '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.25(zod@3.25.76)'
@@ -2308,7 +2333,7 @@ snapshots:
       picomatch: 4.0.4
       posthog-node: 5.36.14
       tokenx: 1.3.0
-      ws: 8.21.0
+      ws: 8.21.0(bufferutil@4.1.0)
       xxhash-wasm: 1.1.0
       zod: 3.25.76
     transitivePeerDependencies:
@@ -2473,6 +2498,12 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@trading-platform/sdk@file:../trading-platform/packages/sdk(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
+    dependencies:
+      trading-bot-platform: link:../trading-platform
+    optionalDependencies:
+      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
+
   '@types/debug@4.1.13':
     dependencies:
       '@types/ms': 2.1.0
@@ -2588,6 +2619,11 @@ snapshots:
       - supports-color
 
   buffer-from@1.1.2: {}
+
+  bufferutil@4.1.0:
+    dependencies:
+      node-gyp-build: 4.8.4
+    optional: true
 
   bullmq@5.78.0:
     dependencies:
@@ -3390,6 +3426,9 @@ snapshots:
       detect-libc: 2.1.2
     optional: true
 
+  node-gyp-build@4.8.4:
+    optional: true
+
   npm-run-path@6.0.0:
     dependencies:
       path-key: 4.0.0
@@ -3838,7 +3877,9 @@ snapshots:
 
   wrappy@1.0.2: {}
 
-  ws@8.21.0: {}
+  ws@8.21.0(bufferutil@4.1.0):
+    optionalDependencies:
+      bufferutil: 4.1.0
 
   xtend@4.0.2: {}
 
