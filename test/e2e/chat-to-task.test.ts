@@ -35,10 +35,12 @@ describe('e2e: chat -> onboard task -> auto-chain research', () => {
       researchTasks: services.researchTasks, strategyProfiles: services.strategyProfiles,
       hypotheses: services.hypotheses, events: services.events, queue,
       minConfidence: 0.6, maxMessageChars: 4000,
+      authToken: 'e2e-chat-token',
     });
 
     const res = await app.request('/messages', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer e2e-chat-token' },
       body: JSON.stringify({ message: 'исследуй эту стратегию: лонг при росте OI и падении цены', sessionId: 's1' }),
     });
     const body = await res.json() as { kind: string; taskId: string; plannedNextStep?: { taskType: string } };
