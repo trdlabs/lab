@@ -5,9 +5,11 @@ import { validateWithSchema } from '../validation/validator.ts';
 import type { TaskSource } from '../domain/types.ts';
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
 import { handleChatMessage, type ChatHandlerDeps } from './chat-handler.ts';
+import { chatAuthMiddleware } from './auth.ts';
 
 export interface ChatAppDeps extends ChatHandlerDeps {
   maxMessageChars: number;
+  authToken?: string;
 }
 
 function channelToSource(channel: 'web' | 'telegram'): TaskSource {
@@ -16,6 +18,10 @@ function channelToSource(channel: 'web' | 'telegram'): TaskSource {
 
 export function createChatApp(deps: ChatAppDeps): Hono {
   const app = new Hono();
+
+  // Service-to-service auth gate — first middleware, so unauthorized requests never reach
+  // JSON parsing / schema validation / the size cap / the handler.
+  app.use('*', chatAuthMiddleware(deps.authToken));
 
   app.post('/messages', async (c) => {
     const raw = await c.req.json().catch(() => null);
