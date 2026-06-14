@@ -7,6 +7,9 @@ import { createReadApp } from '../read-api/read-app.ts';
 const { env, services, queue, pool, chat, read } = composeRuntime();
 const app = createIngressApp({ repo: services.researchTasks, queue });
 app.route('/chat', createChatApp(chat));
+if (!env.TRADING_LAB_CHAT_TOKEN) {
+  console.warn('[chat] TRADING_LAB_CHAT_TOKEN not set — POST /chat/messages will reject all requests (503)');
+}
 serve({ fetch: app.fetch, port: env.INGRESS_PORT });
 console.log(`ingress listening on :${env.INGRESS_PORT}`);
 
