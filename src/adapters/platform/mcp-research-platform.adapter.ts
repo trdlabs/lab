@@ -11,10 +11,13 @@ import type { GatewaySession } from './mcp-research-transport.ts';
 
 /** Stateless over a live transport; the caller owns the session lifecycle (one session per probe). */
 export class McpResearchPlatformAdapter implements ResearchPlatformPort {
-  constructor(
-    private readonly transport: GatewayTransport,
-    private readonly acceptedContractVersion: string,
-  ) {}
+  private readonly transport: GatewayTransport;
+  private readonly acceptedContractVersion: string;
+
+  constructor(transport: GatewayTransport, acceptedContractVersion: string) {
+    this.transport = transport;
+    this.acceptedContractVersion = acceptedContractVersion;
+  }
 
   async discover(): Promise<ResearchCapabilityDescriptor> {
     const descriptor = await discover(this.transport);
@@ -29,10 +32,13 @@ export class McpResearchPlatformAdapter implements ResearchPlatformPort {
 
 /** Runtime-safe variant: opens a session per call and closes it. Boot constructs nothing live. */
 export class LazyMcpResearchPlatformAdapter implements ResearchPlatformPort {
-  constructor(
-    private readonly connect: () => Promise<GatewaySession>,
-    private readonly acceptedContractVersion: string,
-  ) {}
+  private readonly connect: () => Promise<GatewaySession>;
+  private readonly acceptedContractVersion: string;
+
+  constructor(connect: () => Promise<GatewaySession>, acceptedContractVersion: string) {
+    this.connect = connect;
+    this.acceptedContractVersion = acceptedContractVersion;
+  }
 
   async discover(): Promise<ResearchCapabilityDescriptor> {
     const session = await this.connect();

@@ -1,16 +1,19 @@
 import type { ResearchCapabilityDescriptor } from '../../ports/research-platform.port.ts';
 
 export class ContractIncompatibleError extends Error {
-  constructor(
-    readonly expected: string,
-    readonly actual: string,
-    readonly supported: readonly string[],
-  ) {
+  readonly expected: string;
+  readonly actual: string;
+  readonly supported: readonly string[];
+
+  constructor(expected: string, actual: string, supported: readonly string[]) {
     super(
       `platform contract ${actual} is incompatible with expected ${expected} ` +
       `(supported: ${supported.length ? supported.join(', ') : 'none'})`,
     );
     this.name = 'ContractIncompatibleError';
+    this.expected = expected;
+    this.actual = actual;
+    this.supported = supported;
   }
 }
 
