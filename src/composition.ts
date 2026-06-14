@@ -30,7 +30,8 @@ import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
-import { resolveLanguageModel } from './adapters/llm/model-provider.ts';
+import { composeMastra } from './mastra/compose-mastra.ts';
+import type { MastraRuntime } from './mastra/compose-mastra.ts';
 import { FakeIntentClassifier } from './adapters/intent/fake-intent-classifier.ts';
 import { MastraIntentClassifier } from './adapters/intent/mastra-intent-classifier.ts';
 import { DrizzleChatSessionRepository } from './adapters/repository/drizzle-chat-session.repository.ts';
@@ -45,48 +46,38 @@ import { AgentActivityProjection } from './read-api/projection.ts';
 import { PgNotifyAgentEventStream } from './adapters/read/pg-notify-agent-event-stream.ts';
 import type { ReadApiDeps } from './read-api/deps.ts';
 
-function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
-  if (env.STRATEGY_ANALYST_ADAPTER === 'mastra') {
-    const r = resolveLanguageModel(env, env.STRATEGY_ANALYST_MODEL);
-    return new MastraStrategyAnalyst(r.model, r.label);
-  }
+function buildAnalyst(rt: MastraRuntime): StrategyAnalystPort {
+  const e = rt.agents.analyst;
+  if (e) return new MastraStrategyAnalyst(e.agent, e.label);
   console.warn('[composition] STRATEGY_ANALYST_ADAPTER is not "mastra"; using FakeStrategyAnalyst (stub analysis)');
   return new FakeStrategyAnalyst();
 }
 
-function buildResearcher(env: ReturnType<typeof loadEnv>): ResearcherPort {
-  if (env.RESEARCHER_ADAPTER === 'mastra') {
-    const r = resolveLanguageModel(env, env.RESEARCHER_MODEL);
-    return new MastraResearcher(r.model, r.label);
-  }
+function buildResearcher(rt: MastraRuntime): ResearcherPort {
+  const e = rt.agents.researcher;
+  if (e) return new MastraResearcher(e.agent, e.label);
   console.warn('[composition] RESEARCHER_ADAPTER is not "mastra"; using FakeResearcher (stub hypotheses)');
   return new FakeResearcher();
 }
 
-function buildCritic(env: ReturnType<typeof loadEnv>): CriticPort | null {
+function buildCritic(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): CriticPort | null {
   if (!env.ENABLE_CRITIC_AGENT) return null;
-  if (env.CRITIC_ADAPTER === 'mastra') {
-    const r = resolveLanguageModel(env, env.CRITIC_MODEL);
-    return new MastraCritic(r.model, r.label);
-  }
+  const e = rt.agents.critic;
+  if (e) return new MastraCritic(e.agent, e.label);
   console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
   return new FakeCritic();
 }
 
-function buildIntentClassifier(env: ReturnType<typeof loadEnv>): IntentClassifierPort {
-  if (env.INTENT_CLASSIFIER_ADAPTER === 'mastra') {
-    const r = resolveLanguageModel(env, env.INTENT_CLASSIFIER_MODEL);
-    return new MastraIntentClassifier(r.model, r.label);
-  }
+function buildIntentClassifier(rt: MastraRuntime): IntentClassifierPort {
+  const e = rt.agents.intentClassifier;
+  if (e) return new MastraIntentClassifier(e.agent, e.label);
   console.warn('[composition] INTENT_CLASSIFIER_ADAPTER is not "mastra"; using FakeIntentClassifier (rule-based)');
   return new FakeIntentClassifier();
 }
 
-function buildBuilder(env: ReturnType<typeof loadEnv>): BuilderPort {
-  if (env.BUILDER_ADAPTER === 'mastra') {
-    const r = resolveLanguageModel(env, env.BUILDER_MODEL);
-    return new MastraBuilder(r.model, r.label);
-  }
+function buildBuilder(rt: MastraRuntime): BuilderPort {
+  const e = rt.agents.builder;
+  if (e) return new MastraBuilder(e.agent, e.label);
   console.warn('[composition] BUILDER_ADAPTER is not "mastra"; using FakeBuilder (template bundles)');
   return new FakeBuilder();
 }
@@ -96,6 +87,8 @@ export function composeRuntime() {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   if (!env.REDIS_URL) throw new Error('REDIS_URL is required');
 
+  const mastraRuntime = composeMastra(env);
+
   const { db, pool } = createDbClient(env.DATABASE_URL);
   const queue = new BullMqQueueAdapter(env.REDIS_URL);
 
@@ -104,18 +97,18 @@ export function composeRuntime() {
   const services: AppServices = {
     researchTasks: new DrizzleResearchTaskRepository(db),
     strategyProfiles: new DrizzleStrategyProfileRepository(db),
-    analyst: buildAnalyst(env),
+    analyst: buildAnalyst(mastraRuntime),
     artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
     events: new DrizzleAgentEventRepository(db),
     platform: new MockPlatformGatewayAdapter(),
     researchPlatform: selectResearchPlatform(env.TRADING_PLATFORM_INTEGRATION),
-    researcher: buildResearcher(env),
-    critic: buildCritic(env),
+    researcher: buildResearcher(mastraRuntime),
+    critic: buildCritic(env, mastraRuntime),
     hypotheses,
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
     maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
-    builder: buildBuilder(env),
+    builder: buildBuilder(mastraRuntime),
     builds: new DrizzleHypothesisBuildRepository(db),
     backtests: new DrizzleBacktestRunRepository(db),
     evaluations: new DrizzleEvaluationRepository(db),
@@ -130,7 +123,7 @@ export function composeRuntime() {
   router.register('hypothesis.build', hypothesisBuildHandler);
 
   const chat: ChatAppDeps = {
-    classifier: buildIntentClassifier(env),
+    classifier: buildIntentClassifier(mastraRuntime),
     sessions: services.chatSessions,
     plans: services.chatPlans,
     researchTasks: services.researchTasks,
@@ -162,5 +155,5 @@ export function composeRuntime() {
     token: env.TRADING_LAB_READ_TOKEN ?? '',
   };
 
-  return { env, db, pool, queue, router, services, chat, read };
+  return { env, db, pool, queue, router, services, chat, read, mastraRuntime };
 }

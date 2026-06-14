@@ -3,6 +3,7 @@ import { MastraIntentClassifier } from './mastra-intent-classifier.ts';
 import { ChatIntentSchema } from '../../chat/intent.ts';
 import { loadEnv } from '../../config/env.ts';
 import { resolveLanguageModel } from '../llm/model-provider.ts';
+import { createIntentClassifierAgent } from '../../mastra/agents/intent-classifier.agent.ts';
 
 describe('MastraIntentClassifier (construction)', () => {
   it('stores the label and builds an agent from an injected model', () => {
@@ -10,7 +11,7 @@ describe('MastraIntentClassifier (construction)', () => {
       { MODEL_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'dummy' },
       'anthropic/claude-haiku-4-5-20251001',
     );
-    const c = new MastraIntentClassifier(model, label);
+    const c = new MastraIntentClassifier(createIntentClassifierAgent(model), label);
     expect(c.adapter).toBe('mastra');
     expect(c.model).toBe('anthropic/claude-haiku-4-5-20251001');
   });
@@ -22,7 +23,7 @@ const live = env.RUN_LLM_TESTS && env.ANTHROPIC_API_KEY ? describe : describe.sk
 live('MastraIntentClassifier (live LLM)', () => {
   it('classifies a weather question as out_of_scope', async () => {
     const { model, label } = resolveLanguageModel(env, env.INTENT_CLASSIFIER_MODEL);
-    const c = new MastraIntentClassifier(model, label);
+    const c = new MastraIntentClassifier(createIntentClassifierAgent(model), label);
     const raw = await c.classify('какая сегодня погода?');
     const parsed = ChatIntentSchema.parse(raw);
     expect(parsed.intent).toBe('out_of_scope');
