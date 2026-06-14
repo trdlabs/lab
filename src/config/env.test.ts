@@ -100,3 +100,20 @@ describe('SP-6.1 chat ingress token', () => {
     expect(env.TRADING_LAB_CHAT_TOKEN).toBe('chat-secret');
   });
 });
+
+describe('SP-6.2 task + callback ingress tokens', () => {
+  it('defaults both tokens to undefined', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.TRADING_LAB_TASK_TOKEN).toBeUndefined();
+    expect(env.TRADING_LAB_CALLBACK_TOKEN).toBeUndefined();
+  });
+
+  it('reads TRADING_LAB_TASK_TOKEN and TRADING_LAB_CALLBACK_TOKEN from source', () => {
+    const env = loadEnv({
+      TRADING_LAB_TASK_TOKEN: 'task-secret',
+      TRADING_LAB_CALLBACK_TOKEN: 'callback-secret',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.TRADING_LAB_TASK_TOKEN).toBe('task-secret');
+    expect(env.TRADING_LAB_CALLBACK_TOKEN).toBe('callback-secret');
+  });
+});
