@@ -15,9 +15,9 @@ describe('E2E: strategy.onboard ingress -> worker -> profile', () => {
     router.register('strategy.onboard', strategyOnboardHandler);
     startWorker({ queue, router, services });
 
-    const app = createIngressApp({ repo: services.researchTasks, queue });
+    const app = createIngressApp({ repo: services.researchTasks, queue, taskToken: 'e2e-task-token' });
     const res = await app.request('/tasks', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer e2e-task-token' },
       body: JSON.stringify({
         taskType: 'strategy.onboard', source: 'operator',
         payload: { kind: 'manual_description', content: 'long OI divergence', title: 'OI div' },

@@ -5,10 +5,21 @@ import { createChatApp } from '../chat/chat-app.ts';
 import { createReadApp } from '../read-api/read-app.ts';
 
 const { env, services, queue, pool, chat, read } = composeRuntime();
-const app = createIngressApp({ repo: services.researchTasks, queue });
+const app = createIngressApp({
+  repo: services.researchTasks,
+  queue,
+  taskToken: env.TRADING_LAB_TASK_TOKEN,
+  callbackToken: env.TRADING_LAB_CALLBACK_TOKEN,
+});
 app.route('/chat', createChatApp(chat));
 if (!env.TRADING_LAB_CHAT_TOKEN) {
   console.warn('[chat] TRADING_LAB_CHAT_TOKEN not set — POST /chat/messages will reject all requests (503)');
+}
+if (!env.TRADING_LAB_TASK_TOKEN) {
+  console.warn('[ingress] TRADING_LAB_TASK_TOKEN not set — POST /tasks will reject all requests (503)');
+}
+if (!env.TRADING_LAB_CALLBACK_TOKEN) {
+  console.warn('[ingress] TRADING_LAB_CALLBACK_TOKEN not set — POST /callbacks/backtest-completed will reject all requests (503)');
 }
 serve({ fetch: app.fetch, port: env.INGRESS_PORT });
 console.log(`ingress listening on :${env.INGRESS_PORT}`);

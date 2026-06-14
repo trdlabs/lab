@@ -26,9 +26,9 @@ describe('E2E: research.run_cycle ingress -> worker -> persisted hypotheses', ()
     router.register('research.run_cycle', researchRunCycleHandler);
     startWorker({ queue, router, services });
 
-    const app = createIngressApp({ repo: services.researchTasks, queue });
+    const app = createIngressApp({ repo: services.researchTasks, queue, taskToken: 'e2e-task-token' });
     const res = await app.request('/tasks', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer e2e-task-token' },
       body: JSON.stringify({ taskType: 'research.run_cycle', source: 'operator', payload: { strategyProfileId: 'p-e2e' } }),
     });
     expect(res.status).toBe(202);

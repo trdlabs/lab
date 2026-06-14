@@ -8,6 +8,10 @@ import { createAndEnqueueTask } from '../orchestrator/task-intake.ts';
 export interface IngressDeps {
   repo: ResearchTaskRepository;
   queue: TaskQueuePort;
+  /** SP-6.2: service-to-service token for POST /tasks (unset => 503). */
+  taskToken?: string;
+  /** SP-6.2: service-to-service token for POST /callbacks/backtest-completed (unset => 503). */
+  callbackToken?: string;
 }
 
 export function createIngressApp(deps: IngressDeps): Hono {

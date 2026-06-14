@@ -14,9 +14,9 @@ describe('E2E: Ingress → queue → worker → router', () => {
     router.register('strategy.onboard', echoHandler);
     startWorker({ queue, router, services });
 
-    const app = createIngressApp({ repo: services.researchTasks, queue });
+    const app = createIngressApp({ repo: services.researchTasks, queue, taskToken: 'e2e-task-token' });
     const res = await app.request('/tasks', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer e2e-task-token' },
       body: JSON.stringify({ taskType: 'strategy.onboard', source: 'web', payload: { url: 'x' } }),
     });
     const { taskId } = (await res.json()) as { taskId: string };
