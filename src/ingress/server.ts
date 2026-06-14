@@ -11,6 +11,20 @@ serve({ fetch: app.fetch, port: env.INGRESS_PORT });
 console.log(`ingress listening on :${env.INGRESS_PORT}`);
 
 if (env.TRADING_LAB_READ_TOKEN) {
+  // Rebuild the projection from the tail of agent_event, then go live.
+  const sinceMs = Date.now() - env.AGENT_ACTIVITY_REBUILD_WINDOW_HOURS * 3_600_000;
+  const since = new Date(sinceMs).toISOString();
+  let cur: { t: string; id: string } | undefined;
+  for (;;) {
+    const rows = await read.agentEvents.list({ since, after: cur, limit: 500 });
+    if (rows.length === 0) break;
+    for (const row of rows) read.projection.apply(row);
+    cur = { t: rows[rows.length - 1]!.createdAt, id: rows[rows.length - 1]!.id };
+    if (rows.length < 500) break;
+  }
+  read.agentStream.subscribe((row) => read.projection.apply(row));
+  await read.agentStream.start(read.projection.cursorKey());
+
   serve({ fetch: createReadApp(read).fetch, port: env.READ_API_PORT });
   console.log(`read API listening on :${env.READ_API_PORT}`);
 } else {
@@ -18,6 +32,7 @@ if (env.TRADING_LAB_READ_TOKEN) {
 }
 
 const shutdown = async () => {
+  if (env.TRADING_LAB_READ_TOKEN) await read.agentStream.stop();
   await queue.close();
   await pool.end();
   process.exit(0);

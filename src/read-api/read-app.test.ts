@@ -5,6 +5,8 @@ import { InMemoryHypothesisReadAdapter } from '../adapters/read/in-memory-hypoth
 import { InMemoryBacktestReadAdapter } from '../adapters/read/in-memory-backtest-read.adapter.ts';
 import { InMemoryAgentEventReadAdapter } from '../adapters/read/in-memory-agent-event-read.adapter.ts';
 import { InMemoryHypothesisReadAdapter as HypAd } from '../adapters/read/in-memory-hypothesis-read.adapter.ts';
+import { AgentActivityProjection } from './projection.ts';
+import { InMemoryAgentEventStream } from '../adapters/read/in-memory-agent-event-stream.ts';
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
 import type { AgentEventRow } from '../ports/agent-event-read.port.ts';
 
@@ -16,6 +18,9 @@ function deps(over: Partial<ReadApiDeps> = {}): ReadApiDeps {
     hypotheses: new InMemoryHypothesisReadAdapter([]),
     backtests: new InMemoryBacktestReadAdapter([]),
     agentEvents: new InMemoryAgentEventReadAdapter([]),
+    projection: new AgentActivityProjection(50),
+    agentStream: new InMemoryAgentEventStream(),
+    streamHeartbeatMs: 60_000,
     checkReadiness: async () => true,
     token: TOKEN,
     ...over,
@@ -91,6 +96,19 @@ describe('routes', () => {
   it('invalid query (bad limit) → 400', async () => {
     const res = await createReadApp(deps()).request('/v1/backtests?limit=999', { headers: AUTH });
     expect(res.status).toBe(400);
+  });
+
+  it('GET /v1/agents requires a token and returns the known agents', async () => {
+    expect((await createReadApp(deps()).request('/v1/agents')).status).toBe(401);
+    const res = await createReadApp(deps()).request('/v1/agents', { headers: AUTH });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { agentId: string }[]; cursor: string | null };
+    expect(body.data.map((a) => a.agentId)).toEqual(['analyst', 'researcher', 'critic', 'builder']);
+  });
+
+  it('GET /v1/agents/:agentId → 404 for unknown', async () => {
+    const res = await createReadApp(deps()).request('/v1/agents/ghost', { headers: AUTH });
+    expect(res.status).toBe(404);
   });
 
   it('GET /v1/agent-events sanitizes payload', async () => {

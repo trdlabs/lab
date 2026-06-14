@@ -1,6 +1,6 @@
 # SP-6 — Agent Activity Projection + Internal Realtime Stream Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For implementers:** Steps use checkbox (`- [ ]`) syntax for task-by-task tracking.
 
 **Goal:** Add a read-only, in-memory Agent Activity Projection and an internal server-to-server SSE realtime stream to trading-lab's SP-5 read API, so the trading-office backend can render live agent state without browser polling.
 
@@ -298,8 +298,8 @@ import type { AgentEventRow } from '../ports/agent-event-read.port.ts';
 import type { Cursor } from '../ports/keyset.ts';
 import { encodeCursor } from './pagination.ts';
 import { toAgentEventDto } from './mappers.ts';
-import { agentIdForType, lifecycleForType, KNOWN_AGENT_IDS, AGENT_IDS, type AgentId } from './agent-taxonomy.ts';
-import type { AgentEventDto, AgentSummaryDto, AgentActivityDto, AgentLifecycle } from './dto.ts';
+import { agentIdForType, lifecycleForType, KNOWN_AGENT_IDS, AGENT_IDS, type AgentId, type AgentLifecycle } from './agent-taxonomy.ts';
+import type { AgentEventDto, AgentSummaryDto, AgentActivityDto } from './dto.ts';
 
 interface AgentState {
   status: AgentLifecycle;
@@ -394,12 +394,15 @@ git commit -m "feat(sp6): agent activity DTOs + in-memory projection"
 ```ts
 // src/ports/agent-event-stream.port.ts
 import type { AgentEventRow } from './agent-event-read.port.ts';
+import type { Cursor } from './keyset.ts';
 
 // A source of agent_event rows in keyset order. Lifecycle is part of the contract so
-// composition/shutdown/reconnect are explicit, not implementation detail. subscribe()
+// composition/shutdown/reconnect are explicit, not implementation detail. start() takes
+// an optional resume cursor (the projection's post-rebuild position) so catch-up begins
+// AFTER what has already been applied — not from the beginning of agent_event. subscribe()
 // supports multiple subscribers (the projection + each live SSE connection).
 export interface AgentEventStreamPort {
-  start(): Promise<void>;
+  start(startCursor?: Cursor | null): Promise<void>;
   stop(): Promise<void>;
   subscribe(onEvent: (row: AgentEventRow) => void): () => void; // returns unsubscribe
 }
@@ -446,7 +449,7 @@ import type { AgentEventRow } from '../../ports/agent-event-read.port.ts';
 export class InMemoryAgentEventStream implements AgentEventStreamPort {
   private readonly subs = new Set<(row: AgentEventRow) => void>();
 
-  async start(): Promise<void> {}
+  async start(): Promise<void> {} // optional resume cursor is ignored — the fake has no catch-up
   async stop(): Promise<void> { this.subs.clear(); }
 
   subscribe(onEvent: (row: AgentEventRow) => void): () => void {
@@ -712,6 +715,7 @@ Per-connection reducer: subscribe live first (buffer), replay from the resume cu
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { registerStreamRoutes } from './stream.ts';
+import { encodeCursor } from '../pagination.ts';
 import { InMemoryAgentEventReadAdapter } from '../../adapters/read/in-memory-agent-event-read.adapter.ts';
 import { InMemoryAgentEventStream } from '../../adapters/read/in-memory-agent-event-stream.ts';
 import type { AgentEventRow } from '../../ports/agent-event-read.port.ts';
@@ -733,41 +737,44 @@ async function readUntil(res: Response, marker: string, ac: AbortController): Pr
   return buf;
 }
 
-function appWith(seed: AgentEventRow[], stream: InMemoryAgentEventStream): Hono {
+function appWith(seed: AgentEventRow[], stream: InMemoryAgentEventStream, liveCursor: { t: string; id: string } | null = null): Hono {
   const app = new Hono();
   registerStreamRoutes(app, {
     agentEvents: new InMemoryAgentEventReadAdapter(seed),
     agentStream: stream,
     heartbeatMs: 60_000, // keep heartbeats out of the assertion window
+    getLiveCursor: () => liveCursor,
   });
   return app;
 }
 
 describe('GET /stream (SSE)', () => {
-  it('replays seeded events from the tail as frames', async () => {
+  it('replays from an explicit ?cursor= as frames', async () => {
     const stream = new InMemoryAgentEventStream();
     await stream.start();
     const app = appWith([ev('1', 'researcher.started'), ev('2', 'researcher.completed')], stream);
+    const before = encodeCursor({ t: '2026-01-01T00:00:00.000Z', id: '' }); // before e1
     const ac = new AbortController();
-    const res = await app.request('/stream', { signal: ac.signal });
-    const text = await readUntil(res, 'e2', ac); // wait until the 2nd event_appended id shows
-    expect(text).toContain(`event: agent_status_changed`);
-    expect(text).toContain(`event: agent_event_appended`);
-    expect(text).toContain(`"agentId":"researcher"`);
+    const res = await app.request(`/stream?cursor=${encodeURIComponent(before)}`, { signal: ac.signal });
+    const text = await readUntil(res, 'event: agent_event_appended', ac);
+    expect(text).toContain('event: agent_status_changed');
+    expect(text).toContain('event: agent_event_appended');
+    expect(text).toContain('"agentId":"researcher"');
     await stream.stop();
   });
 
-  it('delivers a live pushed event', async () => {
+  it('defaults to the live tail — no history replay — and delivers live events', async () => {
     const stream = new InMemoryAgentEventStream();
     await stream.start();
-    const app = appWith([], stream);
+    const seeded = ev('1', 'researcher.started');
+    const app = appWith([seeded], stream, { t: seeded.createdAt, id: seeded.id }); // live cursor = newest seeded
     const ac = new AbortController();
-    const res = await app.request('/stream', { signal: ac.signal });
-    // Give the handler a tick to finish replay + go live, then push.
+    const res = await app.request('/stream', { signal: ac.signal });           // no resume token → live tail
     setTimeout(() => stream.push(ev('5', 'critic.failed')), 20);
     const text = await readUntil(res, 'critic', ac);
-    expect(text).toContain(`"agentId":"critic"`);
-    expect(text).toContain(`"status":"failed"`);
+    expect(text).toContain('"agentId":"critic"');
+    expect(text).toContain('"status":"failed"');
+    expect(text).not.toContain('"agentId":"researcher"');                      // history NOT replayed
     await stream.stop();
   });
 });
@@ -796,6 +803,7 @@ export interface StreamRouteDeps {
   agentEvents: AgentEventReadPort;
   agentStream: AgentEventStreamPort;
   heartbeatMs: number;
+  getLiveCursor: () => Cursor | null; // projection.cursorKey(): default resume = live tail
   replayPageSize?: number;
 }
 
@@ -806,11 +814,20 @@ export function registerStreamRoutes(app: Hono, deps: StreamRouteDeps): void {
   const pageSize = deps.replayPageSize ?? 200;
 
   app.get('/stream', (c) => {
-    // Resume point: Last-Event-ID beats ?cursor=. Bad header → tail; bad explicit cursor → 400 (throws to onError).
+    // Resume point: valid Last-Event-ID wins; else valid ?cursor=; else the live tail
+    // (projection cursor) so a fresh client does NOT replay all history. A malformed
+    // Last-Event-ID is ignored (fall through); a malformed explicit ?cursor= throws → 400.
     const headerId = c.req.header('last-event-id');
+    const queryCursor = c.req.query('cursor');
     let after: Cursor | undefined;
-    if (headerId) { try { after = decodeCursor(headerId); } catch { after = undefined; } }
-    else { const q = c.req.query('cursor'); if (q) after = decodeCursor(q); }
+    if (headerId) {
+      try { after = decodeCursor(headerId); }
+      catch { after = queryCursor ? decodeCursor(queryCursor) : (deps.getLiveCursor() ?? undefined); }
+    } else if (queryCursor) {
+      after = decodeCursor(queryCursor);
+    } else {
+      after = deps.getLiveCursor() ?? undefined;
+    }
 
     return streamSSE(c, async (stream) => {
       const status = new Map<AgentId, AgentLifecycle>();
@@ -969,10 +986,10 @@ d('PgNotifyAgentEventStream', () => {
     await db.delete(researchTask).where(eq(researchTask.id, taskId));
     await db.insert(researchTask).values({ id: taskId, taskType: 'research.run_cycle', source: 'web', correlationId: 'corr-sp6', status: 'running', payload: {} });
 
-    const stream = new PgNotifyAgentEventStream(pool, new DrizzleAgentEventReadAdapter(db), { safetyTickMs: 60_000, startCursor: { t: new Date().toISOString(), id: '' } });
+    const stream = new PgNotifyAgentEventStream(pool, new DrizzleAgentEventReadAdapter(db), { safetyTickMs: 60_000 });
     const got: string[] = [];
     const received = new Promise<void>((resolve) => { stream.subscribe((r: AgentEventRow) => { got.push(r.id); resolve(); }); });
-    await stream.start();
+    await stream.start({ t: new Date().toISOString(), id: '' });
 
     await db.insert(agentEvent).values({ id: evId, taskId, type: 'researcher.started', payload: { secret: 'x' }, createdAt: new Date() });
 
@@ -1009,7 +1026,6 @@ const isAfter = (a: Cursor, b: Cursor): boolean => a.t > b.t || (a.t === b.t && 
 export interface PgNotifyOpts {
   safetyTickMs: number;
   pageSize?: number;
-  startCursor?: Cursor;
   reconnectMs?: number;
 }
 
@@ -1025,12 +1041,13 @@ export class PgNotifyAgentEventStream implements AgentEventStreamPort {
     private readonly pool: Pool,
     private readonly reader: AgentEventReadPort,
     private readonly opts: PgNotifyOpts,
-  ) {
-    this.cursor = opts.startCursor;
-  }
+  ) {}
 
-  async start(): Promise<void> {
+  // startCursor = the projection's post-rebuild position; catch-up resumes AFTER it.
+  // Falsy (null/undefined) → cursor stays unset (catch-up reads from the start of agent_event).
+  async start(startCursor?: Cursor | null): Promise<void> {
     this.stopped = false;
+    if (startCursor) this.cursor = startCursor;
     await this.connect();
     this.tick = setInterval(() => { void this.catchUp(); }, this.opts.safetyTickMs);
     await this.catchUp();
@@ -1237,7 +1254,12 @@ Register inside `createReadApp`, alongside the existing route registrations on `
 
 ```ts
   registerAgentRoutes(v1, deps);
-  registerStreamRoutes(v1, { agentEvents: deps.agentEvents, agentStream: deps.agentStream, heartbeatMs: deps.streamHeartbeatMs });
+  registerStreamRoutes(v1, {
+    agentEvents: deps.agentEvents,
+    agentStream: deps.agentStream,
+    heartbeatMs: deps.streamHeartbeatMs,
+    getLiveCursor: () => deps.projection.cursorKey(),
+  });
 ```
 
 - [ ] **Step 3: Update the test `deps()` helper** (`src/read-api/read-app.test.ts`)
@@ -1375,7 +1397,7 @@ if (env.TRADING_LAB_READ_TOKEN) {
     if (rows.length < 500) break;
   }
   read.agentStream.subscribe((row) => read.projection.apply(row));
-  await read.agentStream.start();
+  await read.agentStream.start(read.projection.cursorKey());
 
   serve({ fetch: createReadApp(read).fetch, port: env.READ_API_PORT });
   console.log(`read API listening on :${env.READ_API_PORT}`);

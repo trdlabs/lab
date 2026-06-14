@@ -11,3 +11,13 @@ Endpoints:
 - `GET /healthz` · `GET /readyz` (DB readiness only — no queue/worker)
 
 Pagination is keyset (opaque `cursor`); `limit` default 20, max 100. DTOs are deny-by-default projections; internal schema is never exposed; no `trading-platform` calls. See `docs/superpowers/specs/2026-06-13-trading-lab-sp5-read-api-design.md`.
+
+## SP-6 — Agent activity + internal realtime stream
+
+Read-only Agent Activity Projection + an internal server-to-server SSE stream for the trading-office backend.
+
+- `GET /v1/agents` — snapshot of logical agents (`analyst`, `researcher`, `critic`, `builder`, `system`) with `status`, `currentTaskId`, and last event; plus an opaque `cursor` to open the stream from.
+- `GET /v1/agents/:agentId` — agent activity (`status`, `currentTask`, sanitized `trace` tail).
+- `GET /v1/stream` — SSE, server→client only (no command channel). Resume via `Last-Event-ID` (preferred) or `?cursor=`; events `agent_status_changed` + `agent_event_appended`; `: ping` heartbeat.
+
+Delivery: a Postgres `AFTER INSERT` trigger on `agent_event` fires `pg_notify('trading_lab_agent_event', …)` as a wake-up; the read process `LISTEN`s and does a keyset catch-up read (the source of truth & ordering). The projection is in-memory (rebuilt from the tail on boot); the read API never writes a table. v1 assumes a single read instance. Knobs: `AGENT_ACTIVITY_REBUILD_WINDOW_HOURS`, `AGENT_ACTIVITY_TRACE_LIMIT`, `AGENT_EVENT_STREAM_SAFETY_TICK_MS`, `AGENT_EVENT_STREAM_HEARTBEAT_MS`. See `docs/superpowers/specs/2026-06-13-trading-lab-sp6-agent-activity-stream-design.md`.

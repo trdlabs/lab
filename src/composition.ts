@@ -40,6 +40,8 @@ import { sql } from 'drizzle-orm';
 import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis-read.adapter.ts';
 import { DrizzleBacktestReadAdapter } from './adapters/read/drizzle-backtest-read.adapter.ts';
 import { DrizzleAgentEventReadAdapter } from './adapters/read/drizzle-agent-event-read.adapter.ts';
+import { AgentActivityProjection } from './read-api/projection.ts';
+import { PgNotifyAgentEventStream } from './adapters/read/pg-notify-agent-event-stream.ts';
 import type { ReadApiDeps } from './read-api/deps.ts';
 
 function buildAnalyst(env: ReturnType<typeof loadEnv>): StrategyAnalystPort {
@@ -138,10 +140,19 @@ export function composeRuntime() {
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
   };
 
+  const agentEventsRead = new DrizzleAgentEventReadAdapter(db);
+  const projection = new AgentActivityProjection(env.AGENT_ACTIVITY_TRACE_LIMIT);
+  const agentStream = new PgNotifyAgentEventStream(pool, agentEventsRead, {
+    safetyTickMs: env.AGENT_EVENT_STREAM_SAFETY_TICK_MS,
+  });
+
   const read: ReadApiDeps = {
     hypotheses: new DrizzleHypothesisReadAdapter(db),
     backtests: new DrizzleBacktestReadAdapter(db),
-    agentEvents: new DrizzleAgentEventReadAdapter(db),
+    agentEvents: agentEventsRead,
+    projection,
+    agentStream,
+    streamHeartbeatMs: env.AGENT_EVENT_STREAM_HEARTBEAT_MS,
     checkReadiness: async () => {
       try { await db.execute(sql`select 1`); return true; } catch { return false; }
     },

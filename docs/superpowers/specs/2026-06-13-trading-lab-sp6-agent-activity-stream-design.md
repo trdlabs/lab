@@ -161,14 +161,14 @@ Lifecycle is part of the contract (so composition/shutdown/reconnect are explici
 ```ts
 // src/ports/agent-event-stream.port.ts
 export interface AgentEventStreamPort {
-  start(): Promise<void>;                                  // open LISTEN, begin emitting
+  start(startCursor?: Cursor | null): Promise<void>;       // resume from projection's post-rebuild cursor
   stop(): Promise<void>;                                   // remove listeners, release client
   subscribe(onEvent: (row: AgentEventRow) => void): () => void; // returns unsubscribe
 }
 ```
 
 - **`PgNotifyAgentEventStream`** (`src/adapters/read/`): constructed with the node-postgres `pool` and the `AgentEventReadPort`.
-  - `start()` checks out **one dedicated** client from the pool (held for the listener's lifetime, never returned mid-listen) and issues `LISTEN trading_lab_agent_event`.
+  - `start(startCursor?)` seeds its catch-up cursor from the projection's post-rebuild position (so it resumes **after** what the projection already applied, never from the start of `agent_event`), checks out **one dedicated** client from the pool (held for the listener's lifetime, never returned mid-listen) and issues `LISTEN trading_lab_agent_event`.
   - On `notification` **or** a `AGENT_EVENT_STREAM_SAFETY_TICK_MS` tick (default 5000) **or** reconnect, it performs a **keyset catch-up read** (`AgentEventReadPort.list({ after: cursor, limit })`, looping until drained) and emits each row, in order, to subscribers. The NOTIFY payload is only a wake-up signal; the canonical row is always re-read from `agent_event`.
   - On client error / connection drop it reconnects with backoff and re-`LISTEN`s; the next catch-up read covers any events missed while disconnected.
   - `stop()` removes the notification handler and releases the client.

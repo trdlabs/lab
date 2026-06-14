@@ -67,3 +67,25 @@ describe('loadEnv read API config', () => {
     expect(env.TRADING_LAB_READ_TOKEN).toBe('secret');
   });
 });
+
+describe('SP-6 agent-activity knobs', () => {
+  it('defaults the four knobs', () => {
+    const env = loadEnv({});
+    expect(env.AGENT_ACTIVITY_REBUILD_WINDOW_HOURS).toBe(24);
+    expect(env.AGENT_ACTIVITY_TRACE_LIMIT).toBe(50);
+    expect(env.AGENT_EVENT_STREAM_SAFETY_TICK_MS).toBe(5000);
+    expect(env.AGENT_EVENT_STREAM_HEARTBEAT_MS).toBe(15000);
+  });
+  it('parses overrides', () => {
+    const env = loadEnv({
+      AGENT_ACTIVITY_REBUILD_WINDOW_HOURS: '6',
+      AGENT_ACTIVITY_TRACE_LIMIT: '10',
+      AGENT_EVENT_STREAM_SAFETY_TICK_MS: '1000',
+      AGENT_EVENT_STREAM_HEARTBEAT_MS: '30000',
+    });
+    expect(env.AGENT_ACTIVITY_REBUILD_WINDOW_HOURS).toBe(6);
+    expect(env.AGENT_ACTIVITY_TRACE_LIMIT).toBe(10);
+    expect(env.AGENT_EVENT_STREAM_SAFETY_TICK_MS).toBe(1000);
+    expect(env.AGENT_EVENT_STREAM_HEARTBEAT_MS).toBe(30000);
+  });
+});

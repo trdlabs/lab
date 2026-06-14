@@ -43,6 +43,13 @@
       "when": 1781361691091,
       "tag": "0005_fancy_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781385389544,
+      "tag": "0006_agent_event_notify",
+      "breakpoints": true
     }
   ]
 }

@@ -28,6 +28,10 @@ export interface Env {
   INTENT_CLASSIFIER_MODEL: string;
   INTENT_CLASSIFIER_MIN_CONFIDENCE: number;
   CHAT_MAX_MESSAGE_CHARS: number;
+  AGENT_ACTIVITY_REBUILD_WINDOW_HOURS: number;
+  AGENT_ACTIVITY_TRACE_LIMIT: number;
+  AGENT_EVENT_STREAM_SAFETY_TICK_MS: number;
+  AGENT_EVENT_STREAM_HEARTBEAT_MS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -87,5 +91,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     INTENT_CLASSIFIER_MODEL: source.INTENT_CLASSIFIER_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
     INTENT_CLASSIFIER_MIN_CONFIDENCE: parseFloatOr(source.INTENT_CLASSIFIER_MIN_CONFIDENCE, 0.6),
     CHAT_MAX_MESSAGE_CHARS: parsePositiveInt(source.CHAT_MAX_MESSAGE_CHARS, 4000),
+    AGENT_ACTIVITY_REBUILD_WINDOW_HOURS: parsePositiveInt(source.AGENT_ACTIVITY_REBUILD_WINDOW_HOURS, 24),
+    AGENT_ACTIVITY_TRACE_LIMIT: parsePositiveInt(source.AGENT_ACTIVITY_TRACE_LIMIT, 50),
+    AGENT_EVENT_STREAM_SAFETY_TICK_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_SAFETY_TICK_MS, 5000),
+    AGENT_EVENT_STREAM_HEARTBEAT_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_HEARTBEAT_MS, 15000),
   };
 }

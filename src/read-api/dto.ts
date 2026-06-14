@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AgentId, AgentLifecycle } from './agent-taxonomy.ts';
 
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const BACKTEST_STATUSES = ['queued', 'submitted', 'running', 'completed', 'rejected', 'failed', 'evaluated'] as const;
@@ -68,3 +69,21 @@ export interface AgentEventDto {
 }
 
 export interface ListEnvelope<T> { data: T[]; page: { nextCursor: string | null; limit: number }; }
+
+export interface AgentSummaryDto {
+  agentId: AgentId;
+  status: AgentLifecycle;
+  currentTaskId: string | null;
+  lastEvent: AgentEventDto | null;
+}
+
+export interface AgentActivityDto {
+  agentId: AgentId;
+  status: AgentLifecycle;
+  currentTask: { id: string; type: string; status: AgentLifecycle } | null; // type = latest event type
+  trace: AgentEventDto[]; // ring-buffer tail, oldest→newest, sanitized
+}
+
+// SSE delta payloads (carried as `data:` JSON).
+export interface AgentStatusChanged { agentId: AgentId; status: AgentLifecycle; currentTaskId: string | null; ts: string; }
+export interface AgentEventAppended { agentId: AgentId; event: AgentEventDto; }

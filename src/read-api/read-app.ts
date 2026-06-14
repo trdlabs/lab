@@ -6,8 +6,10 @@ import { registerHealthRoutes } from './routes/health.ts';
 import { registerHypothesisRoutes } from './routes/hypotheses.ts';
 import { registerBacktestRoutes } from './routes/backtests.ts';
 import { registerAgentEventRoutes } from './routes/agent-events.ts';
+import { registerAgentRoutes } from './routes/agents.ts';
+import { registerStreamRoutes } from './routes/stream.ts';
 
-const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events'];
+const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream'];
 
 export function createReadApp(deps: ReadApiDeps): Hono {
   const app = new Hono();
@@ -28,6 +30,13 @@ export function createReadApp(deps: ReadApiDeps): Hono {
   registerHypothesisRoutes(v1, deps);
   registerBacktestRoutes(v1, deps);
   registerAgentEventRoutes(v1, deps);
+  registerAgentRoutes(v1, deps);
+  registerStreamRoutes(v1, {
+    agentEvents: deps.agentEvents,
+    agentStream: deps.agentStream,
+    heartbeatMs: deps.streamHeartbeatMs,
+    getLiveCursor: () => deps.projection.cursorKey(),
+  });
 
   // Explicit 405 — Hono would otherwise 404 an unmatched method on a known path.
   const methodNotAllowed = (c: Context) => c.json({ error: { code: 'method_not_allowed', message: 'method not allowed' } }, 405);

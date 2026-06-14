@@ -9,6 +9,7 @@ const PORT_FILES = [
   'src/ports/hypothesis-read.port.ts',
   'src/ports/backtest-read.port.ts',
   'src/ports/agent-event-read.port.ts',
+  'src/ports/agent-event-stream.port.ts',
 ];
 
 // The read boundary must not import the write side or the platform.
