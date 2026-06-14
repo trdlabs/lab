@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  trading-bot-platform@workspace:*: link:../trading-platform
-
 importers:
 
   .:
@@ -30,8 +27,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
       '@trading-platform/sdk':
-        specifier: file:../trading-platform/packages/sdk
-        version: file:../trading-platform/packages/sdk(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+        specifier: file:./vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz
+        version: file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       bullmq:
         specifier: ^5.21.0
         version: 5.78.0
@@ -774,8 +771,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@trading-platform/sdk@file:../trading-platform/packages/sdk':
-    resolution: {directory: ../trading-platform/packages/sdk, type: directory}
+  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz':
+    resolution: {integrity: sha512-WmgyPkYYl6EUaPgqzf2xWuP6rCncLkJcWDo2SwTQ6II4O7+3w/vkEikgbQV3jHbc9CxO+a3JgPuJQQ7Ouuskug==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz}
+    version: 0.1.0
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.29.0
     peerDependenciesMeta:
@@ -980,6 +978,9 @@ packages:
     peerDependenciesMeta:
       supports-color:
         optional: true
+
+  decimal.js@10.6.0:
+    resolution: {integrity: sha512-YpgQiITW3JXGntzdUmyUR1V812Hn8T1YVXhCu+wO3OpS4eU9l4YdD3qjyiKdV6mvV29zapkMeD390UVEf2lkUg==}
 
   decode-named-character-reference@1.3.0:
     resolution: {integrity: sha512-GtpQYB283KrPp6nRw50q3U9/VfOutZOe103qlN7BPP6Ad27xYnOIWv4lPzo8HCAL+mMZofJ9KEy30fq6MfaK6Q==}
@@ -2498,9 +2499,9 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@trading-platform/sdk@file:../trading-platform/packages/sdk(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
+  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
     dependencies:
-      trading-bot-platform: link:../trading-platform
+      decimal.js: 10.6.0
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.76)
 
@@ -2711,6 +2712,8 @@ snapshots:
   debug@4.4.3:
     dependencies:
       ms: 2.1.3
+
+  decimal.js@10.6.0: {}
 
   decode-named-character-reference@1.3.0:
     dependencies:

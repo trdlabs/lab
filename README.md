@@ -25,9 +25,14 @@ runtime boot. It spawns the gateway over stdio (anonymous, zero secrets), calls
 prints the capability descriptor + datasets, and exits non-zero on a contract mismatch / timeout /
 unreachable gateway (fail-closed).
 
+The research gateway is a **separate trading-platform service**, reached only through runtime env
+(`TRADING_PLATFORM_GATEWAY_COMMAND` / `TRADING_PLATFORM_GATEWAY_ARGS`) — it is not an install or
+build dependency of trading-lab. For a local dev run you can point it at a checked-out platform
+gateway, e.g.:
+
 ```bash
 TRADING_PLATFORM_GATEWAY_COMMAND=node \
-TRADING_PLATFORM_GATEWAY_ARGS="--experimental-strip-types ../trading-platform/src/research/mcp-gateway/bin/start-gateway.ts" \
+TRADING_PLATFORM_GATEWAY_ARGS="--experimental-strip-types /path/to/trading-platform/src/research/mcp-gateway/bin/start-gateway.ts" \
 pnpm platform:discover
 ```
 
@@ -35,13 +40,13 @@ The contract-version handshake is mandatory and fail-closed, but on-demand only:
 `pnpm worker` / `pnpm ingress` boot. The runtime gate is `TRADING_PLATFORM_INTEGRATION` (`mock`
 default); the SDK import is confined to `src/ports/research-platform.port.ts` + `src/adapters/platform/`.
 
-### Dependency note (temporary local-integration workaround)
+### Dependency note (vendored standalone SDK)
 
-`@trading-platform/sdk` is consumed via a `file:` dependency plus a `pnpm.overrides` entry
-(`"trading-bot-platform@workspace:*": "link:../trading-platform"`) in `package.json`, because the
-SDK currently declares a `workspace:*` dependency on the platform that trading-lab is not part of.
-This is a **temporary local-integration workaround**: it requires the sibling `trading-platform`
-checked out next to this repo with its build output present (`packages/sdk/dist` and the root
-`dist`, both gitignored), and it pulls the platform's runtime tree into `node_modules`. A follow-up
-on the `trading-platform` side should make the SDK independently published/workspace-consumable so
-this override can be removed.
+`@trading-platform/sdk` is consumed as a **vendored standalone tarball**, committed at
+`vendor/trading-platform-sdk/`. The root `package.json` depends on it via
+`file:./vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz`. No sibling
+`../trading-platform` checkout, pnpm override, or workspace link is needed to install, typecheck,
+or test trading-lab — the SDK is a self-contained consumer package (`dependencies: decimal.js`;
+`@modelcontextprotocol/sdk` optional peer). See `vendor/trading-platform-sdk/README.md` for the
+SDK version, source commit, and the command to refresh the tarball. This vendored channel is
+temporary until the SDK is published to a private registry.
