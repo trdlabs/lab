@@ -14,6 +14,7 @@
     "ingress": "node --experimental-strip-types src/ingress/server.ts",
     "worker": "node --experimental-strip-types src/worker/worker.ts",
     "platform:discover": "node --experimental-strip-types scripts/platform-discover.ts",
+    "platform:validate": "node --experimental-strip-types scripts/platform-validate.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
