@@ -138,6 +138,7 @@ export function composeRuntime() {
     queue,
     minConfidence: env.INTENT_CLASSIFIER_MIN_CONFIDENCE,
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
+    authToken: env.TRADING_LAB_CHAT_TOKEN,
   };
 
   const agentEventsRead = new DrizzleAgentEventReadAdapter(db);
