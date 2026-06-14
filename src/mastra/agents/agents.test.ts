@@ -18,6 +18,7 @@ describe('mastra agent factories', () => {
       [createBuilderAgent(model), BUILDER_AGENT_ID, 'Builder'],
       [createIntentClassifierAgent(model), INTENT_CLASSIFIER_AGENT_ID, 'Intent Classifier'],
     ] as const;
+    expect(cases).toHaveLength(5);
     for (const [agent, id, name] of cases) {
       expect(agent.id).toBe(id);
       expect(agent.name).toBe(name);
