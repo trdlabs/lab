@@ -96,13 +96,13 @@ research_platform: sha256(stableStringify({
 
 `stableStringify` already sorts object keys; `symbols` is explicitly sorted so `[BTC,ETH]` and `[ETH,BTC]` share identity. The `research_platform` object always carries the `backend` discriminator, so a platform hash can never collide with a mock hash. The unique index is unchanged (backend-awareness folded into the hash value).
 
-`findByIdentity(hypothesisId, paramsHash, bundleHash)` runs (as today) **before** any platform side-effect; a hit short-circuits to `backtest.reused` + return for both backends. A previously-persisted pending platform run (`status='submitted'`) is therefore reused on retrigger — no duplicate submit.
+`findByIdentity(hypothesisId, paramsHash, bundleHash)` runs (as today) **before** any platform side-effect; a hit short-circuits to `backtest.reused` + return for both backends. In particular, when the hit is an existing `research_platform` run with `status='submitted'` (a pending run): emit `backtest.reused`, return cleanly, **do not** re-submit, and **do not** poll/resume in SP-7.2b — SP-7.3 owns resume of submitted `research_platform` runs.
 
 ### 4. Platform branch — `runPlatformBacktest(...)` (new file, e.g. `src/orchestrator/handlers/run-platform-backtest.ts`)
 
 Called from the handler after the idempotency miss, with `{ services, task, buildId, bundle, profile, params, platformRun, paramsHash, baselineRef, resumeToken }`.
 
-The handler derives, before the call: `baselineRef = { id: 'strategy:' + profile.id, version: services.baselineVersion }`; `resumeToken = sha256(stableStringify({ hypothesisId, paramsHash, bundleHash }))` (deterministic over identity, so a worker-retry re-submit is an idempotent replay); and the `research_platform` `paramsHash` (§3, which itself consumes `baselineRef` + `platformRun`).
+The handler derives, before the call: `baselineRef = { id: 'strategy:' + profile.id, version: services.baselineVersion }`; `resumeToken = sha256(stableStringify({ v: 1, hypothesisId, paramsHash, bundleHash }))` (deterministic over identity, so a worker-retry re-submit is an idempotent replay); and the `research_platform` `paramsHash` (§3, which itself consumes `baselineRef` + `platformRun`).
 
 1. **Pre-submit gate:** `report = await services.researchPlatform.validateModule(bundle)`. If rejected (blocking issues), map `ValidationReport` → `ValidationIssue[]` (reuse the SP-7.1 `validate-probe` issue mapping) → `markBuildFailed(buildId, issues)` + `build_failed` event → **return, no submit**. On pass, emit `build.platform_validated` (additive).
 2. **Submit:** `opts: SubmitOverlayRunOptions = { baselineModuleRef: baselineRef, run: payload.platformRun, correlationId: task.correlationId, resumeToken }`. `handle = await services.researchPlatform.submitOverlayRun(bundle, opts)`. (A thrown `GatewayRunError`/transport error propagates — see §6; nothing persisted yet; `resumeToken` makes the retry's re-submit an idempotent replay.)
@@ -169,6 +169,7 @@ Offline, deterministic (Vitest); the in-process `MockResearchPlatformAdapter` fo
 - **validate-rejected:** `validateModule` returns a blocking report ⇒ `build_failed`, **no submit** (stub `submitOverlayRun` asserts not-called).
 - **missing-config:** `backtestBackend='research_platform'` + no `payload.platformRun` ⇒ `build_failed` (`missing_platform_run_config`), no builder side-effects, no submit.
 - **Backend-aware idempotency:** second trigger with identical identity ⇒ `backtest.reused`; a `sp4_mock` run and a `research_platform` run for the same `(hypothesisId, params, bundle)` get **different** `paramsHash` (no collision); a `sp4_mock` `paramsHash` equals the pre-7.2b value byte-for-byte.
+- **Existing submitted `research_platform` reuse:** retriggering an identity whose `research_platform` `BacktestRun` is already `status='submitted'` ⇒ `backtest.reused` emitted, `submitOverlayRun` asserted **not-called**, no poll/resume, no `Evaluation`. (SP-7.3 owns resume of submitted `research_platform` runs.)
 - **Infra error:** `submitOverlayRun`/poll throwing `GatewayRunError` ⇒ the handler throws (task retried), no `markRejected`/`markFailed`.
 - **SP-4 regression:** the default `sp4_mock` path (no payload backend) produces the same events, persistence calls, and `Evaluation` as before this slice.
 - **Migration:** `0007_*.sql` applies on a populated DB; existing rows backfill `backend='sp4_mock'`.
