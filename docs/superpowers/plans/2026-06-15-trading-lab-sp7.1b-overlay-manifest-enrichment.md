@@ -22,6 +22,7 @@
 | `src/domain/module-bundle.test.ts` | `overlayMeta` attach + bundleHash-invariance tests. | Create |
 | `src/adapters/platform/submitted-bundle.ts` | Project the 017 manifest via `createOverlayManifest`; `MissingOverlayMetaError`; fail-closed. | Modify |
 | `src/adapters/platform/submitted-bundle.test.ts` | Rewrite SP-7.1 assertions to the 017 `manifest.json`; add fail-closed + deep-equal tests; pass `meta` in path-safety tests. | Modify |
+| `src/adapters/platform/mcp-research-platform.adapter.test.ts` | Add an `OverlayManifestMeta` fixture; build the shared `bundle` via `assembleBundle(manifest, files, meta)` so `validateModule(bundle)` no longer fails closed. Existing assertions preserved. | Modify |
 | `src/adapters/platform/submitted-bundle.preflight.test.ts` | Acceptance smoke: materialize → `preflightValidate({ bundleDir })`. | Create |
 | `src/orchestrator/handlers/hypothesis-build.handler.ts` | One pure-lab line: derive + attach `overlayMeta`. SP-4 logic untouched. | Modify |
 | `src/orchestrator/handlers/hypothesis-build.handler.test.ts` | Add one test: built bundle artifact carries the derived `overlayMeta`. | Modify |
@@ -534,10 +535,53 @@ export function toSubmittedBundle(bundle: ModuleBundle): SubmittedBundle {
 Run: `pnpm vitest run src/adapters/platform/submitted-bundle.test.ts && pnpm typecheck`
 Expected: PASS (all groups); typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Fix the MCP adapter test fixtures (now fail-closed without overlayMeta)**
+
+`McpResearchPlatformAdapter.validateModule(bundle)` calls `toSubmittedBundle(bundle)` internally, which now throws `MissingOverlayMetaError` unless the bundle carries `overlayMeta`. The shared `bundle` fixture in `src/adapters/platform/mcp-research-platform.adapter.test.ts` must be rebuilt with a `meta`.
+
+In `src/adapters/platform/mcp-research-platform.adapter.test.ts`, add this import below the existing import block:
+
+```typescript
+import type { OverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
+```
+
+Find the shared bundle fixture (the second `manifest` block, just above `transportReturning`):
+
+```typescript
+const manifest: ModuleManifest = {
+  moduleId: 'm1', moduleKind: 'hypothesis_overlay', appliesTo: 'long',
+  entry: 'index.ts', exports: ['overlay'], capabilities: ['oi'], sdkContractVersion: SDK_CONTRACT_VERSION,
+};
+const bundle = assembleBundle(manifest, { 'index.ts': 'export const overlay = {};' });
+```
+
+Replace it with:
+
+```typescript
+const manifest: ModuleManifest = {
+  moduleId: 'm1', moduleKind: 'hypothesis_overlay', appliesTo: 'long',
+  entry: 'index.ts', exports: ['overlay'], capabilities: ['oi'], sdkContractVersion: SDK_CONTRACT_VERSION,
+};
+const meta: OverlayManifestMeta = {
+  id: 'm1', version: '0.1.0', name: 'n', summary: 's', rationale: 'r', author: 'agent',
+  targetStrategyRef: 'strategy:p1', interceptionPoint: 'post_entry_management',
+  paramsSchema: { type: 'object', additionalProperties: false },
+};
+const bundle = assembleBundle(manifest, { 'index.ts': 'export const overlay = {};' }, meta);
+```
+
+Leave the three existing assertions in `describe('McpResearchPlatformAdapter.validateModule', ...)` unchanged — they still hold (the fake transport returns its canned result regardless of payload):
+- "sends a submitted bundle to validate_module and returns the report on ok" (asserts `calls[0].tool === 'validate_module'` and `module.kind === 'submitted'`)
+- "throws GatewayValidationError on an ok:false envelope"
+- "Lazy variant opens and closes a session around the call"
+
+Run: `pnpm vitest run src/adapters/platform/mcp-research-platform.adapter.test.ts && pnpm typecheck`
+Expected: PASS; typecheck clean.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/adapters/platform/submitted-bundle.ts src/adapters/platform/submitted-bundle.test.ts
+git add src/adapters/platform/submitted-bundle.ts src/adapters/platform/submitted-bundle.test.ts src/adapters/platform/mcp-research-platform.adapter.test.ts
 git commit -m "feat(sp7.1b): project 017 overlay manifest.json via createOverlayManifest; fail-closed on missing overlayMeta"
 ```
 
@@ -678,10 +722,16 @@ describe('toSubmittedBundle projected bundle passes SDK preflight (subset smoke)
 Run: `pnpm vitest run src/adapters/platform/submitted-bundle.preflight.test.ts`
 Expected: PASS. (If it reports `schema_invalid` / `forbidden_capability` / `unsupported_contract_version`, the 017 projection regressed — fix `submitted-bundle.ts`.)
 
-- [ ] **Step 3: Full suite + typecheck**
+- [ ] **Step 3: Full suite + typecheck (explicit gate)**
 
-Run: `pnpm test && pnpm typecheck`
-Expected: PASS — entire suite green (including untouched SP-4 + SP-7.1 tests), typecheck clean.
+Run both, separately:
+
+```bash
+pnpm test
+pnpm typecheck
+```
+
+Expected: PASS — entire suite green (including untouched SP-4 + SP-7.1 tests, and the MCP adapter test fixed in Task 3 Step 5), typecheck clean.
 
 - [ ] **Step 4: Commit**
 
