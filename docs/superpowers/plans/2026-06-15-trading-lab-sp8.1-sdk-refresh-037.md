@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refresh trading-lab's vendored `@trading-platform/sdk` from the pre-037 `0.1.0` tarball to a `0.2.0` build that exposes feature 037's `submitted_overlay` `ModuleSelector` variant, so SP-7.2 can compile a platform-backed run lifecycle against it — with zero trading-lab runtime/behavior change.
+**Goal:** Refresh trading-lab's vendored `@trading-platform/sdk` from the pre-037 `0.1.0` tarball to a `0.2.0` build (packed from a pushed, remote-visible trading-platform `main` SHA) that exposes feature 037's `submitted_overlay` `ModuleSelector` variant, so SP-7.2 can compile a platform-backed run lifecycle against it — with zero trading-lab runtime/behavior change.
 
-**Architecture:** Two repos in order. **Part A (trading-platform):** fast-forward the stale local `main` to `origin/main` (`da4aae3`, which already contains feature 037), bump the SDK version `0.1.0→0.2.0` (both `package.json` and the hardcoded `SDK_VERSION` constant), rebuild `dist`, commit on `main`. **Part B (trading-lab):** a TDD red→green — a surface-proof test that fails `tsc` against the old tarball, then swap in the freshly-packed `0.2.0` tarball to make it pass — guarded by SP-8's no-sibling archive gate.
+**Architecture:** Two repos in order. **Part A (trading-platform):** on the already-current, clean local `main` (== `origin/main`, includes 035+036+037), bump the SDK version `0.1.0→0.2.0` (both `package.json` and the hardcoded `SDK_VERSION` constant), rebuild `dist`, commit on `main`, and **push to `origin/main`** (user-authorized) so trading-lab vendors from a remote-visible SHA. **Part B (trading-lab):** a TDD red→green — a surface-proof test that fails `tsc` against the old tarball, then swap in the freshly-packed `0.2.0` tarball to make it pass — guarded by SP-8's no-sibling archive gate.
 
 **Tech Stack:** pnpm workspaces, TypeScript (`tsc`, `node --experimental-strip-types`), Vitest, `npm pack` for vendoring, a `file:` tarball dependency.
 
@@ -13,15 +13,16 @@
 ## Context the engineer needs (verified facts)
 
 - The vendored `vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz` was packed from trading-platform `647b13b` (feature 034). It **already exports** the full run-lifecycle surface (`submitRun`, `getRunStatus`, `getRunResult`, `awaitCompletion`, `cancelRun`, `readArtifactPage`, `isTerminal`, and DTOs `RunResultSummary` / `ComparisonSummaryDTO` / `ControlledRunRequest` / `SubmittedBundle` / `Ref`). It also has `ModuleSelector`, but only the **2-variant** union (`ref | submitted`).
-- **The only feature-037 SDK addition is the third `ModuleSelector` variant:** `{ kind: 'submitted_overlay'; bundle: SubmittedBundle; baselineModuleRef: Ref }`. That is the genuine red→green for this slice; the run-lifecycle export checks are regression guards (already green against `0.1.0`).
+- **The feature-037 SDK addition that SP-7.2 needs is the third `ModuleSelector` variant:** `{ kind: 'submitted_overlay'; bundle: SubmittedBundle; baselineModuleRef: Ref }`. That is the genuine red→green for this slice; the run-lifecycle export checks are regression guards (already green against `0.1.0`).
 - `pnpm typecheck` = `tsc -p tsconfig.json`, and `tsconfig.json` `include` is `["src/**/*", "test/**/*", "*.config.ts"]` — so a `*.test.ts` under `src/**` **is** type-checked. A `submitted_overlay` construction in such a file fails `tsc` against `0.1.0` and compiles against `0.2.0`.
 - `SDK_VERSION` is a **hardcoded constant** in the SDK source (`packages/sdk/src/index.ts:22`, `export const SDK_VERSION = '0.1.0'`), not derived from `package.json`. Part A must bump both, or the test's `SDK_VERSION === '0.2.0'` assertion won't flip.
-- Local trading-platform `main` is at `1fa3c68` (feature 035), 7 commits behind `origin/main` (`da4aae3`, the 037 PR #2 merge), **0 local-only commits** — a clean fast-forward. Feature 037 is fully intact on `origin/main`.
-- SDK source package: `build` script = `tsc -p .`; runtime dep `decimal.js`; `@modelcontextprotocol/sdk` optional peer; `files: ["dist","README.md"]`; exports `.`, `./builder`, `./agent`, `./agent/mcp-transport`. Standalone — declares no `trading-platform` / `trading-bot-platform` / `workspace:*`.
+- **trading-platform state (verified):** the working checkout is on `main`, clean, and `main` == `origin/main` == `3b53293` (`0 0` divergence). `origin/main` includes feature 035, **036**, and **037** (both `da4aae3` and `27ef5d5` are ancestors). No fast-forward dance and no worktree are needed — operate on the current clean `main` checkout at `/home/alexxxnikolskiy/projects/trading-platform`.
+- **036 added a new SDK surface** (`packages/sdk/src/intake/**` → exports `./intake` and `./intake/http-transport`). Its only `packages/sdk/package.json` change is those two export entries — **no new dependencies**. So vendoring from latest `main` legitimately includes the 036 `./intake` surface; the standalone invariant still holds (`dependencies: decimal.js` only; `@modelcontextprotocol/sdk` optional peer). trading-lab does NOT consume `./intake` in this slice — it is incidental vendored surface, not new behavior.
+- SDK source package at `origin/main`: `build` script = `tsc -p .`; `files: ["dist","README.md"]`; version still `0.1.0`. Standalone — declares no `trading-platform` / `trading-bot-platform` / `workspace:*`.
 
 ## File Structure
 
-**Part A — trading-platform (committed on its `main`, NOT in the trading-lab PR):**
+**Part A — trading-platform (committed + pushed on its `main`, NOT in the trading-lab PR):**
 - Modify: `packages/sdk/package.json` — `version: "0.1.0" → "0.2.0"`
 - Modify: `packages/sdk/src/index.ts:22` — `SDK_VERSION = '0.1.0' → '0.2.0'`
 - Rebuild (gitignored): `packages/sdk/dist/**`
@@ -29,7 +30,7 @@
 **Part B — trading-lab (branch `sp8.1-sdk-refresh-037`, the PR):**
 - Create: `vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz`
 - Delete: `vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz`
-- Modify: `vendor/trading-platform-sdk/README.md` — version `0.2.0`, new source SHA, feature-037 note
+- Modify: `vendor/trading-platform-sdk/README.md` — version `0.2.0`, new source SHA, feature-037 (+036) note
 - Modify: `package.json` — dependency `file:` path → `…0.2.0.tgz`
 - Modify: `pnpm-lock.yaml` — regenerated by `pnpm install`
 - Create: `src/adapters/platform/sdk-overlay-surface.test.ts` — the surface proof (red→green)
@@ -38,7 +39,7 @@ Each task produces a self-contained, independently sensible change.
 
 ---
 
-## Task 1: trading-platform — fast-forward `main`, bump SDK to `0.2.0`, rebuild
+## Task 1: trading-platform — bump SDK to `0.2.0` on `main`, rebuild, commit, push
 
 **Files:**
 - Modify: `<tp>/packages/sdk/package.json`
@@ -46,77 +47,78 @@ Each task produces a self-contained, independently sensible change.
 
 where `<tp>` = `/home/alexxxnikolskiy/projects/trading-platform`.
 
-This is enabling infrastructure in the other repo (not TDD-shaped). It produces a built SDK at `0.2.0` and a commit SHA that Part B vendors.
+Enabling infrastructure in the other repo (not TDD-shaped). Produces a pushed, remote-visible `0.2.0` SDK commit on `main` and a SHA that Part B vendors. **Checkpoint to the user with the commit SHA + diff summary before pushing-completes / before Task 2.**
 
-- [ ] **Step 1: Fetch and fast-forward local `main` to `origin/main`**
-
-The working checkout is on `036` with an unrelated dirty `package.json`; do not disturb it. `main` is not checked out anywhere, so move its ref directly:
+- [ ] **Step 1: Confirm `main` is current and clean**
 
 ```bash
 TP=/home/alexxxnikolskiy/projects/trading-platform
 git -C "$TP" fetch origin
-# Safety check — must print "0" local-only commits before forcing the ref:
-git -C "$TP" rev-list --count origin/main..main
-git -C "$TP" branch -f main origin/main
+git -C "$TP" rev-parse --abbrev-ref HEAD            # expect: main
+git -C "$TP" status --porcelain                     # expect: empty (clean)
+git -C "$TP" rev-list --left-right --count main...origin/main   # expect: 0	0
 ```
 
-Expected: the `rev-list --count` prints `0` (clean fast-forward). If it prints non-zero, STOP — local `main` has commits not on origin; do not force.
+Expected: on `main`, clean working tree, `0	0` divergence. If behind, `git -C "$TP" merge --ff-only origin/main`. If not on `main` or dirty, STOP and surface it (do not stash/discard unknown work).
 
-- [ ] **Step 2: Add a clean worktree on `main` and verify feature 037 is present**
+- [ ] **Step 2: Verify the source includes both 037 and 036 and the SDK subtree is undirty**
 
 ```bash
-WT=/tmp/tp-sdk-bump
-rm -rf "$WT"
-git -C "$TP" worktree add "$WT" main
-grep -n "submitted_overlay" "$WT/packages/sdk/src/agent/dto.ts"
+grep -c "submitted_overlay" "$TP/packages/sdk/src/agent/dto.ts"   # expect: 1  (037)
+test -f "$TP/packages/sdk/src/intake/index.ts" && echo "036 intake present"  # expect: present
+git -C "$TP" status --porcelain -- packages/sdk     # expect: empty
 ```
 
-Expected: the grep prints the line `| { readonly kind: 'submitted_overlay'; readonly bundle: SubmittedBundle; readonly baselineModuleRef: Ref };`. If empty, STOP — wrong source.
+Expected: `submitted_overlay` count `1`, `036 intake present`, SDK subtree clean. If the dto count is `0`, STOP — wrong source.
 
 - [ ] **Step 3: Bump both the package version and the hardcoded constant**
 
-Edit `"$WT/packages/sdk/package.json"`: change `"version": "0.1.0"` to `"version": "0.2.0"`.
+Edit `"$TP/packages/sdk/package.json"`: change `"version": "0.1.0"` to `"version": "0.2.0"`.
 
-Edit `"$WT/packages/sdk/src/index.ts"` line 22: change `export const SDK_VERSION = '0.1.0';` to `export const SDK_VERSION = '0.2.0';`.
+Edit `"$TP/packages/sdk/src/index.ts"` line 22: change `export const SDK_VERSION = '0.1.0';` to `export const SDK_VERSION = '0.2.0';`.
 
 Leave `BUILDER_SDK_VERSION` (`src/builder/_vendor/version.ts`) untouched — it tracks the vendored builder-template snapshot, not the agent SDK package.
 
 - [ ] **Step 4: Install and build the SDK**
 
 ```bash
-cd "$WT"
+cd "$TP"
 pnpm install
 pnpm --filter @trading-platform/sdk run build
 ```
 
-(Fallback if the filter form errors: `cd "$WT/packages/sdk" && pnpm exec tsc -p .`.)
+(Fallback if the filter form errors: `cd "$TP/packages/sdk" && pnpm exec tsc -p .`.)
 
-Expected: `dist/` is produced/updated with no `tsc` errors.
+Expected: `packages/sdk/dist/` rebuilt with no `tsc` errors.
 
-- [ ] **Step 5: Verify the built dist carries 0.2.0 + the variant, and the standalone invariant holds**
+- [ ] **Step 5: Verify the built dist carries 0.2.0 + the 037 variant + the 036 surface, and the standalone invariant holds**
 
 ```bash
-grep -n "SDK_VERSION = '0.2.0'" "$WT/packages/sdk/dist/index.js"
-grep -c "submitted_overlay" "$WT/packages/sdk/dist/agent/dto.d.ts"
-grep -E '"trading-platform"|"trading-bot-platform"|workspace:' "$WT/packages/sdk/package.json" || echo "STANDALONE-OK (no forbidden deps)"
+grep -n "SDK_VERSION = '0.2.0'" "$TP/packages/sdk/dist/index.js"
+grep -c "submitted_overlay" "$TP/packages/sdk/dist/agent/dto.d.ts"        # expect: >=1  (037)
+test -f "$TP/packages/sdk/dist/intake/index.d.ts" && echo "036 intake built"  # expect: present
+grep -E '"trading-platform"|"trading-bot-platform"|workspace:' "$TP/packages/sdk/package.json" || echo "STANDALONE-OK"
 ```
 
-Expected: line 1 matches; line 2 prints `1` (or more); line 3 prints `STANDALONE-OK (no forbidden deps)`.
+Expected: line 1 matches; `submitted_overlay` count `>=1`; `036 intake built`; `STANDALONE-OK`.
 
-- [ ] **Step 6: Commit on `main` and capture the SHA**
+- [ ] **Step 6: Commit on `main`, push, capture the SHA, and checkpoint**
 
 ```bash
-cd "$WT"
+cd "$TP"
 git add packages/sdk/package.json packages/sdk/src/index.ts
 git commit -m "chore(sdk): bump @trading-platform/sdk to 0.2.0
 
-037's submitted_overlay ModuleSelector variant is an additive change;
-bump SDK_VERSION constant + package.json together (the constant is not
-derived from package.json). Consumed by trading-lab SP-8.1."
-git rev-parse HEAD   # record this SHA for Part B's vendor README
+Additive surface since 0.1.0 (feature 034): 037 submitted_overlay
+ModuleSelector variant + 036 intake. Bump SDK_VERSION constant +
+package.json together (the constant is not derived from package.json).
+Consumed by trading-lab SP-8.1."
+git push origin main
+git rev-parse HEAD          # record this SHA as <TP_SHA> for Part B
+git show --stat HEAD        # diff summary for the checkpoint
 ```
 
-Expected: commit succeeds on branch `main`; note the printed SHA (call it `<TP_SHA>`). Do **not** push — pushing trading-platform `main` is outward-facing and requires explicit user confirmation; it is not needed for trading-lab to pack from the local build.
+Expected: commit on `main`, push succeeds (`origin/main` advances to the bump commit). Report `<TP_SHA>` + the `--stat` summary to the user as the Task-1 checkpoint. Push is user-authorized for this SDK bump.
 
 ---
 
@@ -191,7 +193,7 @@ describe('SP-8.1: vendored SDK feature-037 surface', () => {
 pnpm typecheck
 ```
 
-Expected: FAIL — a `tsc` error on the `overlaySelector` declaration, e.g. `Type '{ kind: "submitted_overlay"; ... }' is not assignable to type 'ModuleSelector'` (`submitted_overlay` is not a known variant).
+Expected: FAIL — a `tsc` error on the `overlaySelector` declaration, e.g. `Type '{ kind: "submitted_overlay"; ... }' is not assignable to type 'ModuleSelector'`.
 
 ```bash
 pnpm test -- src/adapters/platform/sdk-overlay-surface.test.ts
@@ -199,17 +201,18 @@ pnpm test -- src/adapters/platform/sdk-overlay-surface.test.ts
 
 Expected: FAIL — the `SDK_VERSION === '0.2.0'` assertion fails with `expected '0.1.0' to be '0.2.0'`. (The other two tests already pass; they are regression guards.)
 
-- [ ] **Step 3: Pack the `0.2.0` tarball and rewire the dependency**
+- [ ] **Step 3: Pack the `0.2.0` tarball (from the pushed `main`) and rewire the dependency**
 
 ```bash
 LAB=/home/alexxxnikolskiy/projects/trading-lab
+TP=/home/alexxxnikolskiy/projects/trading-platform
 cd "$LAB"
-npm pack /tmp/tp-sdk-bump/packages/sdk --pack-destination vendor/trading-platform-sdk
+npm pack "$TP/packages/sdk" --pack-destination vendor/trading-platform-sdk
 rm vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz
 ls vendor/trading-platform-sdk/
 ```
 
-Expected: `vendor/trading-platform-sdk/` now contains `trading-platform-sdk-0.2.0.tgz` and `README.md` (no `0.1.0.tgz`).
+Expected: `vendor/trading-platform-sdk/` now contains `trading-platform-sdk-0.2.0.tgz` and `README.md` (no `0.1.0.tgz`). (`$TP/packages/sdk` is at the pushed `<TP_SHA>` from Task 1.)
 
 Edit `package.json`: change the dependency
 `"@trading-platform/sdk": "file:./vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz"`
@@ -227,19 +230,20 @@ Expected: lockfile regenerates; the only dependency-graph change is the `@tradin
 ```bash
 T=vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz
 tar -xOf "$T" package/package.json | grep '"version"'
-tar -xOf "$T" package/dist/agent/dto.d.ts | grep -c "submitted_overlay"
+tar -xOf "$T" package/dist/agent/dto.d.ts | grep -c "submitted_overlay"     # >=1 (037)
+tar -tzf "$T" | grep -c "package/dist/intake/index"                          # >=1 (036, incidental)
 tar -xOf "$T" package/dist/index.js | grep "SDK_VERSION = '0.2.0'"
 tar -xOf "$T" package/package.json | grep -E '"trading-platform"|"trading-bot-platform"|workspace:' || echo "STANDALONE-OK"
 ```
 
-Expected: version `"0.2.0"`; `submitted_overlay` count `≥ 1`; the `SDK_VERSION = '0.2.0'` line present; `STANDALONE-OK`.
+Expected: version `"0.2.0"`; `submitted_overlay` count `>=1`; intake count `>=1`; the `SDK_VERSION = '0.2.0'` line present; `STANDALONE-OK`.
 
 - [ ] **Step 5: Update the vendor README**
 
 Edit `vendor/trading-platform-sdk/README.md`:
 - Change every `0.1.0` reference (intro `file:` path, the Version table row, the Tarball row) to `0.2.0`.
-- Change the `Source commit` row value to `<TP_SHA>` (from Task 1 Step 6).
-- Add a line under the table: `Adds feature 037 — the \`submitted_overlay\` ModuleSelector variant + run-lifecycle DTOs (consumed by SP-7.2).`
+- Change the `Source commit` row value to `<TP_SHA>` (the pushed SHA from Task 1 Step 6).
+- Add a line under the table: `0.2.0 adds, since 0.1.0 (feature 034): feature 037 (the \`submitted_overlay\` ModuleSelector variant + run-lifecycle DTOs, consumed by SP-7.2) and feature 036 (the \`./intake\` surface, vendored but not yet consumed).`
 
 - [ ] **Step 6: Run the proof again — verify it passes (GREEN)**
 
@@ -254,17 +258,16 @@ Expected: `pnpm typecheck` clean (no errors); the surface-proof file reports `3 
 
 ```bash
 git add src/adapters/platform/sdk-overlay-surface.test.ts \
-        vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz \
-        vendor/trading-platform-sdk/README.md \
+        vendor/trading-platform-sdk/ \
         package.json pnpm-lock.yaml
-git rm --cached vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz 2>/dev/null || true
-git add -A vendor/trading-platform-sdk/
+git status --porcelain   # confirm 0.1.0.tgz shows as deleted, 0.2.0.tgz as added
 git commit -m "feat(sp8.1): vendor @trading-platform/sdk 0.2.0 (feature 037 submitted_overlay)
 
-Swap the vendored tarball 0.1.0 -> 0.2.0 so the submitted_overlay
-ModuleSelector variant is importable. Add src/adapters/platform/
-sdk-overlay-surface.test.ts proving the variant type-checks and the
-build is 0.2.0. No runtime/behavior change to the SP-4 or SP-7/7.1/7.1b paths.
+Swap the vendored tarball 0.1.0 -> 0.2.0 (packed from a pushed
+trading-platform main SHA) so the submitted_overlay ModuleSelector
+variant is importable. Add src/adapters/platform/sdk-overlay-surface.test.ts
+proving the variant type-checks and the build is 0.2.0. No runtime/behavior
+change to the SP-4 or SP-7/7.1/7.1b paths.
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
@@ -301,14 +304,13 @@ echo "no-sibling gate exit: $?"
 
 Expected: `pnpm install --frozen-lockfile` succeeds resolving the `file:` tarball from inside the archive (the lockfile matches), `pnpm typecheck` clean, `pnpm test` green, final line `no-sibling gate exit: 0`.
 
-- [ ] **Step 3: Clean up the trading-platform worktree**
+- [ ] **Step 3: Clean up**
 
 ```bash
-git -C /home/alexxxnikolskiy/projects/trading-platform worktree remove /tmp/tp-sdk-bump
 rm -rf "$TMP"
 ```
 
-Expected: worktree removed cleanly. (Task 1's `main` commit and the trading-lab branch remain.)
+Expected: temp dir removed. (Task 1's `main` commit/push and the trading-lab branch remain.)
 
 ---
 
@@ -316,11 +318,12 @@ Expected: worktree removed cleanly. (Task 1's `main` commit and the trading-lab 
 
 - A trading-lab module can `import type { ModuleSelector } from '@trading-platform/sdk/agent'` and narrow to `submitted_overlay` with `tsc` passing (the new test proves it).
 - The vendored tarball's internal version, `SDK_VERSION`, and the `file:` path are all `0.2.0`, and the standalone-dependency invariant holds.
+- The vendored tarball was packed from a pushed, remote-visible trading-platform `main` SHA (`<TP_SHA>`), recorded in the vendor README.
 - Full lab suite + typecheck green; the no-sibling archive gate is green.
-- One PR off `main`; trading-platform carries a `chore(sdk): bump … 0.2.0` commit on `main` (push pending user confirmation).
+- One PR off `main`; trading-platform `main` (and `origin/main`) carry the `chore(sdk): bump … 0.2.0` commit.
 
 ## Self-Review
 
-- **Spec coverage:** Part A (FF + dual version bump + rebuild + standalone check) → Task 1. Part B steps 1–4 (pack, swap, README, dep path, lockfile) → Task 2 steps 3–5. Surface proof (type-level `submitted_overlay` + runtime `SDK_VERSION` + lifecycle regression guard) → Task 2 steps 1–2,6. Existing-smoke-unchanged + full suite + no-sibling gate → Task 3. All spec acceptance bullets mapped.
+- **Spec coverage:** Part A (current-main verify + dual version bump + rebuild + standalone check + commit + push) → Task 1. Part B steps 1–4 (pack, swap, README, dep path, lockfile) → Task 2 steps 3–5. Surface proof (type-level `submitted_overlay` + runtime `SDK_VERSION` + lifecycle regression guard) → Task 2 steps 1–2,6. Existing-smoke-unchanged + full suite + no-sibling gate → Task 3. All spec acceptance bullets mapped.
 - **Placeholder scan:** none — `<tp>` / `<TP_SHA>` / `<TMP>` are clearly runtime values produced by earlier steps; all code/commands are concrete.
 - **Type consistency:** the test imports `ModuleSelector` / `Ref` / `SubmittedBundle` / `SDK_VERSION` and the seven workflow functions by the exact names confirmed in the SDK source; the `submitted_overlay` shape matches the SDK DTO (`bundle: SubmittedBundle`, `baselineModuleRef: Ref`).
