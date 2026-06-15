@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { DIRECTIONS } from './strategy-profile.ts';
+import type { OverlayManifestMeta } from './overlay-manifest-meta.ts';
 
 export const MODULE_BUNDLE_CONTRACT_VERSION = 'module-bundle-v1';
 export const SDK_CONTRACT_VERSION = 'builder-sdk-v0';
@@ -22,6 +23,7 @@ export interface ModuleBundle {
   files: Record<string, string>;
   bundleHash: string;
   bundleContractVersion: string;
+  overlayMeta?: OverlayManifestMeta;
 }
 
 /** Deterministic JSON with sorted object keys (so file paths and manifest keys
@@ -34,9 +36,19 @@ function stableStringify(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
 
-/** Lab computes the hash; any caller-supplied hash is impossible to pass (no hash param). */
-export function assembleBundle(manifest: ModuleManifest, files: Record<string, string>): ModuleBundle {
+/** Lab computes the hash over {manifest, files} only; overlayMeta is additive and excluded from the hash. */
+export function assembleBundle(
+  manifest: ModuleManifest,
+  files: Record<string, string>,
+  overlayMeta?: OverlayManifestMeta,
+): ModuleBundle {
   const canonical = stableStringify({ manifest, files });
   const hex = createHash('sha256').update(canonical, 'utf8').digest('hex');
-  return { manifest, files, bundleHash: `sha256:${hex}`, bundleContractVersion: MODULE_BUNDLE_CONTRACT_VERSION };
+  return {
+    manifest,
+    files,
+    bundleHash: `sha256:${hex}`,
+    bundleContractVersion: MODULE_BUNDLE_CONTRACT_VERSION,
+    ...(overlayMeta !== undefined ? { overlayMeta } : {}),
+  };
 }

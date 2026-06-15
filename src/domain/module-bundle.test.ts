@@ -1,6 +1,7 @@
 // src/domain/module-bundle.test.ts
 import { describe, it, expect } from 'vitest';
 import { assembleBundle, ModuleManifestSchema, MODULE_BUNDLE_CONTRACT_VERSION, SDK_CONTRACT_VERSION, type ModuleManifest } from './module-bundle.ts';
+import type { OverlayManifestMeta } from './overlay-manifest-meta.ts';
 
 function manifest(over: Partial<ModuleManifest> = {}): ModuleManifest {
   return {
@@ -36,5 +37,26 @@ describe('assembleBundle', () => {
     // so a sneaked hash cannot reach the canonical input.
     const parsed = ModuleManifestSchema.safeParse({ ...manifest(), bundleHash: 'sha256:deadbeef' });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('assembleBundle overlayMeta', () => {
+  const files = { 'index.ts': 'export const overlay = {};' };
+  const meta: OverlayManifestMeta = {
+    id: 'm1', version: '0.1.0', name: 'n', summary: 's', rationale: 'r', author: 'agent',
+    targetStrategyRef: 'strategy:p1', interceptionPoint: 'post_entry_management',
+    paramsSchema: { type: 'object', additionalProperties: false },
+  };
+
+  it('attaches overlayMeta when provided', () => {
+    expect(assembleBundle(manifest(), files, meta).overlayMeta).toEqual(meta);
+  });
+
+  it('omits overlayMeta when not provided', () => {
+    expect(assembleBundle(manifest(), files).overlayMeta).toBeUndefined();
+  });
+
+  it('does not change bundleHash when overlayMeta is attached (hash covers manifest+files only)', () => {
+    expect(assembleBundle(manifest(), files, meta).bundleHash).toBe(assembleBundle(manifest(), files).bundleHash);
   });
 });
