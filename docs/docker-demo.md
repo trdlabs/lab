@@ -55,3 +55,4 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 - The demo is fully self-contained — it needs nothing beyond this repo and the `trading-office` checkout.
 - Default agents are fake. To use a real LLM, see `docs/docker-local.md`.
 - Host-only infra (run `pnpm ingress` / `pnpm worker` on your machine): `docker compose up postgres redis`.
+- The lab containers run with `node --experimental-transform-types` (not `--experimental-strip-types`) because the current source contains TS syntax (parameter properties) unsupported by strip-only mode. This is an infra-contained workaround; source cleanup is deferred to a separate change.

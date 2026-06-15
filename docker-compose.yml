@@ -42,7 +42,10 @@ services:
 
   ingress:
     <<: *lab-image
-    command: ["pnpm", "ingress"]
+    # Workaround: current source uses TS parameter properties unsupported by
+    # `--experimental-strip-types` (what `pnpm ingress` uses). transform-types parses them.
+    # Infra-contained; source cleanup is deferred. (migrate stays on pnpm — drizzle-kit only.)
+    command: ["node", "--experimental-transform-types", "src/ingress/server.ts"]
     environment:
       DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
       REDIS_URL: redis://redis:6379
@@ -93,7 +96,8 @@ services:
 
   worker:
     <<: *lab-image
-    command: ["pnpm", "worker"]
+    # Same transform-types workaround as ingress (see note above).
+    command: ["node", "--experimental-transform-types", "src/worker/worker.ts"]
     environment:
       DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
       REDIS_URL: redis://redis:6379
