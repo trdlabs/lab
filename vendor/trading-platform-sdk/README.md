@@ -2,18 +2,20 @@
 
 A **vendored standalone build** of `@trading-platform/sdk`, committed so trading-lab can consume
 the SDK as a `file:` tarball dependency in the root `package.json`
-(`file:./vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz`) — no sibling
+(`file:./vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz`) — no sibling
 `../trading-platform` source checkout required.
 
 | Field | Value |
 |-------|-------|
 | Package | `@trading-platform/sdk` |
-| Version | `0.2.0` |
-| Tarball | `trading-platform-sdk-0.2.0.tgz` |
+| Version | `0.3.0` |
+| Tarball | `trading-platform-sdk-0.3.0.tgz` |
 | Source repo | `trading-platform` |
-| Source commit | `bcdd3a4dc7128c73cbf05f47dd565d90d64c1b2e` |
+| Source commit | `21d95cef5eb289ff0044f30480920d051b9a7622` |
 
-0.2.0 adds, since 0.1.0 (feature 034): feature 037 (the submitted_overlay ModuleSelector variant + run-lifecycle DTOs, consumed by SP-7.2) and feature 036 (the ./intake surface, vendored but not yet consumed).
+0.3.0 adds feature 038 — the 7-metric METRIC_CATALOG (total_trades, profit_factor, top_trade_contribution_pct), consumed by SP-7.2.
+
+0.2.0 added, since 0.1.0 (feature 034): feature 037 (the submitted_overlay ModuleSelector variant + run-lifecycle DTOs, consumed by SP-7.2) and feature 036 (the ./intake surface, vendored but not yet consumed).
 
 ## Why this exists
 

@@ -32,8 +32,8 @@ describe('SP-8.1: vendored SDK feature-037 surface', () => {
     }
   });
 
-  it('is the refreshed 0.2.0 build', () => {
-    expect(SDK_VERSION).toBe('0.2.0');
+  it('is the refreshed 0.3.0 build', () => {
+    expect(SDK_VERSION).toBe('0.3.0');
   });
 
   it('still exports the run-lifecycle workflow functions (regression guard)', () => {
