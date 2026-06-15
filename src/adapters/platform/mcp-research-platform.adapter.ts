@@ -1,5 +1,5 @@
-import { discover, listDatasets, validateModule } from '@trading-platform/sdk/agent';
-import type { GatewayTransport, ValidateModuleRequest } from '@trading-platform/sdk/agent';
+import { discover, listDatasets, validateModule, submitRun, getRunStatus as sdkGetRunStatus, getRunResult as sdkGetRunResult } from '@trading-platform/sdk/agent';
+import type { GatewayTransport, ValidateModuleRequest, ControlledRunRequest } from '@trading-platform/sdk/agent';
 import type {
   ResearchPlatformPort,
   ResearchCapabilityDescriptor,
@@ -7,11 +7,16 @@ import type {
   ListDatasetsResult,
   ValidationReport,
   ValidateModuleOptions,
+  SubmitOverlayRunOptions,
+  RunJobHandle,
+  RunStatusView,
+  RunResultView,
 } from '../../ports/research-platform.port.ts';
 import { assertContractCompatible } from './research-contract.ts';
 import type { GatewaySession } from './mcp-research-transport.ts';
 import { toSubmittedBundle } from './submitted-bundle.ts';
-import { GatewayValidationError } from './gateway-errors.ts';
+import { GatewayValidationError, GatewayRunError } from './gateway-errors.ts';
+import { RESEARCH_RUN_METRICS } from '../../domain/platform-comparison.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 
 /** Stateless over a live transport; the caller owns the session lifecycle (one session per probe). */
@@ -42,6 +47,37 @@ export class McpResearchPlatformAdapter implements ResearchPlatformPort {
     const result = await validateModule(this.transport, request);
     if (!result.ok) throw new GatewayValidationError(result.error);
     return result.report;
+  }
+
+  async submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
+    const request: ControlledRunRequest = {
+      datasetRef: { datasetId: opts.run.datasetId },
+      module: { kind: 'submitted_overlay', bundle: toSubmittedBundle(bundle), baselineModuleRef: opts.baselineModuleRef },
+      symbols: opts.run.symbols,
+      timeframe: opts.run.timeframe,
+      period: opts.run.period,
+      seed: opts.run.seed,
+      mode: 'research',
+      metrics: [...RESEARCH_RUN_METRICS],
+      ...(opts.correlationId !== undefined ? { correlationId: opts.correlationId } : {}),
+      ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
+      ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),
+    };
+    const result = await submitRun(this.transport, request);
+    if (!result.ok) throw new GatewayRunError(result.error);
+    return result.handle;
+  }
+
+  async getRunStatus(runId: string): Promise<RunStatusView> {
+    const result = await sdkGetRunStatus(this.transport, runId);
+    if (!result.ok) throw new GatewayRunError(result.error);
+    return result.view;
+  }
+
+  async getRunResult(runId: string): Promise<RunResultView> {
+    const result = await sdkGetRunResult(this.transport, runId);
+    if (!result.ok) throw new GatewayRunError(result.error);
+    return result;
   }
 }
 
@@ -77,6 +113,33 @@ export class LazyMcpResearchPlatformAdapter implements ResearchPlatformPort {
     const session = await this.connect();
     try {
       return await new McpResearchPlatformAdapter(session.transport, this.acceptedContractVersion).validateModule(bundle, options);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
+    const session = await this.connect();
+    try {
+      return await new McpResearchPlatformAdapter(session.transport, this.acceptedContractVersion).submitOverlayRun(bundle, opts);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async getRunStatus(runId: string): Promise<RunStatusView> {
+    const session = await this.connect();
+    try {
+      return await new McpResearchPlatformAdapter(session.transport, this.acceptedContractVersion).getRunStatus(runId);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async getRunResult(runId: string): Promise<RunResultView> {
+    const session = await this.connect();
+    try {
+      return await new McpResearchPlatformAdapter(session.transport, this.acceptedContractVersion).getRunResult(runId);
     } finally {
       await session.close();
     }

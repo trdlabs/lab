@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { CONTRACT_VERSION } from '@trading-platform/sdk';
 import type {
   ResearchPlatformPort,
@@ -6,6 +7,11 @@ import type {
   ListDatasetsResult,
   ValidationReport,
   ValidateModuleOptions,
+  SubmitOverlayRunOptions,
+  RunJobHandle,
+  RunStatusView,
+  RunResultView,
+  RunResultSummary,
 } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 
@@ -39,5 +45,33 @@ export class MockResearchPlatformAdapter implements ResearchPlatformPort {
 
   async validateModule(_bundle: ModuleBundle, _options?: ValidateModuleOptions): Promise<ValidationReport> {
     return { status: 'accepted', issues: [], executed: false };
+  }
+
+  private cannedSummary(runId: string): RunResultSummary {
+    const m = { pnl: 1500, sharpe: 1.6, max_drawdown: 0.14, win_rate: 0.58, total_trades: 42, profit_factor: 2.1, top_trade_contribution_pct: 28 };
+    const baseline = { ...m, pnl: 800, profit_factor: 1.5 };
+    return {
+      runId, status: 'completed', runKind: 'baseline-vs-variant', validationIssues: [],
+      metrics: baseline,
+      comparison: {
+        baseline,
+        variant: m,
+        deltas: Object.fromEntries(Object.keys(m).map((k) => [k, (m as Record<string, number>)[k] ?? 0 - ((baseline as Record<string, number>)[k] ?? 0)])),
+      },
+      coverage: [], artifactRefs: [], evidence: { seed: 0, contractVersion: CONTRACT_VERSION, moduleVersions: [] },
+    } as RunResultSummary;
+  }
+
+  async submitOverlayRun(_bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
+    const runId = randomUUID();
+    return { jobId: randomUUID(), runId, status: 'accepted', effectiveSeed: opts.run.seed, requestFingerprint: 'mock', idempotentReplay: false };
+  }
+
+  async getRunStatus(runId: string): Promise<RunStatusView> {
+    return { jobId: 'mock', runId, status: 'completed', timeline: { acceptedAtMs: 0, terminalAtMs: 1 } };
+  }
+
+  async getRunResult(runId: string): Promise<RunResultView> {
+    return { ok: true, kind: 'summary', summary: this.cannedSummary(runId) };
   }
 }

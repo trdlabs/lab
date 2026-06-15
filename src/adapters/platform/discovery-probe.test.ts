@@ -29,6 +29,9 @@ describe('runDiscoveryProbe', () => {
       async discover() { throw new ContractIncompatibleError('031.1', '031.9', ['031.9']); },
       async listDatasets() { return { datasets: [] }; },
       async validateModule() { return { status: 'accepted', issues: [], executed: false }; },
+      async submitOverlayRun() { throw new Error('not implemented'); },
+      async getRunStatus() { throw new Error('not implemented'); },
+      async getRunResult() { throw new Error('not implemented'); },
     };
     await expect(runDiscoveryProbe({
       platform: bad, events: sink, probeId: 'probe:bad', integration: 'mcp', command: 'node',

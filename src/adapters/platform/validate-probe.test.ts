@@ -38,6 +38,9 @@ describe('runValidateProbe', () => {
       async discover() { return okDescriptor; },
       async listDatasets() { return { datasets: [] }; },
       async validateModule() { return rejected; },
+      async submitOverlayRun() { throw new Error('not implemented'); },
+      async getRunStatus() { throw new Error('not implemented'); },
+      async getRunResult() { throw new Error('not implemented'); },
     };
     await runValidateProbe({ platform, events: sink, probeId: 'p:rej', integration: 'mcp', bundle });
     expect(await typesOf(sink, 'p:rej')).toEqual(['platform.validate.started', 'platform.validate.completed', 'platform.validate.rejected']);
@@ -49,6 +52,9 @@ describe('runValidateProbe', () => {
       async discover() { return okDescriptor; },
       async listDatasets() { return { datasets: [] }; },
       async validateModule() { throw new GatewayValidationError({ category: 'sandbox_module_error', code: 'bundle_load_failed', message: 'x' }); },
+      async submitOverlayRun() { throw new Error('not implemented'); },
+      async getRunStatus() { throw new Error('not implemented'); },
+      async getRunResult() { throw new Error('not implemented'); },
     };
     await expect(runValidateProbe({ platform, events: sink, probeId: 'p:err', integration: 'mcp', bundle }))
       .rejects.toBeInstanceOf(GatewayValidationError);
@@ -61,6 +67,9 @@ describe('runValidateProbe', () => {
       async discover() { throw new ContractIncompatibleError('031.1', '031.9', ['031.9']); },
       async listDatasets() { return { datasets: [] }; },
       async validateModule() { return { status: 'accepted', issues: [], executed: false }; },
+      async submitOverlayRun() { throw new Error('not implemented'); },
+      async getRunStatus() { throw new Error('not implemented'); },
+      async getRunResult() { throw new Error('not implemented'); },
     };
     await expect(runValidateProbe({ platform, events: sink, probeId: 'p:bad', integration: 'mcp', bundle }))
       .rejects.toBeInstanceOf(ContractIncompatibleError);
