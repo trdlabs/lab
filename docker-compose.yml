@@ -1,3 +1,20 @@
+# Base stack — every shared service. Host publishing lives in the mode overlays
+# (docker-compose.{demo,local,vps}.yml); this base uses `expose` only.
+#
+# Run with an overlay, e.g.:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up --build
+#
+# Infra-only for host development (run `pnpm ingress` / `pnpm worker` on the host):
+#   docker compose up postgres redis
+
+# Shared build for the lab image — declared once, reused by ingress/migrate/worker via the
+# YAML anchor below. Docker builds trading-lab:local a single time (keyed by the image tag),
+# so no service depends on another to produce the image.
+x-lab-image: &lab-image
+  build:
+    context: .
+  image: trading-lab:local
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -5,10 +22,145 @@ services:
       POSTGRES_USER: lab
       POSTGRES_PASSWORD: lab
       POSTGRES_DB: trading_lab
-    ports: ["5432:5432"]
-    volumes: ["lab_pg:/var/lib/postgresql/data"]
+    volumes:
+      - lab_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d trading_lab"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [trading]
+
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [trading]
+
+  ingress:
+    <<: *lab-image
+    command: ["pnpm", "ingress"]
+    environment:
+      DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
+      REDIS_URL: redis://redis:6379
+      INGRESS_PORT: "3000"
+      READ_API_PORT: "3100"
+      TRADING_LAB_READ_TOKEN: ${TRADING_LAB_READ_TOKEN:-}
+      TRADING_LAB_CHAT_TOKEN: ${TRADING_LAB_CHAT_TOKEN:-}
+      TRADING_LAB_TASK_TOKEN: ${TRADING_LAB_TASK_TOKEN:-}
+      TRADING_LAB_CALLBACK_TOKEN: ${TRADING_LAB_CALLBACK_TOKEN:-}
+      TRADING_PLATFORM_INTEGRATION: ${TRADING_PLATFORM_INTEGRATION:-mock}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
+      STRATEGY_ANALYST_ADAPTER: ${STRATEGY_ANALYST_ADAPTER:-fake}
+      RESEARCHER_ADAPTER: ${RESEARCHER_ADAPTER:-fake}
+      CRITIC_ADAPTER: ${CRITIC_ADAPTER:-fake}
+      BUILDER_ADAPTER: ${BUILDER_ADAPTER:-fake}
+      INTENT_CLASSIFIER_ADAPTER: ${INTENT_CLASSIFIER_ADAPTER:-fake}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "3000"
+      - "3100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [trading]
+
+  migrate:
+    <<: *lab-image
+    command: ["pnpm", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [trading]
+
+  worker:
+    <<: *lab-image
+    command: ["pnpm", "worker"]
+    environment:
+      DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
+      REDIS_URL: redis://redis:6379
+      TRADING_PLATFORM_INTEGRATION: ${TRADING_PLATFORM_INTEGRATION:-mock}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
+      STRATEGY_ANALYST_ADAPTER: ${STRATEGY_ANALYST_ADAPTER:-fake}
+      RESEARCHER_ADAPTER: ${RESEARCHER_ADAPTER:-fake}
+      CRITIC_ADAPTER: ${CRITIC_ADAPTER:-fake}
+      BUILDER_ADAPTER: ${BUILDER_ADAPTER:-fake}
+      INTENT_CLASSIFIER_ADAPTER: ${INTENT_CLASSIFIER_ADAPTER:-fake}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [trading]
+
+  office-server:
+    build:
+      context: ${TRADING_OFFICE_PATH:-../trading-office}
+      dockerfile: apps/server/Dockerfile
+    environment:
+      OFFICE_CONNECTOR_MODE: trading-lab
+      OFFICE_SERVER_PORT: "8787"
+      OFFICE_CORS_ORIGIN: ${OFFICE_CORS_ORIGIN:-http://localhost:8080}
+      TRADING_LAB_READ_URL: http://ingress:3100
+      TRADING_LAB_READ_TOKEN: ${TRADING_LAB_READ_TOKEN:-}
+      TRADING_LAB_CHAT_URL: http://ingress:3000
+      TRADING_LAB_CHAT_TOKEN: ${TRADING_LAB_CHAT_TOKEN:-}
+      OFFICE_PLATFORM_ENABLED: ${OFFICE_PLATFORM_ENABLED:-false}
+      TRADING_PLATFORM_READ_URL: ${TRADING_PLATFORM_READ_URL:-}
+      TRADING_PLATFORM_READ_TOKEN: ${TRADING_PLATFORM_READ_TOKEN:-}
+    depends_on:
+      ingress:
+        condition: service_healthy
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8787/api/office/agents/statuses').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [trading]
+
+  office-web:
+    build:
+      context: ${TRADING_OFFICE_PATH:-../trading-office}
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_OFFICE_MODE: connected
+        VITE_OFFICE_GATEWAY_URL: ${VITE_OFFICE_GATEWAY_URL:-http://localhost:8787}
+    depends_on:
+      office-server:
+        condition: service_started
+    expose:
+      - "80"
+    networks: [trading]
+
 volumes:
   lab_pg:
+
+networks:
+  trading:
+    driver: bridge
