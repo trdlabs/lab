@@ -25,7 +25,7 @@
     "@mastra/core": "^1.41.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/ai-sdk-provider": "^2.9.1",
-    "@trading-platform/sdk": "file:./vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz",
+    "@trading-platform/sdk": "file:./vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz",
     "bullmq": "^5.21.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",

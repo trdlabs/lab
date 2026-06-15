@@ -27,8 +27,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
       '@trading-platform/sdk':
-        specifier: file:./vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz
-        version: file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
+        specifier: file:./vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz
+        version: file:vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
       bullmq:
         specifier: ^5.21.0
         version: 5.78.0
@@ -771,9 +771,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz':
-    resolution: {integrity: sha512-WmgyPkYYl6EUaPgqzf2xWuP6rCncLkJcWDo2SwTQ6II4O7+3w/vkEikgbQV3jHbc9CxO+a3JgPuJQQ7Ouuskug==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz}
-    version: 0.1.0
+  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz':
+    resolution: {integrity: sha512-Y3/FSJ/yDy8Glg9fvQkVzUUgVWuhCBbgsElRB9Mn6ZZpUO+kbxuCxG0d0UL/28mvHD7FRzgn/ar138Okhhvbjg==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz}
+    version: 0.2.0
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.29.0
     peerDependenciesMeta:
@@ -2499,7 +2499,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.1.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
+  '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.2.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
     dependencies:
       decimal.js: 10.6.0
     optionalDependencies:
