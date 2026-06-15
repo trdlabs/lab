@@ -35,9 +35,9 @@ functions: `submitRun`, `getRunStatus`, `getRunResult`, `awaitCompletion`, `canc
 `readArtifactPage`, `isTerminal`, plus `ControlledRunRequest` / `RunJobHandle` / `RunStatusView` /
 `RunResultSummary` / `ComparisonSummaryDTO`) into trading-lab's vendored SDK via a clean version bump.
 
-**Pure packaging change. Zero trading-lab runtime/behavior change.** The SP-4 mock backtest path,
-the SP-7/7.1/7.1b code, and every existing test stay byte-for-byte unaffected except the SDK
-`file:` path and lockfile.
+**Pure packaging change.** Existing runtime behavior remains unchanged; expected diffs are limited to
+the vendored SDK tarball, the dependency path/lockfile, the vendor README, and the SDK surface proof
+tests. The SP-4 mock backtest path and the SP-7/7.1/7.1b code are not modified.
 
 ## Non-goals
 
