@@ -54,13 +54,16 @@ tests. The SP-4 mock backtest path and the SP-7/7.1/7.1b code are not modified.
    adds a `ModuleSelector` union member (additive, non-breaking). The vendored tarball's internal
    manifest version then matches its filename and the root `package.json` `file:` path — no cosmetic
    mismatch.
-2. **trading-platform bump lands as a direct tiny commit on `main`** (chosen): a clean trading-platform
-   `main` worktree, bump `packages/sdk/package.json` to `0.2.0`, rebuild `packages/sdk/dist`, commit
-   directly (`chore(sdk): bump @trading-platform/sdk to 0.2.0`). The SP-8.1 trading-lab PR records that
-   commit SHA in the vendor README.
-3. **Pack source is pinned and clean.** Pack from trading-platform `main` at the bump commit (verified
-   to be the 037 merge state + the version bump, with the `packages/sdk` subtree carrying nothing from
-   the `036` branch). Record the exact SHA in `vendor/.../README.md`.
+2. **trading-platform bump lands as a direct tiny commit on `main`** (chosen): fast-forward the local
+   trading-platform `main` checkout to `origin/main` (`da4aae3`, the 037 PR #2 merge — a clean
+   fast-forward, 0 local-only commits), bump **both** `packages/sdk/package.json` `version` and the
+   hardcoded `SDK_VERSION` constant (`packages/sdk/src/index.ts:22`) to `0.2.0`, rebuild
+   `packages/sdk/dist`, commit directly (`chore(sdk): bump @trading-platform/sdk to 0.2.0`). The SP-8.1
+   trading-lab PR records that commit SHA in the vendor README.
+3. **Pack source is pinned and clean.** Pack from local `main` at the bump commit — which is
+   `origin/main` (`da4aae3`, includes both feature 035 and 037) + the version bump, carrying nothing
+   from the in-flight `036` branch. Record the exact SHA in `vendor/.../README.md`.
+   `SDK_VERSION` is a hardcoded constant, not derived from `package.json`, so both must move together.
 4. **The SP-8 standalone invariant is re-asserted.** The packed `package.json` must declare no
    `trading-platform`, `trading-bot-platform`, or `workspace:*` dependency (`dependencies: decimal.js`;
    `@modelcontextprotocol/sdk` optional peer). If it does, fix trading-platform feature 034 — never work
@@ -70,12 +73,19 @@ tests. The SP-4 mock backtest path and the SP-7/7.1/7.1b code are not modified.
 
 ### Part A — trading-platform (`main`)
 
-1. Create a clean worktree of trading-platform `main` (the working checkout is on `036`; do not disturb it).
-2. Verify `main`'s `packages/sdk` is at the 037 merge state (`ModuleSelector` has the `submitted_overlay`
-   variant; `submitRun` etc. exported) and free of `036` SDK changes.
-3. Bump `packages/sdk/package.json` `version` to `0.2.0`. Rebuild `packages/sdk/dist`.
-4. Confirm the standalone invariant on the built package (`dependencies` / `peerDependencies`).
-5. Commit to `main`; capture the SHA.
+1. `git -C ../trading-platform fetch`; fast-forward local `main` to `origin/main` (`da4aae3`). The
+   working checkout is on `036`; do this without disturbing it (operate on `main` via a worktree or a
+   stash-free branch switch — the `036` package.json is the only dirty file and is unrelated).
+2. Verify the fast-forwarded `main`'s `packages/sdk/src/agent/dto.ts` has the `submitted_overlay`
+   `ModuleSelector` variant (feature 037 present) and the subtree carries nothing from `036`.
+3. Bump `packages/sdk/package.json` `version` **and** the hardcoded `SDK_VERSION` constant
+   (`packages/sdk/src/index.ts:22`) to `0.2.0`. (`BUILDER_SDK_VERSION` in `src/builder/_vendor/version.ts`
+   tracks the vendored builder-template snapshot, not the agent SDK — leave it untouched.) Rebuild
+   `packages/sdk/dist`.
+4. Confirm the standalone invariant on the built package (`dependencies` / `peerDependencies` declare no
+   `trading-platform` / `trading-bot-platform` / `workspace:*`).
+5. Commit to `main`; capture the SHA. (Pushing `main` to origin is outward-facing — confirm before push;
+   not required for trading-lab to pack from the local build.)
 
 ### Part B — trading-lab (`sp8.1-sdk-refresh-037`, the PR)
 
@@ -116,9 +126,12 @@ with `tsc` passing, the version/standalone invariants hold, and the no-sibling a
 
 ## Risks / mitigations
 
-- **trading-platform `main` has moved past the 037 merge** (tip `1fa3c68`). Mitigation: Part A step 2
-  pins and verifies the exact pack commit's `packages/sdk` subtree before packing; the README records
-  the SHA.
+- **Local trading-platform `main` checkout was stale**, not regressed: it sat at `1fa3c68` (feature 035),
+  7 commits behind `origin/main` (`da4aae3`, the 037 PR #2 merge), 0 local-only — a clean fast-forward.
+  Feature 037 (SDK dto + gateway wiring + verify scripts) is fully intact on `origin/main`. (An earlier
+  "037 looks reverted" read was a reverse-direction diff artifact.) Mitigation: Part A fast-forwards
+  local `main` to `origin/main` and verifies `submitted_overlay` is present before packing; the README
+  records the SHA.
 - **Accidentally packing `036` SDK changes.** Mitigation: pack from a clean `main` worktree, never the
   `036` working checkout; verify the subtree.
 - **`pnpm install` pulls an unexpected transitive change.** Mitigation: review the lockfile diff —
