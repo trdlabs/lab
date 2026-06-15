@@ -10,12 +10,21 @@ function sha256Hex(bytes: string): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** Sorted-key canonical JSON (strings/arrays/objects only) — mirrors the platform's 018 canonicalJson. */
-function canonicalJson(value: unknown): string {
+/** Recursive sorted-key serializer (strings via JSON.stringify) — matches the platform's `serialize`. */
+function serializeCanonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(serializeCanonical).join(',')}]`;
   const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(',')}}`;
+  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${serializeCanonical(obj[k])}`).join(',')}}`;
+}
+
+/**
+ * Canonical JSON — MUST byte-match trading-platform `src/research/backtest/canonical-json.ts`:
+ * sorted-key + a TRAILING "\n". The newline is load-bearing for bundleHash parity; omitting it
+ * makes the gateway recompute a different hash → bundle_integrity_violation.
+ */
+function canonicalJson(value: unknown): string {
+  return `${serializeCanonical(value)}\n`;
 }
 
 /**

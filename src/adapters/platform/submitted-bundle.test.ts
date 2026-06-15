@@ -5,11 +5,15 @@ import { toSubmittedBundle } from './submitted-bundle.ts';
 import { assembleBundle, SDK_CONTRACT_VERSION, type ModuleManifest } from '../../domain/module-bundle.ts';
 
 function sha256Hex(s: string): string { return createHash('sha256').update(s).digest('hex'); }
-function canon(value: unknown): string {
+function serializeCanon(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canon).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(serializeCanon).join(',')}]`;
   const o = value as Record<string, unknown>;
-  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canon(o[k])}`).join(',')}}`;
+  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${serializeCanon(o[k])}`).join(',')}}`;
+}
+// MUST match the platform: sorted-key + trailing "\n" (the newline is load-bearing for bundleHash parity).
+function canon(value: unknown): string {
+  return `${serializeCanon(value)}\n`;
 }
 
 const manifest: ModuleManifest = {
