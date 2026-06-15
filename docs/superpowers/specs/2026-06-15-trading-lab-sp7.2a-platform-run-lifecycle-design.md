@@ -23,16 +23,16 @@ Add the platform run lifecycle to `ResearchPlatformPort` (`submitOverlayRun` / `
 
 ## Key facts (verified)
 
-- SDK `0.3.0` (vendored) exports the lifecycle: `submitRun(transport, ControlledRunRequest)→SubmitRunResult`, `getRunStatus(transport, runId)→RunStatusResult`, `getRunResult(transport, runId)→RunResultResult` (`kind:'summary'|'status'` | error), `awaitCompletion(transport, runId, {maxPolls, pollDelayMs, sleep})→RunStatusView` (polls to terminal; throws on poll-budget exhaustion / status error), `isTerminal`. `ModuleSelector` has the `submitted_overlay` variant.
-- The platform `RunResultSummary` carries `metrics` (baseline) + `comparison: { baseline, variant, deltas }` (`Record<string,number>`), over the **7-metric** set (`pnl`, `sharpe`, `max_drawdown`, `win_rate`, `total_trades`, `profit_factor`, `top_trade_contribution_pct`) — 038. `comparison` keys are the baseline∩variant intersection (038 omit-safe); `profit_factor` is dropped when either side has no losing trades. `evidence.contractVersion` = `'017.2'`.
+- SDK `0.3.0` (vendored) exports the lifecycle: `submitRun(transport, ControlledRunRequest)→SubmitRunResult`, `getRunStatus(transport, runId)→RunStatusResult`, `getRunResult(transport, runId)→RunResultResult` (`{ok:true,kind:'summary',summary}` | `{ok:true,kind:'status',view}` | `{ok:false,error}`), `isTerminal(status)`, and `awaitCompletion` (transport-based; **not** used by 7.2a — see Design). `ModuleSelector` has the `submitted_overlay` variant. `ControlledRunRequest` has **no** `runId` field; `RunJobHandle.runId` is returned by the gateway.
+- The platform `RunResultSummary` carries `metrics` (the **baseline's full** metric set) + `comparison: { baseline, variant, deltas }` (`Record<string,number>`), over the **7-metric** set (`pnl`, `sharpe`, `max_drawdown`, `win_rate`, `total_trades`, `profit_factor`, `top_trade_contribution_pct`) — 038. `comparison` keys are the **baseline∩variant intersection** (038 omit-safe `computeComparison`); `profit_factor` is dropped from `comparison` when either side has no losing trades. `evidence.contractVersion` = `'017.2'`.
 - Lab `ComparisonSummary` (`src/ports/platform-gateway.port.ts`) = `{ baseline: BacktestMetricBlock; variant: BacktestMetricBlock; sampleSize: { baselineTrades; variantTrades }; platformContractVersion: string }`. `BacktestMetricBlock` = `netPnlUsd, netPnlPct, totalTrades, winRate, profitFactor, maxDrawdownPct, expectancyUsd, sharpe, topTradeContributionPct` (all `number`).
-- `ResearchPlatformPort` is a thin SDK boundary (returns SDK `ValidationReport`); the mcp adapter is stateless-over-transport, lazy variant opens a session per call (runtime boot spawns nothing). `toSubmittedBundle` (SP-7.1b) already maps `ModuleBundle`→`SubmittedBundle` with the 017 overlay manifest.
+- `ResearchPlatformPort` is a thin SDK boundary (returns SDK `ValidationReport`); the mcp adapter is stateless-over-transport, lazy variant opens a session per call (runtime boot spawns nothing). `toSubmittedBundle` (SP-7.1b) already maps `ModuleBundle`→`SubmittedBundle` with the 017 overlay manifest. SDK imports are confined to `ports/research-platform.port.ts` + `adapters/platform/` (guard-tested).
 
 ## Design
 
 ### Port surface (`src/ports/research-platform.port.ts`)
 
-Grow `ResearchPlatformPort` (re-export SDK lifecycle types):
+Grow `ResearchPlatformPort` (re-export the SDK lifecycle types **and** `isTerminal`, so non-adapter lab code uses them through the port boundary, not via a direct SDK import):
 
 ```ts
 export interface PlatformRunConfig {
@@ -46,16 +46,19 @@ export interface SubmitOverlayRunOptions {
   readonly baselineModuleRef: Ref;      // strategy:<profileId>@<version>, trusted catalog-resident
   readonly run: PlatformRunConfig;
   readonly correlationId?: string;
+  readonly resumeToken?: string;        // passed through to ControlledRunRequest (idempotent replay; SP-7.2b/7.3)
+  readonly workflowId?: string;         // passed through to ControlledRunRequest
 }
 export interface ResearchPlatformPort {
   // ...existing discover / listDatasets / validateModule...
   submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle>;
   getRunStatus(runId: string): Promise<RunStatusView>;
-  getRunResult(runId: string): Promise<RunResultResult>;   // SDK union: {kind:'summary',summary} | {kind:'status',view}
+  getRunResult(runId: string): Promise<RunResultView>;   // RunResultView = {kind:'summary',summary} | {kind:'status',view} (ok:true union)
 }
+// re-export: RunJobHandle, RunStatusView, RunResultView, Ref, isTerminal
 ```
 
-The methods return SDK types; the `{ok,...}` envelope is unwrapped in the adapter and `ok:false` throws a typed `GatewayRunError` (new, mirrors `GatewayValidationError` in `gateway-errors.ts`).
+The methods return SDK types; the `{ok,...}` envelope is unwrapped in the adapter and `ok:false` throws a typed `GatewayRunError` (new, mirrors `GatewayValidationError` in `gateway-errors.ts`). `getRunResult` returns the `ok:true` union (`summary` | `status`).
 
 ### Request assembly (mcp adapter)
 
@@ -63,35 +66,39 @@ The methods return SDK types; the `{ok,...}` envelope is unwrapped in the adapte
 - `module: { kind: 'submitted_overlay', bundle: toSubmittedBundle(bundle), baselineModuleRef }`
 - `datasetRef: { datasetId }`, `symbols`, `timeframe`, `period`, `seed`, `mode: 'research'`
 - `metrics: ['pnl','sharpe','max_drawdown','win_rate','total_trades','profit_factor','top_trade_contribution_pct']` (so the platform computes the full set)
-- `runId` generated by the adapter; `correlationId` passed through.
+- `correlationId`, optional `resumeToken`, optional `workflowId` passed through.
+- The adapter does **NOT** set `runId` — `ControlledRunRequest` has no `runId` field; the gateway assigns it and returns `handle.runId` (`RunJobHandle.runId`).
 Comparison is overlay-driven (not `runMode`-driven) — `runMode` left unset.
 
-### Orchestration (`src/research/run-backtest.ts` or similar, pure lab logic)
+### Orchestration (`src/research/run-backtest.ts`, pure lab logic)
 
 `runOverlayBacktest(port, bundle, opts, pollOpts)` → `PlatformRunOutcome`:
-1. `handle = await port.submitOverlayRun(bundle, opts)` → emit `platform.run.submitted`.
-2. `view = await awaitCompletion(...)` via the port's transport-less helper — **bounded** (`maxPolls`, `pollDelayMs`); on budget-exhaustion → outcome `{ status: 'pending', runId }` (emit `platform.run.pending`). NOTE: `awaitCompletion` needs the transport; to keep the port the boundary, the bounded poll is implemented in the adapter as a 4th concern OR the orchestration loops `getRunStatus` + `isTerminal` itself (preferred — keeps `awaitCompletion`/transport inside the adapter, orchestration uses the port's `getRunStatus`). The orchestration loops `getRunStatus` up to `maxPolls` with `pollDelayMs`, using SDK `isTerminal`.
-3. On terminal: `res = await port.getRunResult(runId)`. If `res.kind==='summary'` and `summary.status==='completed'` and `summary.comparison` present → `comparison = mapPlatformComparison(summary)`; outcome `{ status:'completed', runId, comparison, artifactIds }` (emit `platform.run.completed`). Else (terminal non-completed / no comparison) → `{ status:'rejected', runId, terminalCode }` (emit `platform.run.rejected`).
+1. `handle = await port.submitOverlayRun(bundle, opts)` → emit `platform.run.submitted` (carry `handle.runId`, `handle.idempotentReplay`).
+2. **Bounded poll:** loop `port.getRunStatus(handle.runId)` up to `maxPolls` times (waiting `pollDelayMs` between calls), checking terminal-ness via `isTerminal` (re-exported from `research-platform.port.ts`). The orchestration does NOT import the SDK and does NOT call `awaitCompletion` (it needs the transport, which stays inside adapters). On poll-budget exhaustion (no terminal status reached) → outcome `{ status: 'pending', runId }` (emit `platform.run.pending`).
+3. On terminal status: `res = await port.getRunResult(runId)`. If `res.kind==='summary'` && `res.summary.status==='completed'` && `res.summary.comparison` present → `comparison = mapPlatformComparison(res.summary)`; outcome `{ status:'completed', runId, comparison, artifactIds }` (emit `platform.run.completed`). Else (terminal non-completed / `kind:'status'` / no comparison) → `{ status:'rejected', runId, terminalCode }` (emit `platform.run.rejected`).
 - `artifactIds = summary.artifactRefs.map(r => r.artifactId)` (IDs only; no artifact reads).
 
 ### Mapper (`src/domain/platform-comparison.ts`, pure)
 
-`mapPlatformComparison(summary: RunResultSummary): ComparisonSummary`:
-- For each side (`comparison.baseline`, `comparison.variant`) build a `BacktestMetricBlock`:
-  - `netPnlUsd = pnl`
-  - `maxDrawdownPct = max_drawdown * 100` (platform fraction → lab percent)
-  - `winRate = win_rate`; `sharpe = sharpe`; `totalTrades = total_trades`; `topTradeContributionPct = top_trade_contribution_pct`
-  - `profitFactor = profit_factor` if present, else `NO_LOSS_PROFIT_FACTOR` (documented sentinel = a high finite constant that passes the evaluator PF gate; "no losing trades" is a strong edge)
-  - `netPnlPct = pnl / INITIAL_EQUITY * 100` where `INITIAL_EQUITY = 10_000` (documented coupling to the platform constant)
-  - `expectancyUsd = totalTrades > 0 ? netPnlUsd / totalTrades : 0`
-- `sampleSize = { baselineTrades: baseline.total_trades, variantTrades: variant.total_trades }`
-- `platformContractVersion = summary.evidence.contractVersion`
-- A required metric (`pnl`/`max_drawdown`/`win_rate`/`sharpe`/`total_trades`/`top_trade_contribution_pct`) missing from a side → `MetricMappingError` (only `profit_factor` is legitimately omittable). Constants (`NO_LOSS_PROFIT_FACTOR`, `INITIAL_EQUITY`) + the 7 metric names live here.
+`mapPlatformComparison(summary: RunResultSummary): ComparisonSummary` builds a `BacktestMetricBlock` for each side from `summary.comparison.baseline` / `summary.comparison.variant`:
+- `netPnlUsd = pnl`
+- `maxDrawdownPct = max_drawdown * 100` (platform fraction → lab percent)
+- `winRate = win_rate`; `sharpe = sharpe`; `totalTrades = total_trades`; `topTradeContributionPct = top_trade_contribution_pct`
+- `netPnlPct = pnl / INITIAL_EQUITY * 100` where `INITIAL_EQUITY = 10_000` (documented coupling to the platform constant; unused by the evaluator)
+- `expectancyUsd = totalTrades > 0 ? netPnlUsd / totalTrades : 0`
+- **`profitFactor` — three-case rule** (do NOT blind-sentinel both sides; `comparison` carries only the baseline∩variant intersection, while `summary.metrics` is the **baseline's full** metric set):
+  1. `comparison.baseline.profit_factor` AND `comparison.variant.profit_factor` both present → map both directly.
+  2. `comparison` lacks `profit_factor` but `summary.metrics.profit_factor` present → `baseline.profitFactor = summary.metrics.profit_factor` (baseline had losses → finite PF); `variant.profitFactor = NO_LOSS_PROFIT_FACTOR` (variant omitted PF → no losing trades).
+  3. `comparison` lacks `profit_factor` AND `summary.metrics.profit_factor` absent → **fail-closed** `MetricMappingError` code `ambiguous_profit_factor` (baseline had no losses; the current surface cannot tell whether the variant also had no losses or has a finite PF hidden by the common-key intersection).
+
+`sampleSize = { baselineTrades: comparison.baseline.total_trades, variantTrades: comparison.variant.total_trades }`. `platformContractVersion = summary.evidence.contractVersion`.
+
+Any of the other 6 metrics (`pnl`/`max_drawdown`/`win_rate`/`sharpe`/`total_trades`/`top_trade_contribution_pct`) missing from a side → `MetricMappingError` code `missing_metric`. `NO_LOSS_PROFIT_FACTOR` (a documented high finite sentinel that passes the evaluator PF gate), `INITIAL_EQUITY`, the error codes, and the 7 metric names live in this module.
 
 ### Adapters
 
-- `MockResearchPlatformAdapter`: canned `RunJobHandle` + a completed `RunResultSummary` with a baseline-vs-variant comparison over the 7 metrics (configurable), so the probe + tests run fully offline.
-- `McpResearchPlatformAdapter` / `LazyMcpResearchPlatformAdapter`: wrap the SDK `submitRun`/`getRunStatus`/`getRunResult` + `awaitCompletion` over the live transport; lazy opens a session per call.
+- `MockResearchPlatformAdapter`: canned `RunJobHandle` + a completed `RunResultSummary` with a baseline-vs-variant comparison over the 7 metrics (configurable, incl. the `profit_factor`-omitted shapes), so the probe + tests run fully offline.
+- `McpResearchPlatformAdapter` / `LazyMcpResearchPlatformAdapter`: wrap the SDK `submitRun`/`getRunStatus`/`getRunResult` over the live transport (unwrap `{ok,...}`, throw `GatewayRunError`); lazy opens a session per call.
 
 ### Probe + CLI
 
@@ -103,10 +110,11 @@ Comparison is overlay-driven (not `runMode`-driven) — `runMode` left unset.
 
 ## Acceptance
 
-- **Offline (mock):** `platform:run` against the mock adapter produces a `completed` outcome with a mapped `ComparisonSummary` (9-field `BacktestMetricBlock` baseline+variant, `sampleSize`, `platformContractVersion`); the 7→9 mapping + sentinel/derive verified by unit tests (incl. the `profit_factor`-omitted case → `NO_LOSS_PROFIT_FACTOR`, and `max_drawdown`×100).
-- **Bounded poll:** poll-budget exhaustion → `pending` outcome (no throw); terminal-non-completed → `rejected`.
-- **Errors:** `ok:false` envelopes → `GatewayRunError`; a missing required metric → `MetricMappingError`.
-- **Boundary:** `sdk-import-boundary.guard.test.ts` still passes (SDK import confined to `ports/research-platform.port.ts` + `adapters/platform/`). SP-4 path, `hypothesisBuildHandler`, evaluator, DB — zero diff.
+- **Offline (mock):** `platform:run` against the mock adapter produces a `completed` outcome with a mapped `ComparisonSummary` (9-field `BacktestMetricBlock` baseline+variant, `sampleSize`, `platformContractVersion`); the 7→9 mapping + derivations + the three `profit_factor` cases verified by unit tests:
+  - both-present → both mapped; `comparison`-omitted-but-`summary.metrics.profit_factor`-present → baseline real / variant `NO_LOSS_PROFIT_FACTOR`; both-absent → `MetricMappingError` `ambiguous_profit_factor`; and `max_drawdown`×100.
+- **Bounded poll:** `getRunStatus` loop reaching `maxPolls` without a terminal status → `pending` (no throw); terminal-non-completed → `rejected`.
+- **Errors:** `ok:false` envelopes → `GatewayRunError`; a missing required metric → `MetricMappingError` (`missing_metric` / `ambiguous_profit_factor`).
+- **Boundary:** `sdk-import-boundary.guard.test.ts` still passes (SDK import — incl. `isTerminal` — confined to `ports/research-platform.port.ts` + `adapters/platform/`). SP-4 path, `hypothesisBuildHandler`, evaluator, DB — zero diff.
 - **Suite + typecheck green** (≥ current baseline + new tests).
 - **Live round-trip = gateway-pending** (like SP-7.1): real `platform:run` against a 037/038 gateway + a trusted catalog-resident baseline strategy is recorded as pending (dev env has no `TRADING_PLATFORM_GATEWAY_COMMAND` / canonical Postgres); the offline-faithful mock acceptance is the bar for this slice.
 
@@ -114,7 +122,7 @@ Comparison is overlay-driven (not `runMode`-driven) — `runMode` left unset.
 
 ## Risks
 
-- `awaitCompletion` needs the transport → the bounded poll loop lives in the adapter (or orchestration loops `getRunStatus`+`isTerminal`); keep the transport out of the orchestration layer. Decided: orchestration loops `getRunStatus` via the port.
-- Sentinel `NO_LOSS_PROFIT_FACTOR` is a magic value → name + document it; it only appears in the rare no-losing-trades case.
-- `INITIAL_EQUITY=10000` couples the lab to a platform constant → documented; `netPnlPct` is unused by the evaluator, so low risk.
+- **Bounded poll:** orchestration loops `port.getRunStatus()` + `isTerminal` (re-exported from the port); it does NOT call SDK `awaitCompletion` (transport stays inside adapters). Keeps SDK imports confined to the port file + adapters (guard-tested).
+- **`profit_factor` ambiguity:** the common-key `comparison` can hide a finite variant PF; the three-case rule fails closed (`ambiguous_profit_factor`) rather than guess. Surfaces only in the rare no-losing-trades edge.
+- Sentinel `NO_LOSS_PROFIT_FACTOR` + `INITIAL_EQUITY=10000` are documented constants; `netPnlPct` is unused by the evaluator, so the coupling is low-risk.
 - Trusted baseline precondition (`strategy:<profileId>` catalog-resident) is a live-gateway concern → surfaces only on the live round-trip (gateway-pending).
