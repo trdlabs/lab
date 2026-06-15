@@ -9,6 +9,8 @@ import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { BuilderInput, BuilderOutput, BuilderPort } from '../../ports/builder.port.ts';
 import type { PlatformGatewayPort } from '../../ports/platform-gateway.port.ts';
 import { MockPlatformGatewayAdapter } from '../../adapters/platform/mock-platform-gateway.adapter.ts';
+import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
+import type { ModuleBundle } from '../../domain/module-bundle.ts';
 
 function profile(): StrategyProfile {
   const now = '2026-01-01T00:00:00Z';
@@ -58,6 +60,15 @@ describe('hypothesisBuildHandler', () => {
     for (const t of ['build.started', 'builder.completed', 'build.validated', 'artifact.stored', 'backtest.submitted', 'backtest.completed', 'evaluation.completed']) {
       expect(evTypes).toContain(t);
     }
+  });
+
+  it('attaches overlayMeta (derived from hypothesis+profile) to the built bundle artifact', async () => {
+    const s = await seeded();
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    const builds = await s.builds.listByHypothesis('h1');
+    const ref = builds[0]!.bundleArtifactRef!;
+    const stored = JSON.parse((await s.artifacts.get(ref)).toString('utf8')) as ModuleBundle;
+    expect(stored.overlayMeta).toEqual(deriveOverlayManifestMeta(hypothesis(), profile(), stored.manifest));
   });
 
   it('same hypothesis + params + bundle does not re-submit (idempotent reuse)', async () => {

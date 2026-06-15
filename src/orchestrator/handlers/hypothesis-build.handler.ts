@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { assembleBundle, SDK_CONTRACT_VERSION, MODULE_BUNDLE_CONTRACT_VERSION } from '../../domain/module-bundle.ts';
+import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
 import { validateBundle } from '../../validation/build-validator.ts';
 import { evaluateBacktest } from '../../validation/evaluator.ts';
 import { normalizeFeature, LAB_FEATURE_CATALOG } from '../../domain/hypothesis-rules.ts';
@@ -75,7 +76,8 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   }
   await services.events.append(event(task.id, 'builder.completed', { buildId }));
 
-  const bundle = assembleBundle(out.manifest, out.files);
+  const overlayMeta = deriveOverlayManifestMeta(hypothesis, profile, out.manifest);
+  const bundle = assembleBundle(out.manifest, out.files, overlayMeta);
   const allowedCapabilities = new Set<string>([...profile.requiredMarketFeatures.map(normalizeFeature), ...LAB_FEATURE_CATALOG]);
   const validation = validateBundle(bundle, { allowedImports: new Set<string>(), allowedCapabilities });
   if (validation.status === 'build_failed') {
