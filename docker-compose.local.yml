@@ -1,0 +1,35 @@
+# Local overlay — developer machine. Publishes on 127.0.0.1; private source ON by default (URL only).
+services:
+  office-web:
+    ports:
+      - "127.0.0.1:${OFFICE_WEB_PORT:-8080}:80"
+    restart: "no"
+  office-server:
+    ports:
+      - "127.0.0.1:${OFFICE_SERVER_PORT:-8787}:8787"
+    restart: "no"
+    environment:
+      OFFICE_PLATFORM_ENABLED: ${OFFICE_PLATFORM_ENABLED:-true}
+    # Reach a trading-platform Ops Read API running on the host (Linux/WSL2 needs host-gateway).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  ingress:
+    restart: "no"
+  worker:
+    restart: "no"
+
+  # OPTIONAL filesystem validation of the private runtime checkout.
+  # NOT part of the default command. Enable explicitly: --profile private-path-check
+  # Fails immediately if ${PRIVATE_RUNTIME_PATH} is absent (create_host_path:false) or empty.
+  private-path-check:
+    image: busybox:1.36
+    profiles: ["private-path-check"]
+    volumes:
+      - type: bind
+        source: ${PRIVATE_RUNTIME_PATH:-../trading-platform}
+        target: /private-runtime
+        read_only: true
+        bind:
+          create_host_path: false
+    command: ["sh", "-c", "test -n \"$(ls -A /private-runtime 2>/dev/null)\" || (echo 'PRIVATE_RUNTIME_PATH missing or empty' >&2; exit 1)"]
+    networks: [trading]

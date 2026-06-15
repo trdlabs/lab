@@ -1,0 +1,10 @@
+node_modules
+.git
+.artifacts
+.artifacts-test
+dist
+assets
+.env
+.env.*
+docs
+*.md

@@ -5,3 +5,8 @@ dist
 *.local
 .artifacts
 .artifacts-test
+
+# Docker orchestration — real env files (only *.example are committed)
+.env.demo
+.env.local
+.env.vps
