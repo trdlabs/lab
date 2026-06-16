@@ -17,7 +17,7 @@
     "platform:validate": "node --experimental-strip-types scripts/platform-validate.ts",
     "platform:run": "node --experimental-strip-types scripts/platform-run.ts",
     "platform:resume": "node --experimental-strip-types scripts/platform-resume.ts",
-    "analyst:eval": "node --experimental-strip-types scripts/strategy-analyst-eval.ts",
+    "analyst:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/strategy-analyst-eval.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
