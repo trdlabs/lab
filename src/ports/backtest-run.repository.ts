@@ -11,4 +11,6 @@ export interface BacktestRunRepository {
   /** Identity lookup powering pre-submit idempotency (matches the DB unique key). */
   findByIdentity(hypothesisId: string, paramsHash: string, bundleHash: string): Promise<BacktestRun | null>;
   listByHypothesis(hypothesisId: string): Promise<BacktestRun[]>;
+  /** Pending platform-backed runs eligible for resume: status='submitted' AND backend='research_platform'. */
+  listResumablePlatformRuns(): Promise<BacktestRun[]>;
 }

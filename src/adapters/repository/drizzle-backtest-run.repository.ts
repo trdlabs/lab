@@ -74,6 +74,12 @@ export class DrizzleBacktestRunRepository implements BacktestRunRepository {
     return rows[0] ? toDomain(rows[0]) : null;
   }
 
+  async listResumablePlatformRuns(): Promise<BacktestRun[]> {
+    const rows = await this.db.select().from(backtestRun)
+      .where(and(eq(backtestRun.status, 'submitted'), eq(backtestRun.backend, 'research_platform')));
+    return rows.map(toDomain);
+  }
+
   async listByHypothesis(hypothesisId: string): Promise<BacktestRun[]> {
     const rows = await this.db.select().from(backtestRun).where(eq(backtestRun.hypothesisId, hypothesisId));
     return rows.map(toDomain);

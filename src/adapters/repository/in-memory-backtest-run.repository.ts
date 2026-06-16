@@ -43,6 +43,12 @@ export class InMemoryBacktestRunRepository implements BacktestRunRepository {
     return null;
   }
 
+  async listResumablePlatformRuns(): Promise<BacktestRun[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.status === 'submitted' && r.backend === 'research_platform')
+      .map((r) => ({ ...r }));
+  }
+
   async listByHypothesis(hypothesisId: string): Promise<BacktestRun[]> {
     return [...this.byId.values()].filter((r) => r.hypothesisId === hypothesisId);
   }

@@ -91,4 +91,14 @@ describe('InMemoryBacktestRunRepository', () => {
     await repo.createSubmitted({ ...run('rt1'), backend: 'research_platform', taskId: 't-123' });
     expect((await repo.findById('rt1'))?.taskId).toBe('t-123');
   });
+
+  it('listResumablePlatformRuns returns only submitted research_platform runs', async () => {
+    const repo = new InMemoryBacktestRunRepository();
+    await repo.createSubmitted({ ...run('a'), backend: 'research_platform', taskId: 't1' });                       // submitted + research_platform -> yes
+    await repo.createSubmitted({ ...run('b', { bundleHash: 'sha256:b2' }), backend: 'sp4_mock' });                  // sp4_mock -> no
+    await repo.createSubmitted({ ...run('c', { bundleHash: 'sha256:b3' }), backend: 'research_platform', taskId: 't1' });
+    await repo.markEvaluated('c');                                                                                  // evaluated -> no
+    const resumable = await repo.listResumablePlatformRuns();
+    expect(resumable.map((r) => r.id)).toEqual(['a']);
+  });
 });
