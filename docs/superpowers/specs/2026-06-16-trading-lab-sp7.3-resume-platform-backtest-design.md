@@ -139,10 +139,11 @@ export type ResumeOutcome =
 Flow:
 
 ```
-// Guard #1 (start): re-read run; require status==='submitted'; require no Evaluation.
+// Guard #1 (start): re-read run; Evaluation-exists check FIRST, then require status==='submitted'.
 fresh = backtests.findById(run.id)
-if (!fresh || fresh.status !== 'submitted')          -> skip 'not_resumable'
+if (!fresh)                                           -> skip 'not_resumable'
 if (evaluations.listByBacktestRun(run.id).length)    -> skip 'already_evaluated'
+if (fresh.status !== 'submitted')                    -> skip 'not_resumable'
 
 // Recover task for event continuity.
 if (!fresh.taskId)                                    -> skip 'missing_task_id'
@@ -158,10 +159,11 @@ if (outcome.status === 'pending'):
     return pending                      // run stays 'submitted'; next probe retries
 
 // Guard #2 (immediately before applying the terminal outcome / finalize):
-// re-read run; require still status==='submitted'; require no Evaluation.
+// re-read run; Evaluation-exists check FIRST, then require still status==='submitted'.
 again = backtests.findById(run.id)
-if (!again || again.status !== 'submitted')          -> skip 'not_resumable'
+if (!again)                                           -> skip 'not_resumable'
 if (evaluations.listByBacktestRun(run.id).length)    -> skip 'already_evaluated'
+if (again.status !== 'submitted')                    -> skip 'not_resumable'
 
 result = applyPlatformTerminalOutcome(services, task, { runId, hypothesisId: fresh.hypothesisId }, outcome)
 if (result.kind === 'completed'):
@@ -170,7 +172,7 @@ if (result.kind === 'completed'):
 return failed(result.reason)
 ```
 
-**Double idempotency check (per review):** Guard #1 at entry (before any work / events) and Guard #2 immediately before the terminal transition (after the completed/rejected poll, before `finalizeBacktestCompletion` or `markRejected`/`markFailed`). Either guard failing → clean `skipped` return, no events, no state change. The guards live in the core so a future callback handed a **stale** `BacktestRun` is safe. (Guard #2 wraps the rejected transition too, which is strictly safer than the minimum asked.)
+**Double idempotency check (per review):** Each guard re-reads the run, checks `evaluations.listByBacktestRun` **first** (→ `already_evaluated`), then requires `status==='submitted'` (→ `not_resumable`). Ordering matters: a second resume of a successfully finalized run (status `evaluated` **and** an `Evaluation` present) must return `already_evaluated`, not `not_resumable`. **Guard #1** runs at entry, before any events — its failure emits **nothing**. **Guard #2** runs immediately before the terminal transition (after the completed/rejected poll, before `finalizeBacktestCompletion` / `markRejected` / `markFailed`); because it fires *after* `backtest.resume.started` was already emitted, its failure emits **no additional (terminal) events** — only the pre-existing `started` event remains, and there is no state change. The guards live in the core so a future callback handed a **stale** `BacktestRun` is safe. (Guard #2 wraps the rejected transition too, strictly safer than the minimum asked.)
 
 ---
 
@@ -200,7 +202,7 @@ Per-run error isolation matters: `getRunStatus` raising a `GatewayRunError` for 
 ## 9. Idempotency & concurrency — honest scope
 
 **Guaranteed by SP-7.3:**
-- **Sequential re-runs** of the probe are safe: finalized/failed runs leave `status='submitted'`, so `listResumablePlatformRuns` never re-selects them.
+- **Sequential re-runs** of the probe are safe: finalized/failed runs leave `status != 'submitted'` (only pending runs stay `submitted`; `evaluated` / `rejected` / `failed` do not), so `listResumablePlatformRuns` never re-selects them.
 - **Stale single-delivery callback safety:** the double guard (re-read status + empty-`Evaluation` check at entry and pre-finalize) means a core invocation handed an out-of-date run cannot double-finalize.
 - **Exactly one `Evaluation`** per completed run in the sequential model: the completion tail (`finalizeBacktestCompletion`) transitions `submitted → completed → evaluated`; `evaluations.listByBacktestRun` is the explicit duplicate guard.
 
@@ -273,7 +275,7 @@ Core (Vitest, in-memory repos + fake `ResearchPlatformPort`):
 - **pending** — re-poll pending → run stays `submitted`, `resume.pending` emitted, no `Evaluation`.
 - **rejected** — `markRejected`, `backtest.failed { platform_rejected }`, no `Evaluation`.
 - **metric mapping error** — `markFailed`, `backtest.failed { result_invalid }`, no `Evaluation`.
-- **idempotency** — second `resumePlatformRun` on the same run → `skipped 'already_evaluated'`, no duplicate `Evaluation`; a run already `evaluated` at entry → `skipped`.
+- **idempotency** — second `resumePlatformRun` after a successful finalize (status `evaluated` **and** an `Evaluation` present) → `skipped 'already_evaluated'` (the Evaluation-exists check precedes the status check), no duplicate `Evaluation`.
 - **task recovery** — `missing_task_id` (null `taskId`) and `task_not_found` → clean `skipped`, no events.
 - **batch** — `resumePendingPlatformRuns` selects only `submitted` + `research_platform`; one run throwing (transport) is isolated into `errors[]` while others proceed; `counts` correct.
 
