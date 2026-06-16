@@ -7,8 +7,8 @@ export type Direction = (typeof DIRECTIONS)[number];
 
 export const StrategyParameterSchema = z.object({
   name: z.string().min(1),
-  value: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
-  unit: z.string().nullish(),
+  value: z.union([z.string(), z.number(), z.boolean(), z.null()]).nullable().default(null),
+  unit: z.string().nullable().default(null),
   description: z.string(),
   tunable: z.boolean(),
 });
@@ -24,9 +24,9 @@ export const AnalystProfileOutputSchema = z.object({
   timeframes: z.array(z.string()).describe('Timeframes used, e.g. 5m, 1h'),
   indicators: z.array(z.string()),
   parameters: z.array(StrategyParameterSchema),
-  watchLifecycleSummary: z.string().nullish(),
-  positionManagementSummary: z.string().nullish(),
-  riskManagementSummary: z.string().nullish(),
+  watchLifecycleSummary: z.string().nullable().default(null),
+  positionManagementSummary: z.string().nullable().default(null),
+  riskManagementSummary: z.string().nullable().default(null),
   runnerOwnedAuthorities: z.array(z.string()).describe('Concerns owned by runner/platform: risk sizing, fills, execution'),
   confidence: z.number().min(0).max(1),
   unknowns: z.array(z.string()),
