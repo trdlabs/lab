@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  BotResultsReadPort, BotRunsFilter, BotRunRecord, ClosedTrade, RunSummary,
+  BotResultsReadPort,
+  BotRunsFilter,
+  BotRunRecord,
+  ClosedTrade,
+  RunSummary,
+  EventsPage,
+  DecisionsPage,
 } from '../../ports/bot-results-read.port.ts';
 
 /** Reads Surface-A-shaped JSON fixtures (port-shaped arrays/object) from a directory. Dev/offline use. */
@@ -12,6 +18,10 @@ export class FixtureBotResultsAdapter implements BotResultsReadPort {
     return JSON.parse(readFileSync(join(this.dir, file), 'utf8')) as T;
   }
 
+  private pageFile(prefix: 'events' | 'decisions', runId: string, cursor?: string): string {
+    return cursor ? `${prefix}-${runId}@${cursor}.json` : `${prefix}-${runId}.json`;
+  }
+
   async listBotRuns(_filter?: BotRunsFilter): Promise<readonly BotRunRecord[]> {
     return this.read<BotRunRecord[]>('runs.json');
   }
@@ -20,5 +30,11 @@ export class FixtureBotResultsAdapter implements BotResultsReadPort {
   }
   async getRunSummary(_runId: string): Promise<RunSummary> {
     return this.read<RunSummary>('summary.json');
+  }
+  async getOperationalEvents(runId: string, cursor?: string): Promise<EventsPage> {
+    return this.read<EventsPage>(this.pageFile('events', runId, cursor));
+  }
+  async getDecisionLog(runId: string, cursor?: string): Promise<DecisionsPage> {
+    return this.read<DecisionsPage>(this.pageFile('decisions', runId, cursor));
   }
 }
