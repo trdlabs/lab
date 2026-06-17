@@ -65,7 +65,7 @@ try {
     trades: await services.botResults.getClosedTrades(run.runId),
   })));
 } catch (err) {
-  await services.events.append(event(task.id, 'researcher.bot_results_unavailable', { reason: String(err) }));
+  await services.events.append(event(task.id, 'researcher.bot_results_unavailable', { error: errMsg(err) }));
 }
 // then: services.researcher.propose({ profile, marketContext, marketRegime, similarHypotheses, botResults, maxHypotheses: effectiveMax })
 ```
