@@ -2,7 +2,7 @@
   {
     "id": "strategy-onboard-ru",
     "lang": "ru",
-    "message": "заведи стратегию: лонг при росте open interest и цене выше VWAP",
+    "message": "подключи мою стратегию к боту: лонг при росте open interest и цене выше VWAP",
     "expect": { "intent": "strategy.onboard", "requestedOutcome": "onboard", "hasStrategyText": true }
   },
   {

@@ -69,6 +69,17 @@ breaks.
 | `openrouter/x-ai/grok-4.3` | quality ceiling (current StrategyAnalyst default) |
 | `openrouter/google/gemini-3.5-flash` | quality ceiling (#1 OpenRouter intelligence) |
 
+## Results (June 2026)
+
+Two paid rounds over the cheap class:
+
+- **Winner — `openrouter/google/gemini-3.1-flash-lite-preview`**: intentAccuracy **0.90**, schemaValidRate **1.00**, payloadAccuracy **0.917**. Cheap and fast — the pick for chat intent classification.
+- **`openrouter/google/gemini-3.5-flash` (stable, non-preview)**: essentially identical (payloadAccuracy 0.833); a fine fallback.
+- **`openrouter/qwen/qwen3.6-flash` — eliminated**: 0/20 schemaValidRate. It invents its own intent labels, so almost nothing survives the strict ChatIntentSchema gate.
+- **`openrouter/x-ai/grok-4.1-fast` — eliminated**: 0/20 schemaValidRate. The fast variant immediately refuses structured output through the current path.
+
+Note that **intentAccuracy and schemaValidRate are measured separately**: a model can recognize the right intent (counts toward intentAccuracy) while still emitting an object that fails `.strict()` (0 schemaValidRate). The eliminated models failed on schema validity, not necessarily on intent recognition — but a 0% schema-valid model is unusable in prod, where the guard re-validates against ChatIntentSchema.
+
 ## Files
 
 `types.ts` (contracts) · `fixtures.ts` + `__fixtures__/*.json` (labelled dataset) · `scoring.ts`
