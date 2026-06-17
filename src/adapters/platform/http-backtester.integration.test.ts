@@ -1,0 +1,53 @@
+// Opt-in integration: drives a REAL trading-backtester instance through the adapter + client with a
+// strategy-signals bundle (what the backtester executes today). Skips (does not fail) unless
+// RUN_BACKTESTER_INTEGRATION=true and BACKTESTER_API_URL is set — mirrors the pg/Docker gating in the
+// backtester repo. Needs the backtester running with its Docker sandbox available.
+
+import { describe, it, expect } from 'vitest';
+import { BacktesterClient } from '@trading-backtester/client';
+import type { ModuleBundle } from '../../domain/module-bundle.ts';
+import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';
+
+const enabled = process.env.RUN_BACKTESTER_INTEGRATION === 'true' && !!process.env.BACKTESTER_API_URL;
+const TERMINAL = new Set(['completed', 'failed', 'canceled', 'expired', 'timed_out']);
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+const strategyBundle: ModuleBundle = {
+  manifest: { moduleId: 'momentum', moduleKind: 'hypothesis_overlay', appliesTo: 'long', entry: 'module.mjs', exports: ['signals'], capabilities: [], sdkContractVersion: 'builder-sdk-v0' },
+  files: { 'module.mjs': 'export function signals(candles){ return candles.map((_,i)=> i>=2 && candles[i-1].close>candles[i-2].close); }' },
+  bundleHash: 'sha256:integration',
+  bundleContractVersion: 'module-bundle-v1',
+};
+
+describe.skipIf(!enabled)('HttpBacktesterAdapter integration (real backtester)', () => {
+  it('submits a strategy-signals bundle and reads a completed result', async () => {
+    const adapter = new HttpBacktesterAdapter(
+      new BacktesterClient({ baseUrl: process.env.BACKTESTER_API_URL as string, token: process.env.BACKTESTER_API_TOKEN ?? '' }),
+    );
+
+    const handle = await adapter.submitOverlayRun(strategyBundle, {
+      baselineModuleRef: { id: 'baseline', version: 'v1' },
+      run: {
+        datasetId: 'smoke-btc-1m',
+        symbols: ['BTCUSDT'],
+        timeframe: '1m',
+        period: { from: '2023-11-14T00:00:00.000Z', to: '2023-11-15T00:00:00.000Z' },
+        seed: 42,
+      },
+    });
+
+    let view = await adapter.getRunStatus(handle.runId);
+    for (let i = 0; i < 120 && !TERMINAL.has(view.status); i += 1) {
+      await sleep(500);
+      view = await adapter.getRunStatus(handle.runId);
+    }
+    expect(view.status).toBe('completed');
+
+    const result = await adapter.getRunResult(handle.runId);
+    expect(result.kind).toBe('summary');
+    if (result.kind === 'summary') {
+      expect(result.summary.runKind).toBe('baseline-only');
+      expect(result.summary.metrics.total_bars).toBeGreaterThan(0);
+    }
+  }, 120_000);
+});

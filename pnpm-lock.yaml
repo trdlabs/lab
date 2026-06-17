@@ -26,6 +26,9 @@ importers:
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
+      '@trading-backtester/client':
+        specifier: file:../trading-backtester/packages/client
+        version: file:../trading-backtester/packages/client
       '@trading-platform/sdk':
         specifier: file:./vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz
         version: file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))
@@ -770,6 +773,9 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@trading-backtester/client@file:../trading-backtester/packages/client':
+    resolution: {directory: ../trading-backtester/packages/client, type: directory}
 
   '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz':
     resolution: {integrity: sha512-d7YME49uLbX7CGjZPou3gUdjpv1THM4V1fPXP7XSeol3sbsvV5TGLhFlcktjnMVyxhovhIDQexOKRhYeSnu7eQ==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz}
@@ -2498,6 +2504,8 @@ snapshots:
       escape-string-regexp: 5.0.0
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@trading-backtester/client@file:../trading-backtester/packages/client': {}
 
   '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz(@modelcontextprotocol/sdk@1.29.0(zod@3.25.76))':
     dependencies:

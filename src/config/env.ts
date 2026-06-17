@@ -12,7 +12,9 @@ export interface Env {
   TRADING_LAB_CHAT_TOKEN?: string;
   TRADING_LAB_TASK_TOKEN?: string;
   TRADING_LAB_CALLBACK_TOKEN?: string;
-  TRADING_PLATFORM_INTEGRATION: 'mock' | 'mcp';
+  TRADING_PLATFORM_INTEGRATION: 'mock' | 'mcp' | 'backtester';
+  BACKTESTER_API_URL?: string;
+  BACKTESTER_API_TOKEN?: string;
   BACKTEST_BACKEND: 'sp4_mock' | 'research_platform';
   PLATFORM_RUN_MAX_POLLS: number;
   PLATFORM_RUN_POLL_DELAY_MS: number;
@@ -76,7 +78,14 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     TRADING_LAB_CHAT_TOKEN: source.TRADING_LAB_CHAT_TOKEN,
     TRADING_LAB_TASK_TOKEN: source.TRADING_LAB_TASK_TOKEN,
     TRADING_LAB_CALLBACK_TOKEN: source.TRADING_LAB_CALLBACK_TOKEN,
-    TRADING_PLATFORM_INTEGRATION: source.TRADING_PLATFORM_INTEGRATION === 'mcp' ? 'mcp' : 'mock',
+    TRADING_PLATFORM_INTEGRATION:
+      source.TRADING_PLATFORM_INTEGRATION === 'mcp'
+        ? 'mcp'
+        : source.TRADING_PLATFORM_INTEGRATION === 'backtester'
+          ? 'backtester'
+          : 'mock',
+    BACKTESTER_API_URL: source.BACKTESTER_API_URL,
+    BACKTESTER_API_TOKEN: source.BACKTESTER_API_TOKEN,
     BACKTEST_BACKEND: source.BACKTEST_BACKEND === 'research_platform' ? 'research_platform' : 'sp4_mock',
     PLATFORM_RUN_MAX_POLLS: parsePositiveInt(source.PLATFORM_RUN_MAX_POLLS, 30),
     PLATFORM_RUN_POLL_DELAY_MS: parsePositiveInt(source.PLATFORM_RUN_POLL_DELAY_MS, 2000),
