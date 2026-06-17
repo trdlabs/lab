@@ -19,10 +19,10 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/experiments/intent-classifier/fixtures.ts` | cases, fingerprintCases |
-| `src/experiments/intent-classifier/report.ts` | lastRunByModel, ch, tick, cases, s, ... |
+| `src/experiments/intent-classifier/fixtures.ts` | fingerprintCases, cases |
+| `src/experiments/intent-classifier/report.ts` | schemaInvalidButRight, cases, cases, c, r, ... |
 | `src/experiments/intent-classifier/scoring.test.ts` | over, evalCase |
-| `src/experiments/intent-classifier/types.ts` | ManifestMeta, EvalCase, EvalRunResult |
+| `src/experiments/intent-classifier/types.ts` | EvalCase, EvalRunResult, ManifestMeta |
 
 ## Entry Points
 
@@ -35,7 +35,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-156"
+get_communities with id: "community-153"
 smart_context with task: "understand experiments/intent-classifier · renderReport", format: "gcx"
 find_usages with id: "src/experiments/intent-classifier/report.ts::renderReport", format: "gcx"
 ```

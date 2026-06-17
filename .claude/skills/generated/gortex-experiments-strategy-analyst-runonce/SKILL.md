@@ -18,8 +18,8 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/experiments/strategy-analyst/eval-harness.test.ts` | _input, analystFor, m, m, providerOf, ... |
-| `src/experiments/strategy-analyst/eval-harness.ts` | provider, err, r, err, classifyError, ... |
+| `src/experiments/strategy-analyst/eval-harness.test.ts` | m, m, _input, analystFor, clock, ... |
+| `src/experiments/strategy-analyst/eval-harness.ts` | RunEvalDeps, perModel, raw, judgeErr, type, ... |
 | `src/experiments/strategy-analyst/types.ts` | CandidateError |
 
 ## Entry Points
@@ -34,7 +34,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-169"
+get_communities with id: "community-166"
 smart_context with task: "understand experiments/strategy-analyst · runOnce", format: "gcx"
 find_usages with id: "src/experiments/strategy-analyst/eval-harness.ts::runEval", format: "gcx"
 ```

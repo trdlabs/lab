@@ -32,3 +32,11 @@ export interface BotResultsReadPort {
   getClosedTrades(runId: string): Promise<readonly ClosedTrade[]>;
   getRunSummary(runId: string): Promise<RunSummary>;
 }
+
+/** A single live bot run paired with its raw summary + closed trades (raw SDK DTOs, not a derived
+ *  summary). The advisory shape the Researcher receives via ResearcherInput.botResults. */
+export interface BotRunResultDetail {
+  readonly run: BotRunRecord;
+  readonly summary: RunSummary;
+  readonly trades: readonly ClosedTrade[];
+}

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { FakeResearcher } from './fake-researcher.ts';
 import { ResearcherOutputSchema } from '../../domain/hypothesis.ts';
 import type { ResearcherInput } from '../../ports/researcher.port.ts';
+import type { BotRunResultDetail } from '../../ports/bot-results-read.port.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 
 function profile(): StrategyProfile {
@@ -46,5 +47,27 @@ describe('FakeResearcher', () => {
   it('produces distinct fingerprintable theses', async () => {
     const out = await new FakeResearcher().propose(input(2));
     expect(out.hypotheses[0]!.thesis).not.toBe(out.hypotheses[1]!.thesis);
+  });
+});
+
+const botDetail = { run: {}, summary: {}, trades: [] } as unknown as BotRunResultDetail;
+
+const inputWithBotResults = (botResults?: readonly BotRunResultDetail[]): ResearcherInput => ({
+  profile: { coreIdea: 'idea', direction: 'long', requiredMarketFeatures: [] } as unknown as StrategyProfile,
+  marketContext: { symbol: 'BTCUSDT', ts: 't', features: {} },
+  marketRegime: 'ranging',
+  similarHypotheses: [],
+  ...(botResults ? { botResults } : {}),
+  maxHypotheses: 2,
+});
+
+describe('FakeResearcher botResults reflection', () => {
+  it('reflects botResults count in researchSummary, deterministically (no count branch)', async () => {
+    const fr = new FakeResearcher();
+    const out0 = await fr.propose(inputWithBotResults(undefined));
+    const out2 = await fr.propose(inputWithBotResults([botDetail, botDetail]));
+    expect(out0.researchSummary).toContain('botResults: 0');
+    expect(out2.researchSummary).toContain('botResults: 2');
+    expect(out0.hypotheses.length).toBe(out2.hypotheses.length); // count not branched on botResults
   });
 });

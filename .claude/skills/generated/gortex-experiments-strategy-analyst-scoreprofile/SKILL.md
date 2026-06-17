@@ -17,13 +17,13 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/experiments/strategy-analyst/scoring.ts` | def, opts, gates, hits, matched, ... |
+| `src/experiments/strategy-analyst/scoring.ts` | paramFab, re, p, hit, checks, ... |
 | `src/experiments/strategy-analyst/types.ts` | CheckResult |
 
 ## How to Explore
 
 ```
-get_communities with id: "community-177"
+get_communities with id: "community-174"
 smart_context with task: "understand experiments/strategy-analyst · scoreProfile", format: "gcx"
 ```
 

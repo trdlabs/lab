@@ -33,23 +33,23 @@ Use this skill when working on files in:
 | `src/adapters/repository/drizzle-research-task.repository.test.ts` | task, over |
 | `src/adapters/repository/in-memory-research-task.repository.test.ts` | task, over |
 | `src/chat/guard.test.ts` | task, id |
-| `src/chat/ref-resolver.test.ts` | task, id |
+| `src/chat/ref-resolver.test.ts` | id, task |
 | `src/domain/types.ts` | ResearchTask |
 | `src/orchestrator/chain-runner.test.ts` | onboardTask, id |
 | `src/orchestrator/handlers/backtest-support.ts` | task |
-| `src/orchestrator/handlers/hypothesis-build.handler.test.ts` | now, task, payload |
+| `src/orchestrator/handlers/hypothesis-build.handler.test.ts` | payload, now, task |
 | `src/orchestrator/handlers/hypothesis-build.platform.handler.test.ts` | task, payload, now |
 | `src/orchestrator/handlers/research-run-cycle.handler.test.ts` | task, payload |
 | `src/orchestrator/handlers/run-platform-backtest.test.ts` | task, now |
 | `src/orchestrator/handlers/strategy-onboard.handler.test.ts` | task, payload |
 | `src/orchestrator/workflow-router.test.ts` | over, task |
-| `src/worker/worker.test.ts` | t, task, over, researchTasks.create |
-| `test/e2e/hypothesis-build.test.ts` | task, now |
+| `src/worker/worker.test.ts` | researchTasks.create, t, task, over |
+| `test/e2e/hypothesis-build.test.ts` | now, task |
 
 ## How to Explore
 
 ```
-get_communities with id: "community-198"
+get_communities with id: "community-197"
 smart_context with task: "understand orchestrator/handlers +6 dirs · ResearchTask", format: "gcx"
 ```
 

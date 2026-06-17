@@ -8,6 +8,7 @@ import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.por
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { AppServices } from '../app-services.ts';
+import type { BotResultsReadPort } from '../../ports/bot-results-read.port.ts';
 
 function profile(): StrategyProfile {
   return {
@@ -36,6 +37,14 @@ function draft(thesis: string, action: 'skip_entry' | 'no_op' = 'skip_entry', ba
 
 function stubResearcher(out: ResearcherOutput): ResearcherPort {
   return { adapter: 'fake', model: 'stub', async propose(_in: ResearcherInput) { return out; } };
+}
+
+function capturingResearcher(out: ResearcherOutput): { port: ResearcherPort; captured: () => ResearcherInput | undefined } {
+  let cap: ResearcherInput | undefined;
+  return {
+    port: { adapter: 'fake', model: 'stub', async propose(inp: ResearcherInput) { cap = inp; return out; } },
+    captured: () => cap,
+  };
 }
 
 async function seedProfile(services: AppServices) {
@@ -153,5 +162,57 @@ describe('researchRunCycleHandler', () => {
 
     expect((await second.hypotheses.listByStrategyProfile('p1')).length).toBe(2);
     expect((await second.events.listByTask('t2')).map((e) => e.type)).not.toContain('hypothesis.deduped');
+  });
+
+  it('gathers live bot-results (status=finished, symbol-filtered) and passes them to the researcher', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis BR')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port }); // default MockBotResultsAdapter -> finished BTCUSDT run
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+
+    const input = cap.captured();
+    expect(input?.botResults?.length).toBe(1);
+    expect(input?.botResults?.[0]?.run.symbols).toContain('BTCUSDT');
+    expect(typeof input?.botResults?.[0]?.summary.pnlUsd).toBe('string');
+    expect(Array.isArray(input?.botResults?.[0]?.trades)).toBe(true);
+  });
+
+  it('filters out runs whose symbols do not include the cycle symbol', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis BR2')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port }); // mock run is BTCUSDT only
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'ETHUSDT' }), services);
+    expect(cap.captured()?.botResults).toEqual([]);
+  });
+
+  it('is fail-soft: a throwing bot-results port yields [] + a researcher.bot_results_unavailable event', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis BR3')], researchSummary: 's' });
+    const throwing: BotResultsReadPort = {
+      async listBotRuns() { throw new Error('ops-read down'); },
+      async getClosedTrades() { return []; },
+      async getRunSummary() { throw new Error('ops-read down'); },
+    };
+    const services = makeServices({ researcher: cap.port, botResults: throwing });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+
+    expect(cap.captured()?.botResults).toEqual([]);
+    expect(await types(services)).toContain('researcher.bot_results_unavailable');
+  });
+
+  it('is fail-soft mid-gather: a per-run summary failure (after listBotRuns succeeds) also yields [] + the event', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis BR4')], researchSummary: 's' });
+    const midThrow: BotResultsReadPort = {
+      async listBotRuns() {
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+      },
+      async getRunSummary() { throw new Error('summary down'); },
+      async getClosedTrades() { return []; },
+    };
+    const services = makeServices({ researcher: cap.port, botResults: midThrow });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    expect(cap.captured()?.botResults).toEqual([]);
+    expect(await types(services)).toContain('researcher.bot_results_unavailable');
   });
 });

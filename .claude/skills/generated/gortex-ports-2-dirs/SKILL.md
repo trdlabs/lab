@@ -19,7 +19,7 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/composition.ts` | rt, buildAnalyst, rt, queue, buildIntentClassifier, ... |
+| `src/composition.ts` | buildResearcher, env, agentEventsRead, rt, e, ... |
 | `src/mastra/compose-mastra.ts` | MastraRuntime |
 | `src/ports/builder.port.ts` | BuilderPort |
 | `src/ports/critic.port.ts` | CriticPort |
@@ -31,7 +31,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-129"
+get_communities with id: "community-126"
 smart_context with task: "understand ports +2 dirs", format: "gcx"
 find_usages with id: "src/composition.ts::composeRuntime", format: "gcx"
 ```

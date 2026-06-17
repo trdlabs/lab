@@ -2,10 +2,16 @@ import type { Agent } from '@mastra/core/agent';
 import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.port.ts';
 import { ResearcherOutputSchema, type ResearcherOutput } from '../../domain/hypothesis.ts';
 
-function buildPrompt(input: ResearcherInput): string {
+export function buildPrompt(input: ResearcherInput): string {
   const similar = input.similarHypotheses.length > 0
     ? input.similarHypotheses.map((s) => `- [${s.status}] ${s.thesis}`).join('\n')
     : '(none)';
+  const botPerf = input.botResults && input.botResults.length > 0
+    ? input.botResults.map((d) =>
+        `- ${d.run.strategy.name}@${d.run.strategy.version} [${d.run.mode}/${d.run.status}]`
+        + ` pnlUsd=${d.summary.pnlUsd} winratePct=${d.summary.winratePct} trades=${d.summary.closedTrades}`
+        + ` (closed sample: ${d.trades.length})`).join('\n')
+    : null;
   return [
     `Strategy core idea: ${input.profile.coreIdea}`,
     `Direction: ${input.profile.direction}`,
@@ -13,6 +19,7 @@ function buildPrompt(input: ResearcherInput): string {
     `Market regime: ${input.marketRegime}`,
     `Market context features: ${JSON.stringify(input.marketContext.features)}`,
     `Similar past hypotheses (advisory, avoid duplicating):\n${similar}`,
+    ...(botPerf ? [`Live/paper bot performance (advisory):\n${botPerf}`] : []),
     `Produce at most ${input.maxHypotheses} hypotheses.`,
   ].join('\n');
 }

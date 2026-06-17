@@ -25,13 +25,13 @@ Use this skill when working on files in:
 | File | Symbols |
 |------|---------|
 | `src/adapters/platform/console-agent-event-sink.ts` | append |
-| `src/adapters/platform/discovery-probe.ts` | platform, runDiscoveryProbe, probeId, events, datasets, ... |
+| `src/adapters/platform/discovery-probe.ts` | probeId, err, deps, runDiscoveryProbe, datasets, ... |
 | `src/adapters/platform/http-backtester.adapter.test.ts` | listDatasets, getCapabilities |
-| `src/adapters/platform/http-backtester.adapter.ts` | constructor, client, HttpBacktesterAdapter, caps, datasets, ... |
-| `src/adapters/platform/mcp-research-platform.adapter.ts` | listDatasets, filter, getRunStatus, options, discover, ... |
-| `src/adapters/platform/research-contract.ts` | descriptor, expected, assertContractCompatible, ok |
-| `src/adapters/platform/run-probe.ts` | RunProbeDeps, probeId, err, poll, integration, ... |
-| `src/adapters/platform/validate-probe.ts` | deps, events, integration, warningCount, ValidateProbeResult, ... |
+| `src/adapters/platform/http-backtester.adapter.ts` | _filter, client, datasets, discover, listDatasets, ... |
+| `src/adapters/platform/mcp-research-platform.adapter.ts` | listDatasets, options, discover, descriptor, result, ... |
+| `src/adapters/platform/research-contract.ts` | assertContractCompatible, ok, expected, descriptor |
+| `src/adapters/platform/run-probe.ts` | probeId, outcome, integration, errMsg, comparison, ... |
+| `src/adapters/platform/validate-probe.ts` | runValidateProbe, probeId, ValidateProbeDeps, mkEvent, integration, ... |
 | `src/ports/research-platform.port.ts` | ResearchPlatformPort |
 
 ## Entry Points

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
+import type { BotRunResultDetail } from '../../ports/bot-results-read.port.ts';
 import { validateHypothesis } from '../../validation/hypothesis-validator.ts';
 import { LAB_FEATURE_CATALOG, normalizeFeature } from '../../domain/hypothesis-rules.ts';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../../domain/hypothesis.ts';
 
 export const RESEARCH_DEFAULT_SYMBOL = 'BTCUSDT';
+export const BOT_RESULTS_MAX = 10;
 
 export const ResearchRunCyclePayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -57,11 +59,27 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
 
   const similarHypotheses = await services.similarHypotheses.search(profile.id, profile.coreIdea, 5);
 
+  let botResults: readonly BotRunResultDetail[] = [];
+  try {
+    const runs = (await services.botResults.listBotRuns({ status: 'finished' }))
+      .filter((r) => r.symbols.includes(symbol))
+      .slice()
+      .sort((a, b) => b.lastSeenMs - a.lastSeenMs)
+      .slice(0, BOT_RESULTS_MAX);
+    botResults = await Promise.all(runs.map(async (run) => ({
+      run,
+      summary: await services.botResults.getRunSummary(run.runId),
+      trades: await services.botResults.getClosedTrades(run.runId),
+    })));
+  } catch (err) {
+    await services.events.append(event(task.id, 'researcher.bot_results_unavailable', { error: errMsg(err) }));
+  }
+
   await services.events.append(event(task.id, 'researcher.started', { strategyProfileId: profile.id }));
   let output: ResearcherOutput;
   try {
     output = await services.researcher.propose({
-      profile, marketContext, marketRegime, similarHypotheses, maxHypotheses: effectiveMax,
+      profile, marketContext, marketRegime, similarHypotheses, botResults, maxHypotheses: effectiveMax,
     });
   } catch (err) {
     await services.events.append(event(task.id, 'researcher.failed', { error: errMsg(err) }));

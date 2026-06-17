@@ -19,9 +19,9 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/experiments/intent-classifier/eval-harness.test.ts` | classifierFor, providerOf, c, judge, input, ... |
-| `src/experiments/intent-classifier/eval-harness.ts` | perModel, RunEvalInput, runs, runEval, judge, ... |
-| `src/experiments/intent-classifier/scoring.ts` | threshold, opts, total, intentAccuracy, cases, ... |
+| `src/experiments/intent-classifier/eval-harness.test.ts` | input, clock, over, classify, deps, ... |
+| `src/experiments/intent-classifier/eval-harness.ts` | message, aggregates, RunEvalDeps, r, judgeErr, ... |
+| `src/experiments/intent-classifier/scoring.ts` | cases, schemaValidCount, correct, scoreRun, intentAccuracy, ... |
 | `src/experiments/intent-classifier/types.ts` | CandidateError |
 
 ## Entry Points
@@ -37,7 +37,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-149"
+get_communities with id: "community-146"
 smart_context with task: "understand experiments/intent-classifier · runOnce", format: "gcx"
 find_usages with id: "src/experiments/intent-classifier/eval-harness.ts::runEval", format: "gcx"
 ```

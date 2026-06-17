@@ -19,10 +19,10 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/adapters/platform/fixture-platform-gateway.adapter.ts` | T, dir, submitBacktest, _tsOrWindow, name, ... |
-| `src/adapters/platform/mock-platform-gateway.adapter.ts` | symbol, getBacktestResult, ref, MockPlatformGatewayAdapter, tsOrWindow, ... |
+| `src/adapters/platform/fixture-platform-gateway.adapter.ts` | getMarketContext, T, fixtureDir, getBacktestResult, FixturePlatformGatewayAdapter, ... |
+| `src/adapters/platform/mock-platform-gateway.adapter.ts` | getMarketRegime, submitBacktest, MockPlatformGatewayAdapter, req, getMarketContext, ... |
 | `src/domain/types.ts` | BacktestRunRef |
-| `src/ports/platform-gateway.port.ts` | MarketRegime, PlatformGatewayPort, ComparisonSummary, MarketContext, ResearchRunEnvelope, ... |
+| `src/ports/platform-gateway.port.ts` | ResearchRunEnvelope, ComparisonSummary, BacktestRunRequest, PlatformGatewayPort, MarketRegime, ... |
 
 ## How to Explore
 

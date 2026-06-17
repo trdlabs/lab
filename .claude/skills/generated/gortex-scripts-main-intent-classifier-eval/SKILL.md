@@ -17,8 +17,8 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `scripts/intent-classifier-eval.ts` | ranking, written, modelEnv, main, buildRealJudge, ... |
-| `scripts/strategy-analyst-eval.ts` | fixture, parseCli, now, fixtureText, timestamp, ... |
+| `scripts/intent-classifier-eval.ts` | buildRealJudge, env, cases, now, buildRealClassifierFor, ... |
+| `scripts/strategy-analyst-eval.ts` | buildRealJudge, outDir, args, values, fixture, ... |
 
 ## Entry Points
 

@@ -19,10 +19,10 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/adapters/platform/http-backtester.adapter.ts` | err, summary, toSdkSummary, status, getRunResult, ... |
-| `src/adapters/platform/mcp-research-platform.adapter.ts` | getRunResult, runId, result |
+| `src/adapters/platform/http-backtester.adapter.ts` | err, at, getRunResult, s, runId, ... |
+| `src/adapters/platform/mcp-research-platform.adapter.ts` | result, getRunResult, runId |
 | `src/ports/research-platform.port.ts` | RunResultView |
-| `src/research/run-backtest.test.ts` | i, statuses, result, fakePort |
+| `src/research/run-backtest.test.ts` | fakePort, statuses, i, result |
 
 ## How to Explore
 

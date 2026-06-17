@@ -22,6 +22,6 @@ export class FakeResearcher implements ResearcherPort {
       invalidationCriteria: ['No win_rate improvement vs baseline'],
       confidence: 0.5,
     }));
-    return { hypotheses, researchSummary: `Fake researcher produced ${n} hypotheses` };
+    return { hypotheses, researchSummary: `Fake researcher produced ${n} hypotheses (botResults: ${input.botResults?.length ?? 0})` };
   }
 }

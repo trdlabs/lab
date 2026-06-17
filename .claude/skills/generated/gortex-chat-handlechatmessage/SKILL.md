@@ -18,9 +18,9 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/chat/chat-handler.ts` | planId, ev, payload, ev, deps, ... |
-| `src/chat/guard.ts` | v, parseIntent, ParseResult, raw |
-| `src/chat/response.ts` | PlannedNextStep, sessionId, reason, taskCreated, issues, ... |
+| `src/chat/chat-handler.ts` | sid, now, deps, err, correlationId, ... |
+| `src/chat/guard.ts` | raw, parseIntent, v, ParseResult |
+| `src/chat/response.ts` | taskType, ChatResponse, message, status, PlannedNextStep, ... |
 
 ## Entry Points
 
@@ -33,7 +33,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-126"
+get_communities with id: "community-123"
 smart_context with task: "understand chat · handleChatMessage", format: "gcx"
 find_usages with id: "src/chat/chat-handler.ts::handleChatMessage", format: "gcx"
 ```

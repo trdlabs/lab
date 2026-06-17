@@ -16,7 +16,7 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `migrations/0003_lean_cargill.sql` | platform_run_id, max_drawdown_pct, baseline_module_id, bundle_hash, id, ... |
+| `migrations/0003_lean_cargill.sql` | bundle_hash, top_trade_contribution_pct, win_rate, created_at, max_drawdown_pct, ... |
 
 ## How to Explore
 

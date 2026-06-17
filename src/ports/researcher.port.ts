@@ -1,12 +1,14 @@
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { ResearcherOutput, SimilarHypothesisSummary } from '../domain/hypothesis.ts';
 import type { MarketContext, MarketRegime } from './platform-gateway.port.ts';
+import type { BotRunResultDetail } from './bot-results-read.port.ts';
 
 export interface ResearcherInput {
   profile: StrategyProfile;
   marketContext: MarketContext;
   marketRegime: MarketRegime;
   similarHypotheses: SimilarHypothesisSummary[];
+  botResults?: readonly BotRunResultDetail[];
   maxHypotheses: number;
 }
 

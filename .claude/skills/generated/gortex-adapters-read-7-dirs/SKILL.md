@@ -29,23 +29,23 @@ Use this skill when working on files in:
 | File | Symbols |
 |------|---------|
 | `src/adapters/read/drizzle-hypothesis-read.adapter.ts` | toDomain, row |
-| `src/adapters/read/in-memory-hypothesis-read.adapter.test.ts` | over, id, now, hyp |
-| `src/adapters/read/in-memory-hypothesis-read.adapter.ts` | b, cmpDesc, a |
-| `src/adapters/repository/drizzle-hypothesis.repository.test.ts` | id, hyp, fp, status |
-| `src/adapters/repository/in-memory-hypothesis-proposal.repository.test.ts` | hyp, id, profileId, fp |
-| `src/adapters/similarity/in-memory-lexical-similar-hypothesis-search.test.ts` | id, hyp, thesis |
-| `src/chat/guard.test.ts` | id, validatedHyp, profileId |
-| `src/chat/ref-resolver.test.ts` | status, id, profileId, hyp |
+| `src/adapters/read/in-memory-hypothesis-read.adapter.test.ts` | id, over, hyp, now |
+| `src/adapters/read/in-memory-hypothesis-read.adapter.ts` | cmpDesc, a, b |
+| `src/adapters/repository/drizzle-hypothesis.repository.test.ts` | id, fp, status, hyp |
+| `src/adapters/repository/in-memory-hypothesis-proposal.repository.test.ts` | profileId, hyp, fp, id |
+| `src/adapters/similarity/in-memory-lexical-similar-hypothesis-search.test.ts` | hyp, thesis, id |
+| `src/chat/guard.test.ts` | validatedHyp, id, profileId |
+| `src/chat/ref-resolver.test.ts` | status, hyp, id, profileId |
 | `src/domain/hypothesis.ts` | HypothesisProposal |
-| `src/orchestrator/handlers/hypothesis-build.handler.test.ts` | now, hypothesis |
-| `src/read-api/mappers.test.ts` | hyp, over |
+| `src/orchestrator/handlers/hypothesis-build.handler.test.ts` | hypothesis, now |
+| `src/read-api/mappers.test.ts` | over, hyp |
 | `src/read-api/read-app.test.ts` | createdAt, id, hyp |
-| `test/e2e/hypothesis-build.test.ts` | now, hypothesis, over |
+| `test/e2e/hypothesis-build.test.ts` | hypothesis, over, now |
 
 ## How to Explore
 
 ```
-get_communities with id: "community-90"
+get_communities with id: "community-89"
 smart_context with task: "understand adapters/read +7 dirs", format: "gcx"
 ```
 

@@ -25,15 +25,15 @@ Use this skill when working on files in:
 
 | File | Symbols |
 |------|---------|
-| `src/adapters/repository/drizzle-chat-session.repository.test.ts` | over, ctx |
+| `src/adapters/repository/drizzle-chat-session.repository.test.ts` | ctx, over |
 | `src/adapters/repository/drizzle-research-task.repository.ts` | rows, id, findById |
-| `src/adapters/repository/in-memory-chat-session.repository.test.ts` | ctx, over |
+| `src/adapters/repository/in-memory-chat-session.repository.test.ts` | over, ctx |
 | `src/chat/guard.test.ts` | session, over |
-| `src/chat/guard.ts` | kind, sid, PlanArgs, text, t, ... |
+| `src/chat/guard.ts` | intent, profile, planChatAction, text, sid, ... |
 | `src/chat/intent.ts` | AllowedIntent |
-| `src/chat/ref-resolver.test.ts` | over, session, deps |
-| `src/chat/ref-resolver.ts` | t, resolveBuildableHypothesis, deps, t, deps, ... |
-| `src/chat/response.ts` | taskStatus, outOfScope, sessionId, sessionId, question, ... |
+| `src/chat/ref-resolver.test.ts` | session, deps, over |
+| `src/chat/ref-resolver.ts` | session, h, deps, resolveResearchProfile, deps, ... |
+| `src/chat/response.ts` | missing, sessionId, capability, sessionId, outOfScope, ... |
 | `src/ports/chat-session.repository.ts` | ChatSessionContext |
 
 ## Entry Points
@@ -47,7 +47,7 @@ Use this skill when working on files in:
 ## How to Explore
 
 ```
-get_communities with id: "community-128"
+get_communities with id: "community-125"
 smart_context with task: "understand chat +2 dirs", format: "gcx"
 find_usages with id: "src/chat/guard.ts::planChatAction", format: "gcx"
 ```
