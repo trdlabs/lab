@@ -1,0 +1,3 @@
+[
+  { "runId": "fx_run_001", "mode": "paper", "status": "finished", "strategy": { "name": "fixture-strategy", "version": "1.0.0" }, "startedAtMs": 1700000000000, "finishedAtMs": 1700000600000, "lastSeenMs": 1700000600000, "symbols": ["BTCUSDT"] }
+]

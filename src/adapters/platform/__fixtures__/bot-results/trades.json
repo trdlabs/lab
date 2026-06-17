@@ -1,0 +1,3 @@
+[
+  { "tradeId": "fx_trade_001", "runId": "fx_run_001", "symbol": "BTCUSDT", "side": "long", "openedAtMs": 1700000100000, "closedAtMs": 1700000200000, "realizedPnl": "12.50", "pnlPct": "1.25", "isWin": true, "closeReason": "take_profit" }
+]

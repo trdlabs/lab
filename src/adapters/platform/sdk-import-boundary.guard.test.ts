@@ -3,7 +3,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 // @trading-platform/* may be imported ONLY from the research-platform port and the platform adapter dir.
-const ALLOWED_FILES = new Set<string>(['src/ports/research-platform.port.ts']);
+const ALLOWED_FILES = new Set<string>([
+  'src/ports/research-platform.port.ts',
+  'src/ports/bot-results-read.port.ts',
+]);
 const ALLOWED_DIR = 'src/adapters/platform/';
 
 function walk(dir: string): string[] {

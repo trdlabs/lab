@@ -1,0 +1,1 @@
+{ "runId": "fx_run_001", "excludesReconcile": true, "asOf": 1700000600000, "closedTrades": 1, "wins": 1, "losses": 0, "breakeven": 0, "winratePct": 100, "pnlUsd": "12.50", "avgPnl": "12.50", "exitReasons": { "take_profit": 1 } }
