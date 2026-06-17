@@ -1,5 +1,11 @@
 import type {
-  BotResultsReadPort, BotRunsFilter, BotRunRecord, ClosedTrade, RunSummary,
+  BotResultsReadPort,
+  BotRunsFilter,
+  BotRunRecord,
+  ClosedTrade,
+  RunSummary,
+  EventsPage,
+  DecisionsPage,
 } from '../../ports/bot-results-read.port.ts';
 import type { OpsReadClient } from './ops-read-client.ts';
 
@@ -27,6 +33,14 @@ export class HttpOpsReadAdapter implements BotResultsReadPort {
     return this.client.get<RunSummary>(`/ops/runs/${encodeURIComponent(runId)}/summary`);
   }
 
+  async getOperationalEvents(runId: string, cursor?: string): Promise<EventsPage> {
+    return this.client.get<EventsPage>(this.pagePath('/ops/events', runId, cursor));
+  }
+
+  async getDecisionLog(runId: string, cursor?: string): Promise<DecisionsPage> {
+    return this.client.get<DecisionsPage>(this.pagePath('/ops/decisions', runId, cursor));
+  }
+
   /** Walk Surface A cursor pages for `path`, carrying the fixed query params in `base`. */
   private async walk<T>(path: string, base: URLSearchParams): Promise<readonly T[]> {
     const all: T[] = [];
@@ -40,5 +54,12 @@ export class HttpOpsReadAdapter implements BotResultsReadPort {
       cursor = page.nextCursor;
     } while (cursor);
     return all;
+  }
+
+  private pagePath(path: string, runId: string, cursor?: string): string {
+    const params = new URLSearchParams({ runId });
+    if (cursor) params.set('cursor', cursor);
+    const qs = params.toString();
+    return `${path}?${qs}`;
   }
 }
