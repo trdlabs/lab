@@ -6,6 +6,7 @@ import { MastraIntentClassifier } from '../../adapters/intent/mastra-intent-clas
 import { resolveLanguageModel, type ModelProviderEnv } from '../../adapters/llm/model-provider.ts';
 import { createIntentClassifierJudgeAgent } from '../../mastra/agents/intent-classifier-judge.agent.ts';
 import { runJudge, type JudgeInput } from './judge.ts';
+import { ChatIntentEvalSchema } from './openai-eval-schema.ts';
 import type { IntentClassifierPort } from '../../ports/intent-classifier.port.ts';
 import type { JudgeVerdict } from './types.ts';
 
@@ -31,7 +32,9 @@ export function buildRealClassifierFor(baseEnv: ModelProviderEnv): (modelId: str
     if (!entry) throw new Error('intent-classifier agent was not composed (check INTENT_CLASSIFIER_ADAPTER)');
     // 'raw': the eval harness re-validates via ChatIntentSchema (single trust boundary), so a schema
     // deviation must reach scoreCase as a per-case miss — not throw inside Mastra and kill the run.
-    return new MastraIntentClassifier(entry.agent, entry.label, { schemaValidation: 'raw' });
+    // requestSchema: OpenAI-strict-compatible variant (all keys required + optionals nullable) so
+    // OpenAI models don't 400 on resolve; nulls are normalized away before the ChatIntentSchema gate.
+    return new MastraIntentClassifier(entry.agent, entry.label, { schemaValidation: 'raw', requestSchema: ChatIntentEvalSchema });
   };
 }
 

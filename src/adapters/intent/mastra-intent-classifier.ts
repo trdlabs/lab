@@ -1,4 +1,5 @@
 import type { Agent } from '@mastra/core/agent';
+import type { ZodTypeAny } from 'zod';
 import type { IntentClassifierPort } from '../../ports/intent-classifier.port.ts';
 import { ChatIntentSchema } from '../../chat/intent.ts';
 
@@ -39,6 +40,13 @@ export interface MastraIntentClassifierOptions {
    *   model's intent still visible — never a bald throw that kills the run.
    */
   schemaValidation?: 'strict' | 'raw';
+  /**
+   * Schema sent to the model for structured output in the `'raw'` (eval) path. Lets the eval layer
+   * pass an OpenAI-strict-compatible variant (every key required + optionals nullable) without
+   * changing the prod ChatIntentSchema. Defaults to ChatIntentSchema. Ignored in `'strict'` mode,
+   * so the production request stays byte-identical.
+   */
+  requestSchema?: ZodTypeAny;
 }
 
 export class MastraIntentClassifier implements IntentClassifierPort {
@@ -46,11 +54,13 @@ export class MastraIntentClassifier implements IntentClassifierPort {
   readonly model: string;
   private readonly agent: Agent;
   private readonly schemaValidation: 'strict' | 'raw';
+  private readonly requestSchema: ZodTypeAny;
 
   constructor(agent: Agent, label: string, options: MastraIntentClassifierOptions = {}) {
     this.agent = agent;
     this.model = label;
     this.schemaValidation = options.schemaValidation ?? 'strict';
+    this.requestSchema = options.requestSchema ?? ChatIntentSchema;
   }
 
   async classify(message: string): Promise<unknown> {
@@ -63,9 +73,11 @@ export class MastraIntentClassifier implements IntentClassifierPort {
       return result.object;
     }
 
-    // EVAL path — never let Mastra's internal zod gate throw; the harness re-validates.
+    // EVAL path — never let Mastra's internal zod gate throw; the harness re-validates. Uses
+    // requestSchema (OpenAI-strict-compatible variant) so providers that demand all-keys-required
+    // don't reject the request; absent fields come back as null and are normalized before the gate.
     const result: { object?: unknown; text?: unknown } = await this.agent.generate(buildPrompt(message), {
-      structuredOutput: { schema: ChatIntentSchema, errorStrategy: 'warn' },
+      structuredOutput: { schema: this.requestSchema, errorStrategy: 'warn' },
     });
     return result.object != null ? result.object : parseRawText(result.text);
   }

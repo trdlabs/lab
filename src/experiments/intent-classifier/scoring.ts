@@ -11,6 +11,19 @@ function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
+/** OpenAI-strict eval outputs express "absent" as null (the eval schema is required-but-nullable).
+ *  Drop null-valued top-level keys so the prod ChatIntentSchema gate — where those fields are
+ *  `.optional()` (i.e. string|undefined, not null) — treats them as absent instead of rejecting null.
+ *  Eval-only normalization; the prod guard is never touched. Non-objects pass through unchanged. */
+function withoutNullProps(raw: unknown): unknown {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v !== null) out[k] = v;
+  }
+  return out;
+}
+
 /** Best-effort `intent` from a raw (possibly schema-invalid) output, so a deviation is a visible
  *  miss in the report rather than a bald null. Never trusted — the case is still a schema-invalid miss. */
 function bestEffortIntent(raw: unknown): string | null {
@@ -43,14 +56,15 @@ function buildPayloadChecks(intent: ParsedIntent, expect: EvalCaseExpect): Paylo
 
 /** Score one classifier output against an expected case. Never throws. */
 export function scoreCase(raw: unknown, evalCase: EvalCase, latencyMs: number): CaseResult {
-  const parsed = ChatIntentSchema.safeParse(raw);
+  const candidate = withoutNullProps(raw); // null optional fields (OpenAI nullable outputs) -> absent
+  const parsed = ChatIntentSchema.safeParse(candidate);
   if (!parsed.success) {
     const message = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') || 'schema invalid';
     // Intent accuracy and schema validity are scored SEPARATELY: a deviation in a secondary field
     // (e.g. a bad entityRef enum) fails the strict gate but must not zero a correctly-recognized
     // intent. intentMatch is judged on the best-effort intent; the case stays schemaValid:false and
     // payload is not scored on an object that failed the gate.
-    const actualIntent = bestEffortIntent(raw);
+    const actualIntent = bestEffortIntent(candidate);
     return {
       id: evalCase.id, lang: evalCase.lang, expectedIntent: evalCase.expect.intent,
       actualIntent, intentMatch: actualIntent === evalCase.expect.intent, schemaValid: false,

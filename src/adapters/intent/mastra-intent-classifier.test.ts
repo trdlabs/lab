@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import type { Agent } from '@mastra/core/agent';
 import { MastraIntentClassifier } from './mastra-intent-classifier.ts';
 import { ChatIntentSchema } from '../../chat/intent.ts';
@@ -56,6 +57,14 @@ describe('MastraIntentClassifier — raw (eval) path', () => {
     const c = new MastraIntentClassifier(agent, 'm', { schemaValidation: 'raw' });
     await c.classify('hi');
     expect(calls[0]!.options.structuredOutput?.errorStrategy).toBe('warn');
+  });
+
+  it('forwards a provided requestSchema to the model (OpenAI-compatible schema)', async () => {
+    const { agent, calls } = mockAgent({ object: { intent: 'help', confidence: 0.9 } });
+    const evalSchema = z.object({ intent: z.string() }); // stand-in for the OpenAI-strict variant
+    const c = new MastraIntentClassifier(agent, 'm', { schemaValidation: 'raw', requestSchema: evalSchema });
+    await c.classify('hi');
+    expect(calls[0]!.options.structuredOutput?.schema).toBe(evalSchema);
   });
 
   it('returns the validated object when one is present', async () => {

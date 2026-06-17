@@ -47,6 +47,29 @@ describe('scoreCase — schema gate (ChatIntentSchema, the guard trust boundary)
     expect(r.error?.type).toBe('schema');
   });
 
+  it('treats null optional fields as absent (OpenAI nullable eval outputs pass the prod gate)', () => {
+    const r = scoreCase(
+      { intent: 'help', confidence: 0.9, strategyText: null, hypothesisText: null, entityRef: null, taskIdHint: null, requestedOutcome: null, rationale: null },
+      evalCase({ expect: { intent: 'help' } }),
+      0,
+    );
+    expect(r.schemaValid).toBe(true); // nulls stripped -> valid under the .optional() prod schema
+    expect(r.intentMatch).toBe(true);
+    expect(r.actualIntent).toBe('help');
+    expect(r.error).toBeNull();
+  });
+
+  it('a null on an expected payload field counts as missing (not present)', () => {
+    const r = scoreCase(
+      { intent: 'strategy.onboard', confidence: 0.9, strategyText: null, requestedOutcome: 'onboard' },
+      evalCase({ expect: { intent: 'strategy.onboard', hasStrategyText: true } }),
+      0,
+    );
+    expect(r.schemaValid).toBe(true); // null stripped
+    expect(r.intentMatch).toBe(true);
+    expect(r.payloadScore).toBe(0); // strategyText absent -> hasStrategyText fails
+  });
+
   it('a schema-invalid object with the WRONG intent is still an intent miss', () => {
     const r = scoreCase(
       { intent: 'out_of_scope', confidence: 0.8, entityRef: 'from_message' },
