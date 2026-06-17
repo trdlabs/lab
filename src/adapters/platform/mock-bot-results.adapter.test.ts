@@ -15,4 +15,18 @@ describe('MockBotResultsAdapter', () => {
     expect(s.runId).toBeTruthy();
     expect(typeof s.pnlUsd).toBe('string'); // decimal-as-string
   });
+  it('returns canned operational events as a page envelope', async () => {
+    const page = await a.getOperationalEvents('r1');
+    expect(page.items.length).toBeGreaterThan(0);
+    expect(page.items[0]?.runId).toBeTruthy();
+    expect(page.nextCursor).toBeNull();
+    expect(typeof page.asOf).toBe('number');
+  });
+  it('returns canned decision log entries as a page envelope', async () => {
+    const page = await a.getDecisionLog('r1');
+    expect(page.items.length).toBeGreaterThan(0);
+    expect(page.items[0]?.runId).toBeTruthy();
+    expect(page.nextCursor).toBeNull();
+    expect(typeof page.asOf).toBe('number');
+  });
 });

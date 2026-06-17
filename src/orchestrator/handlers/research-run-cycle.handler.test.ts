@@ -191,6 +191,8 @@ describe('researchRunCycleHandler', () => {
       async listBotRuns() { throw new Error('ops-read down'); },
       async getClosedTrades() { return []; },
       async getRunSummary() { throw new Error('ops-read down'); },
+      async getOperationalEvents() { throw new Error('ops-read down'); },
+      async getDecisionLog() { throw new Error('ops-read down'); },
     };
     const services = makeServices({ researcher: cap.port, botResults: throwing });
     await seedProfile(services);
@@ -208,6 +210,8 @@ describe('researchRunCycleHandler', () => {
       },
       async getRunSummary() { throw new Error('summary down'); },
       async getClosedTrades() { return []; },
+      async getOperationalEvents() { return { items: [], nextCursor: null, asOf: 0, window: {}, freshness: 'fresh' }; },
+      async getDecisionLog() { return { items: [], nextCursor: null, asOf: 0, window: {}, freshness: 'fresh' }; },
     };
     const services = makeServices({ researcher: cap.port, botResults: midThrow });
     await seedProfile(services);

@@ -1,5 +1,13 @@
 import type {
-  BotResultsReadPort, BotRunsFilter, BotRunRecord, ClosedTrade, RunSummary,
+  BotResultsReadPort,
+  BotRunsFilter,
+  BotRunRecord,
+  ClosedTrade,
+  RunSummary,
+  EventsPage,
+  DecisionsPage,
+  OperationalEvent,
+  DecisionLogEntry,
 } from '../../ports/bot-results-read.port.ts';
 
 const RUN: BotRunRecord = {
@@ -18,10 +26,26 @@ const SUMMARY: RunSummary = {
   closedTrades: 1, wins: 1, losses: 0, breakeven: 0, winratePct: 100,
   pnlUsd: '12.50', avgPnl: '12.50', exitReasons: { take_profit: 1 },
 };
+const EVENT: OperationalEvent = {
+  category: 'risk', severity: 'warn', runId: 'mock_run_001', tradeId: null,
+  tsMs: 1_700_000_300_000, safeMessage: 'risk warning',
+};
+const DECISION: DecisionLogEntry = {
+  category: 'entry', runId: 'mock_run_001', botId: 'mock-bot', symbol: 'BTCUSDT',
+  side: 'long', reason: 'breakout', tsMs: 1_700_000_250_000, safeMessage: 'entered long',
+};
+const EVENTS_PAGE: EventsPage = {
+  items: [EVENT], nextCursor: null, asOf: 1_700_000_600_000, window: {}, freshness: 'fresh',
+};
+const DECISIONS_PAGE: DecisionsPage = {
+  items: [DECISION], nextCursor: null, asOf: 1_700_000_600_000, window: {}, freshness: 'fresh',
+};
 
 /** Boot-safe canned BotResultsReadPort — no I/O. */
 export class MockBotResultsAdapter implements BotResultsReadPort {
   async listBotRuns(_filter?: BotRunsFilter): Promise<readonly BotRunRecord[]> { return [RUN]; }
   async getClosedTrades(_runId: string): Promise<readonly ClosedTrade[]> { return [TRADE]; }
   async getRunSummary(_runId: string): Promise<RunSummary> { return SUMMARY; }
+  async getOperationalEvents(_runId: string, _cursor?: string): Promise<EventsPage> { return EVENTS_PAGE; }
+  async getDecisionLog(_runId: string, _cursor?: string): Promise<DecisionsPage> { return DECISIONS_PAGE; }
 }

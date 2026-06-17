@@ -1,12 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { OpsReadClient, type FetchLike } from './ops-read-client.ts';
 import { HttpOpsReadAdapter } from './http-ops-read.adapter.ts';
-import type { BotRunRecord, ClosedTrade, RunSummary } from '../../ports/bot-results-read.port.ts';
+import type {
+  BotRunRecord,
+  ClosedTrade,
+  RunSummary,
+  DecisionLogEntry,
+  OperationalEvent,
+} from '../../ports/bot-results-read.port.ts';
 
 const RUN_A: BotRunRecord = { runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTC'] };
 const RUN_B: BotRunRecord = { ...RUN_A, runId: 'r2' };
 const TRADE: ClosedTrade = { tradeId: 't1', runId: 'r1', symbol: 'BTC', side: 'long', openedAtMs: 1, closedAtMs: 2, realizedPnl: '1.5', pnlPct: '0.1', isWin: true, closeReason: 'tp' };
 const SUMMARY: RunSummary = { runId: 'r1', excludesReconcile: true, asOf: 9, closedTrades: 1, wins: 1, losses: 0, breakeven: 0, winratePct: 100, pnlUsd: '1.5', avgPnl: '1.5', exitReasons: { tp: 1 } };
+const EVENT: OperationalEvent = { category: 'risk', severity: 'warn', runId: 'r1', tradeId: null, tsMs: 3, safeMessage: 'warning' };
+const DECISION: DecisionLogEntry = { category: 'entry', runId: 'r1', botId: 'bot-1', symbol: 'BTC', side: 'long', reason: 'breakout', tsMs: 4, safeMessage: 'entered' };
 
 /** Normalize a path-or-URL to "pathname[?sorted=query]" so route matching is order-independent
  *  and exact — no fragile endsWith / first-match-wins (URLSearchParams does not guarantee key order). */
@@ -70,5 +78,26 @@ describe('HttpOpsReadAdapter', () => {
     const summary = await adapter(fetchImpl).getRunSummary('r1');
     expect(summary.runId).toBe('r1');
     expect(summary.closedTrades).toBe(1);
+  });
+
+  it('getOperationalEvents returns the page envelope without flattening and passes cursor', async () => {
+    const { fetchImpl, urls } = routed({
+      '/ops/events?runId=r1&cursor=c1': { items: [EVENT], nextCursor: null, asOf: 9, window: {}, freshness: 'fresh' },
+    });
+    const page = await adapter(fetchImpl).getOperationalEvents('r1', 'c1');
+    expect(page.items[0]?.category).toBe('risk');
+    expect(page.asOf).toBe(9);
+    expect(urls[0]).toContain('/ops/events');
+    expect(urls[0]).toContain('cursor=c1');
+  });
+
+  it('getDecisionLog returns the page envelope without flattening', async () => {
+    const { fetchImpl, urls } = routed({
+      '/ops/decisions?runId=r1': { items: [DECISION], nextCursor: 'n1', asOf: 9, window: {}, freshness: 'fresh' },
+    });
+    const page = await adapter(fetchImpl).getDecisionLog('r1');
+    expect(page.items[0]?.botId).toBe('bot-1');
+    expect(page.nextCursor).toBe('n1');
+    expect(urls[0]).toContain('/ops/decisions?runId=r1');
   });
 });
