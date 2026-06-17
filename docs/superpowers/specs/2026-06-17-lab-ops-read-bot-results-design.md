@@ -68,7 +68,7 @@ export interface BotResultsReadPort {
 
 ## 5. Adapters, selector, env
 
-- **`HttpOpsReadAdapter`** (live) — `implements BotResultsReadPort`. `fetch` GET to the ops-read endpoints (`/ops/runs` with cursor pagination via the page envelope, `/ops/runs/:id/trades`, `/ops/runs/:id/summary`); bearer token (sha256 allowlist, as office uses); parses JSON → SDK types; fail-closed on non-2xx / parse error / timeout. Config from env: a **dedicated** `LAB_OPS_READ_URL` / `LAB_OPS_READ_TOKEN` (exact names a plan-time lookup). **Do not reuse the research-transport env** (`TRADING_PLATFORM_GATEWAY_*` / research URL) — research and bot-results are separate channels.
+- **`HttpOpsReadAdapter`** (live) — `implements BotResultsReadPort`. `fetch` GET to the ops-read endpoints (`/ops/runs` with cursor pagination via the page envelope, `/ops/trades?runId=…`, `/ops/runs/:id/summary`); bearer token (sha256 allowlist, as office uses); parses JSON → SDK types; fail-closed on non-2xx / parse error / timeout. Config from env: a **dedicated** `LAB_OPS_READ_URL` / `LAB_OPS_READ_TOKEN` (exact names a plan-time lookup). **Do not reuse the research-transport env** (`TRADING_PLATFORM_GATEWAY_*` / research URL) — research and bot-results are separate channels.
 - **`MockBotResultsAdapter`** — canned SDK-typed values, no I/O (boot-safe, like `MockResearchPlatformAdapter`).
 - **`FixtureBotResultsAdapter`** — reads local JSON fixtures (shaped like Surface A responses) → SDK types.
 - **`selectBotResults(integration)`** — env-gated (`'mock' | 'fixture' | 'http'`), following the `selectResearchPlatform` convention but on a **separate axis** — a dedicated enum/env (e.g. `LAB_BOT_RESULTS_INTEGRATION`), NOT `TRADING_PLATFORM_INTEGRATION`. Unknown value → fail-closed.
@@ -101,7 +101,7 @@ export interface BotResultsReadPort {
 - Mixing the research-transport env/selector with the bot-results channel.
 
 ## 10. Plan-time lookups (resolve during planning — not placeholders)
-1. The exact Surface A ops-read HTTP contract from the mock (`src/ops/handlers` + `src/http`): endpoint paths (`/ops/runs` + query params, `/ops/runs/:id/trades`, `/ops/runs/:id/summary`), the page-envelope shape, and the auth-header name.
+1. The exact Surface A ops-read HTTP contract from the mock (`src/ops/handlers` + `src/http`): endpoint paths (`/ops/runs` + query params, `/ops/trades?runId=…`, `/ops/runs/:id/summary`), the page-envelope shape, and the auth-header name.
 2. The exact env var names — **confirm office's real convention** (`TRADING_PLATFORM_READ_URL` / `TRADING_PLATFORM_READ_TOKEN`). If lab already has a similar research-transport env, do **not** reuse it for ops-read; introduce dedicated `LAB_OPS_READ_*` (per lab convention). Keep research and bot-results channels separate.
 3. The exact SDK re-pack command + the lab `vendor/` path (`vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz`).
 4. The lab selector/env-enum convention (how `TRADING_PLATFORM_INTEGRATION` is read) — mirror it on a **separate axis** (`LAB_BOT_RESULTS_INTEGRATION`), not the research integration.
