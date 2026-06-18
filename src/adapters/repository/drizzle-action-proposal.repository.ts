@@ -104,6 +104,7 @@ export class DrizzleActionProposalRepository implements ActionProposalRepository
         ));
       // Return the proposal with the transitioned status regardless of whether the
       // UPDATE landed (concurrent transition is fine — the state is still 'expired').
+      // The returned updatedAt reflects this caller's now; in a concurrent-expire race it may differ from the DB row's updatedAt — acceptable, both states are terminal.
       return { kind: 'expired', proposal: rowToDomain({ ...row, status: 'expired', updatedAt: nowDate }) };
     }
 

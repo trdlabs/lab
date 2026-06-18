@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach } from 'vitest';
 import { createDbClient } from '../../db/client.ts';
 import { DrizzleActionProposalRepository } from './drizzle-action-proposal.repository.ts';
 import { actionProposal, chatSession } from '../../db/schema.ts';
@@ -30,11 +30,6 @@ d('DrizzleActionProposalRepository (integration)', () => {
   const { db, pool } = createDbClient(url!);
   const repo = new DrizzleActionProposalRepository(db);
 
-  beforeAll(async () => {
-    // action_proposal has no FK to chat_session, but delete proposal rows first anyway
-    await db.delete(actionProposal);
-  });
-
   afterAll(async () => { await pool.end(); });
 
   beforeEach(async () => {
@@ -64,8 +59,7 @@ d('DrizzleActionProposalRepository (integration)', () => {
     const r1 = await repo.confirmPending('p1', 's1', '2026-06-18T12:05:00.000Z');
     expect(r1.kind).toBe('confirmed_now');
     const r2 = await repo.confirmPending('p1', 's1', '2026-06-18T12:05:01.000Z');
-    expect(r2.kind).toBe('already_confirmed');
-    expect(r2).toHaveProperty('proposal');
+    expect(r2).toMatchObject({ kind: 'already_confirmed', proposal: { id: 'p1', status: 'confirmed' } });
   });
 
   // ---- not_found for other session + expired for past now ----
@@ -79,8 +73,7 @@ d('DrizzleActionProposalRepository (integration)', () => {
   it('returns expired when now is past expiresAt', async () => {
     await repo.create(baseProposal());
     const r = await repo.confirmPending('p1', 's1', '2026-06-18T12:11:00.000Z');
-    expect(r.kind).toBe('expired');
-    expect(r).toHaveProperty('proposal');
+    expect(r).toMatchObject({ kind: 'expired', proposal: { id: 'p1', status: 'expired' } });
   });
 
   // ---- cancel only live pending ----
@@ -100,6 +93,10 @@ d('DrizzleActionProposalRepository (integration)', () => {
   it('cancelPending returns false for expired proposal', async () => {
     await repo.create(baseProposal());
     expect(await repo.cancelPending('p1', 's1', '2026-06-18T12:11:00.000Z')).toBe(false);
+  });
+
+  it('cancelPending returns false for a non-existent proposal', async () => {
+    expect(await repo.cancelPending('does-not-exist', 's1', '2026-06-18T12:05:00.000Z')).toBe(false);
   });
 
   // ---- totality: confirmPending after cancel -> not_found ----
