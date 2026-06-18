@@ -1,6 +1,6 @@
 import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision } from 'drizzle-orm/pg-core';
 import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
-import type { ArtifactRef } from '../domain/types.ts';
+import type { ArtifactRef, TaskSource } from '../domain/types.ts';
 import type { RuleAction, ExpectedEffect, HypothesisProposalDraft } from '../domain/hypothesis.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
@@ -8,6 +8,8 @@ import type { ModuleManifest } from '../domain/module-bundle.ts';
 import type { BacktestMetricBlock, ComparisonSummary } from '../ports/platform-gateway.port.ts';
 import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
+import type { ActionProposalStatus, ProposedTaskSnapshot, OperatorAction } from '../domain/action-proposal.ts';
+import type { PendingOperatorInteraction } from '../ports/chat-session.repository.ts';
 
 export const researchTask = pgTable('research_task', {
   id: text('id').primaryKey(),
@@ -186,6 +188,7 @@ export const chatSession = pgTable('chat_session', {
   lastBacktestRunId: text('last_backtest_run_id'),
   lastUserGoal: text('last_user_goal'),
   pendingPlanId: text('pending_plan_id'),
+  pendingInteraction: jsonb('pending_interaction').$type<PendingOperatorInteraction>(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -203,4 +206,20 @@ export const chatPlan = pgTable('chat_plan', {
   // Powers the worker hook query: findPendingByAfterTaskId(afterTaskId).
   afterStatusIdx: index('chat_plan_after_task_status_idx').on(t.afterTaskId, t.status),
   sessionIdx: index('chat_plan_session_idx').on(t.sessionId),
+}));
+
+export const actionProposal = pgTable('action_proposal', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  subjectHash: text('subject_hash').notNull(),
+  action: text('action').notNull().$type<OperatorAction>(),
+  source: text('source').notNull().$type<TaskSource>(),
+  task: jsonb('task').notNull().$type<ProposedTaskSnapshot>(),
+  status: text('status').notNull().$type<ActionProposalStatus>(),
+  confirmedTaskId: text('confirmed_task_id'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  sessionStatusIdx: index('action_proposal_session_status_idx').on(t.sessionId, t.status),
 }));
