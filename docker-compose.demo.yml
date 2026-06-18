@@ -1,16 +1,102 @@
 # Demo overlay — self-contained, key-free, no private source. Binds to 127.0.0.1.
+# Adds mock-platform + backtester services so the full research demo runs without
+# any private trading-platform, exchange SDKs or production credentials.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml \
+#     --env-file .env.demo up --build
 services:
+
+  # ── mock-platform (Ops Read + snapshot replay) ─────────────────────────────
+  mock-platform:
+    build:
+      context: ${TRADING_MOCK_PLATFORM_PATH:-../trading-mock-platform}
+    image: trading-mock-platform:demo
+    environment:
+      MOCK_OPS_BIND: "0.0.0.0"
+      MOCK_OPS_PORT: "8839"
+      MOCK_OPS_TOKENS: "${MOCK_OPS_TOKENS:?set MOCK_OPS_TOKENS to sha256-hex of MOCK_OPS_TOKEN}"
+      MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-16-synthetic}"
+      MOCK_REPLAY_MODE: "${MOCK_REPLAY_MODE:-loop}"
+      MOCK_REPLAY_SPEED: "${MOCK_REPLAY_SPEED:-1}"
+    expose:
+      - "8839"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8839/ops/discover').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: "no"
+    networks: [trading]
+
+  # ── backtester (research-read backed by mock-platform historical data) ──────
+  backtester:
+    build:
+      context: ${TRADING_BACKTESTER_PATH:-../trading-backtester}
+    image: trading-backtester:demo
+    environment:
+      BACKTESTER_HOST: "0.0.0.0"
+      BACKTESTER_PORT: "8080"
+      BACKTESTER_AUTH_TOKEN: "${BACKTESTER_AUTH_TOKEN:-demo-backtester-token}"
+      BACKTESTER_DATA_SOURCE: "mock"
+      BACKTESTER_MOCK_PLATFORM_URL: "http://mock-platform:8839"
+      BACKTESTER_MOCK_PLATFORM_TOKEN: "${MOCK_OPS_TOKEN:-}"
+    expose:
+      - "8080"
+    depends_on:
+      mock-platform:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: "no"
+    networks: [trading]
+
+  # ── lab services: override env to wire mock-platform + backtester ───────────
+  ingress:
+    restart: "no"
+    environment:
+      LAB_BOT_RESULTS_INTEGRATION: "http"
+      LAB_OPS_READ_URL: "http://mock-platform:8839"
+      LAB_OPS_READ_TOKEN: "${MOCK_OPS_TOKEN:-}"
+      TRADING_PLATFORM_INTEGRATION: "backtester"
+      BACKTESTER_API_URL: "http://backtester:8080"
+      BACKTESTER_API_TOKEN: "${BACKTESTER_AUTH_TOKEN:-demo-backtester-token}"
+    depends_on:
+      backtester:
+        condition: service_healthy
+
+  worker:
+    restart: "no"
+    environment:
+      LAB_BOT_RESULTS_INTEGRATION: "http"
+      LAB_OPS_READ_URL: "http://mock-platform:8839"
+      LAB_OPS_READ_TOKEN: "${MOCK_OPS_TOKEN:-}"
+      TRADING_PLATFORM_INTEGRATION: "backtester"
+      BACKTESTER_API_URL: "http://backtester:8080"
+      BACKTESTER_API_TOKEN: "${BACKTESTER_AUTH_TOKEN:-demo-backtester-token}"
+    depends_on:
+      backtester:
+        condition: service_healthy
+
+  # ── office: expose on loopback + enable mock-platform read surface ──────────
   office-web:
     ports:
       - "127.0.0.1:${OFFICE_WEB_PORT:-8080}:80"
     restart: "no"
+
   office-server:
     ports:
       - "127.0.0.1:${OFFICE_SERVER_PORT:-8787}:8787"
     restart: "no"
     environment:
-      OFFICE_PLATFORM_ENABLED: "false"
-  ingress:
-    restart: "no"
-  worker:
-    restart: "no"
+      OFFICE_PLATFORM_ENABLED: "true"
+      TRADING_PLATFORM_READ_URL: "http://mock-platform:8839"
+      TRADING_PLATFORM_READ_TOKEN: "${MOCK_OPS_TOKEN:-}"
+    depends_on:
+      mock-platform:
+        condition: service_healthy
