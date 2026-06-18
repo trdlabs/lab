@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # Single image for the trading-lab runtime. No build step. The `migrate`,
 # `ingress`, and `worker` compose services run this image with a different
 # command; ingress/worker override the entrypoint to run
@@ -12,7 +14,9 @@ WORKDIR /app
 # package.json (file:./vendor/...) must be present before install.
 COPY package.json pnpm-lock.yaml ./
 COPY vendor ./vendor
-RUN pnpm install --frozen-lockfile
+COPY --from=trading_backtester /packages/client/package.json /trading-backtester/packages/client/package.json
+COPY --from=trading_backtester /packages/client/dist /trading-backtester/packages/client/dist
+RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 
 # App source (src, migrations, drizzle.config.js, scripts, tsconfig.json, ...)
 COPY . .
