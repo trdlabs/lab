@@ -1,5 +1,5 @@
 # Thin wrappers around the documented docker compose commands.
-.PHONY: demo local vps down smoke e2e config
+.PHONY: demo local vps down smoke e2e cross-repo-e2e config
 
 demo: .env.demo
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up --build
@@ -29,6 +29,11 @@ e2e:
 	docker compose -f docker-compose.yml -f docker-compose.$(or $(MODE),demo).yml \
 	  --env-file .env.$(or $(MODE),demo) exec -T ingress \
 	  node --input-type=module < scripts/e2e.mjs
+
+# Usage: make cross-repo-e2e [MODE=demo] — requires demo stack + backtester host port
+cross-repo-e2e:
+	chmod +x scripts/cross-repo-e2e.sh
+	./scripts/cross-repo-e2e.sh $(or $(MODE),demo)
 
 # Validate all three merges against the committed examples.
 config:

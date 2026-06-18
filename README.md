@@ -389,6 +389,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 Проверка работоспособности и остановка:
 ```bash
 make smoke MODE=demo   # 7 проверок, ожидается:  [smoke:demo] PASS
+make cross-repo-e2e MODE=demo   # lab → backtester → mock-platform (vitest, ~1 мин)
 make e2e               # полный цикл: strategy.onboard → research.run_cycle.completed (~5–10 мин)
 docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo down   # + -v чтобы снести том БД
 ```

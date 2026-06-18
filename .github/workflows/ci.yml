@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: trading-lab
+      - uses: actions/checkout@v4
+        with:
+          repository: alexnikolskiy/trading-backtester
+          path: trading-backtester
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: trading-lab/pnpm-lock.yaml
+      - name: Install and check
+        working-directory: trading-lab
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm check

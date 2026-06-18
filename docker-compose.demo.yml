@@ -45,6 +45,8 @@ services:
       BACKTESTER_MOCK_PLATFORM_TOKEN: "${MOCK_OPS_TOKEN:-}"
     expose:
       - "8080"
+    ports:
+      - "127.0.0.1:${BACKTESTER_HOST_PORT:-8081}:8080"
     depends_on:
       mock-platform:
         condition: service_healthy
@@ -80,6 +82,8 @@ services:
       TRADING_PLATFORM_INTEGRATION: "backtester"
       BACKTESTER_API_URL: "http://backtester:8080"
       BACKTESTER_API_TOKEN: "${BACKTESTER_AUTH_TOKEN:-demo-backtester-token}"
+      # Backtester POSTs completion here (docker DNS); token comes from .env.demo via base compose.
+      TRADING_LAB_CALLBACK_PUBLIC_URL: "${TRADING_LAB_CALLBACK_PUBLIC_URL:-http://ingress:3000}"
     depends_on:
       backtester:
         condition: service_healthy

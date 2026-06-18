@@ -7,8 +7,10 @@
  * Prerequisites (demo stack):
  *   docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up --build
  *
- * Run:
- *   RUN_CROSS_REPO_E2E=true BACKTESTER_API_URL=http://127.0.0.1:8080 BACKTESTER_API_TOKEN=demo-backtester-token \
+ * Run (demo stack up):
+ *   make cross-repo-e2e MODE=demo
+ * Or manually:
+ *   RUN_CROSS_REPO_E2E=true BACKTESTER_API_URL=http://127.0.0.1:8081 BACKTESTER_API_TOKEN=demo-backtester-token \
  *     pnpm vitest run src/adapters/platform/cross-repo-e2e.integration.test.ts
  *
  * Gating: skips unless RUN_CROSS_REPO_E2E=true and BACKTESTER_API_URL are set.
