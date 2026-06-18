@@ -17,6 +17,8 @@ export const HypothesisBuildPayloadSchema = z.object({
   hypothesisId: z.string().min(1),
   params: z.record(z.unknown()).optional(),
   backtestBackend: z.enum(['research_platform']).optional(),
+  /** Depth in the research→build→backtest cycle chain, propagated from research.run_cycle. */
+  cycleDepth: z.number().int().min(0).default(0),
   platformRun: z.object({
     datasetId: z.string().min(1),
     symbols: z.array(z.string().min(1)).min(1),
@@ -111,5 +113,6 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   await runPlatformBacktest({
     services, task, buildId, bundle, profile, hypothesisId: hypothesis.id,
     params, platformRun: payload.platformRun!, paramsHash, baselineRef, resumeToken,
+    cycleDepth: payload.cycleDepth,
   });
 };

@@ -1,7 +1,7 @@
 import type { AppServices } from '../app-services.ts';
 import type { BacktestRun } from '../../domain/backtest-run.ts';
 import { pollOverlayRun } from '../../research/run-backtest.ts';
-import { event, errMsg, applyPlatformTerminalOutcome } from './backtest-support.ts';
+import { event, errMsg, applyPlatformTerminalOutcome, enqueueBacktestCompleted } from './backtest-support.ts';
 
 export type ResumeOutcome =
   | { kind: 'completed'; runId: string }
@@ -54,6 +54,14 @@ export async function resumePlatformRun(services: AppServices, run: BacktestRun)
 
   const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId: fresh.hypothesisId }, outcome);
   if (result.kind === 'completed') {
+    await enqueueBacktestCompleted(services, task, {
+      backtestRunId: runId,
+      hypothesisId: fresh.hypothesisId,
+      strategyProfileId: fresh.strategyProfileId,
+      decision: result.decision,
+      reasons: result.reasons,
+      cycleDepth: typeof task.payload.cycleDepth === 'number' ? task.payload.cycleDepth : 0,
+    });
     await services.events.append(event(task.id, 'backtest.resume.completed', { runId }));
     return { kind: 'completed', runId };
   }

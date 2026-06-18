@@ -1,0 +1,151 @@
+// src/orchestrator/handlers/backtest-completed.handler.test.ts
+import { describe, it, expect } from 'vitest';
+import { backtestCompletedHandler, MAX_CYCLE_DEPTH } from './backtest-completed.handler.ts';
+import { makeServices } from '../../../test/support/make-services.ts';
+import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
+import type { ResearchTask } from '../../domain/types.ts';
+
+function task(payload: Record<string, unknown>): ResearchTask {
+  const now = '2026-01-01T00:00:00Z';
+  return {
+    id: 'task-bt-completed',
+    taskType: 'backtest.completed',
+    source: 'operator',
+    correlationId: 'corr-1',
+    status: 'running',
+    payload,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+const BASE_PAYLOAD = {
+  backtestRunId: 'bt-run-1',
+  hypothesisId: 'hyp-1',
+  strategyProfileId: 'profile-1',
+  reasons: ['strong_robust_edge'],
+  cycleDepth: 0,
+};
+
+describe('backtestCompletedHandler', () => {
+  describe('PAPER_CANDIDATE', () => {
+    it('emits hypothesis.paper_candidate event and does NOT enqueue new task', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PAPER_CANDIDATE' }), s);
+
+      const events = await s.events.listByTask('task-bt-completed');
+      expect(events.map((e) => e.type)).toContain('hypothesis.paper_candidate');
+      expect(queue.queued).toHaveLength(0);
+    });
+  });
+
+  describe('PASS', () => {
+    it('emits hypothesis.passed event and does NOT enqueue new task', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
+
+      const events = await s.events.listByTask('task-bt-completed');
+      expect(events.map((e) => e.type)).toContain('hypothesis.passed');
+      expect(queue.queued).toHaveLength(0);
+    });
+  });
+
+  describe('INCONCLUSIVE', () => {
+    it('emits hypothesis.inconclusive and does NOT retry (insufficient data)', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'INCONCLUSIVE', reasons: ['insufficient_sample'] }), s);
+
+      const events = await s.events.listByTask('task-bt-completed');
+      expect(events.map((e) => e.type)).toContain('hypothesis.inconclusive');
+      expect(queue.queued).toHaveLength(0);
+    });
+  });
+
+  describe('FAIL', () => {
+    it('emits hypothesis.failed + enqueues research.run_cycle retry when cycleDepth < MAX_CYCLE_DEPTH', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'FAIL', reasons: ['no_improvement_over_baseline'], cycleDepth: 0 }),
+        s,
+      );
+
+      const events = await s.events.listByTask('task-bt-completed');
+      const eventTypes = events.map((e) => e.type);
+      expect(eventTypes).toContain('hypothesis.failed');
+      expect(eventTypes).toContain('research.retry_enqueued');
+
+      const enqueued = queue.queued;
+      expect(enqueued).toHaveLength(1);
+      const first = enqueued[0]!;
+      expect(first.taskType).toBe('research.run_cycle');
+
+      const retryTask = await s.researchTasks.findById(first.taskId);
+      expect(retryTask).not.toBeNull();
+      expect(retryTask!.payload).toMatchObject({
+        strategyProfileId: 'profile-1',
+        cycleDepth: 1,
+        feedback: { hypothesisId: 'hyp-1', decision: 'FAIL' },
+      });
+    });
+
+    it('does NOT retry when cycleDepth >= MAX_CYCLE_DEPTH and emits budget_exhausted event', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'FAIL', cycleDepth: MAX_CYCLE_DEPTH }),
+        s,
+      );
+
+      const events = await s.events.listByTask('task-bt-completed');
+      const eventTypes = events.map((e) => e.type);
+      expect(eventTypes).toContain('hypothesis.failed');
+      expect(eventTypes).toContain('research.retry_budget_exhausted');
+      expect(queue.queued).toHaveLength(0);
+    });
+  });
+
+  describe('MODIFY', () => {
+    it('emits hypothesis.modify_required + enqueues research.run_cycle with feedback', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'MODIFY', reasons: ['drawdown_regression'], cycleDepth: 1 }),
+        s,
+      );
+
+      const events = await s.events.listByTask('task-bt-completed');
+      const eventTypes = events.map((e) => e.type);
+      expect(eventTypes).toContain('hypothesis.modify_required');
+      expect(eventTypes).toContain('research.retry_enqueued');
+
+      const enqueued = queue.queued;
+      expect(enqueued).toHaveLength(1);
+      const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+      expect(retryTask!.payload).toMatchObject({
+        cycleDepth: 2,
+        feedback: { decision: 'MODIFY', reasons: ['drawdown_regression'] },
+      });
+    });
+
+    it('stops retrying when cycleDepth >= MAX_CYCLE_DEPTH', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'MODIFY', cycleDepth: MAX_CYCLE_DEPTH }),
+        s,
+      );
+      expect(queue.queued).toHaveLength(0);
+    });
+  });
+
+  it('throws on invalid payload', async () => {
+    const s = makeServices();
+    await expect(
+      backtestCompletedHandler(task({ decision: 'UNKNOWN_DECISION' }), s),
+    ).rejects.toThrow('invalid backtest.completed payload');
+  });
+});

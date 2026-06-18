@@ -8,7 +8,7 @@ import type { BacktestRun } from '../../domain/backtest-run.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
 import type { PlatformRunConfig, Ref, SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
 import { pollOverlayRun } from '../../research/run-backtest.ts';
-import { event, applyPlatformTerminalOutcome } from './backtest-support.ts';
+import { event, applyPlatformTerminalOutcome, enqueueBacktestCompleted } from './backtest-support.ts';
 
 export interface RunPlatformBacktestInput {
   services: AppServices;
@@ -22,6 +22,8 @@ export interface RunPlatformBacktestInput {
   paramsHash: string;
   baselineRef: Ref;
   resumeToken: string;
+  /** Depth in the research→build→backtest cycle chain (0 = first run). */
+  cycleDepth: number;
 }
 
 /**
@@ -30,7 +32,7 @@ export interface RunPlatformBacktestInput {
  * platform rejection + MetricMappingError are recorded business/data failures (no throw).
  */
 export async function runPlatformBacktest(input: RunPlatformBacktestInput): Promise<void> {
-  const { services, task, buildId, bundle, profile, hypothesisId, params, platformRun, paramsHash, baselineRef, resumeToken } = input;
+  const { services, task, buildId, bundle, profile, hypothesisId, params, platformRun, paramsHash, baselineRef, resumeToken, cycleDepth } = input;
   const now = () => new Date().toISOString();
 
   // 1. Pre-submit platform validation gate (fail-closed into the build-failure path; no submit).
@@ -71,5 +73,15 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
     await services.events.append(event(task.id, 'backtest.pending', { runId, platformRunId: handle.runId, resumeToken }));
     return;
   }
-  await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId }, outcome);
+  const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId }, outcome);
+  if (result.kind === 'completed') {
+    await enqueueBacktestCompleted(services, task, {
+      backtestRunId: runId,
+      hypothesisId,
+      strategyProfileId: profile.id,
+      decision: result.decision,
+      reasons: result.reasons,
+      cycleDepth,
+    });
+  }
 }

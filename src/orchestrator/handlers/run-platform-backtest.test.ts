@@ -37,7 +37,7 @@ async function setup(over: Partial<AppServices> = {}) {
     sdkContractVersion: 'sdk', bundleContractVersion: 'bundle', issues: [], attempt: 1, createdAt: 'now', updatedAt: 'now' });
   const baselineRef = { id: 'strategy:p1', version: 'v1' };
   const common = { services: s, task: task(), buildId, bundle: b, profile: profile(), hypothesisId: 'h1',
-    params: {}, platformRun: PLATFORM_RUN, paramsHash: 'ph-test', baselineRef, resumeToken: 'rt-test' };
+    params: {}, platformRun: PLATFORM_RUN, paramsHash: 'ph-test', baselineRef, resumeToken: 'rt-test', cycleDepth: 0 };
   return { s, buildId, common };
 }
 

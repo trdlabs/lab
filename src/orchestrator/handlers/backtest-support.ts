@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AppServices } from '../app-services.ts';
-import type { ResearchTask } from '../../domain/types.ts';
+import type { ResearchTask, QueueEnvelope } from '../../domain/types.ts';
 import type { PlatformRunOutcome } from '../../research/run-backtest.ts';
 import { mapPlatformComparison, MetricMappingError } from '../../domain/platform-comparison.ts';
 import type { AgentEvent } from '../../ports/agent-event.repository.ts';
@@ -9,6 +9,7 @@ import type { BacktestCompletion } from '../../domain/backtest-run.ts';
 import type { Evaluation } from '../../domain/evaluation.ts';
 import type { PlatformRunConfig, Ref } from '../../ports/research-platform.port.ts';
 import { evaluateBacktest } from '../../validation/evaluator.ts';
+import type { EvaluationDecision } from '../../validation/evaluator.ts';
 
 export function event(taskId: string, type: string, payload: Record<string, unknown>): AgentEvent {
   return { id: randomUUID(), taskId, type, payload, createdAt: new Date().toISOString() };
@@ -50,12 +51,17 @@ export function computeParamsHash(
   }));
 }
 
+export interface BacktestCompletionResult {
+  decision: EvaluationDecision;
+  reasons: string[];
+}
+
 /** Shared completion + evaluation tail (extracted verbatim from the SP-4 path). */
 export async function finalizeBacktestCompletion(
   services: AppServices,
   task: ResearchTask,
   args: { runId: string; hypothesisId: string; comparison: ComparisonSummary; artifactRefs: string[] },
-): Promise<void> {
+): Promise<BacktestCompletionResult> {
   const now = () => new Date().toISOString();
   const c = args.comparison;
   const completion: BacktestCompletion = {
@@ -77,10 +83,47 @@ export async function finalizeBacktestCompletion(
   await services.evaluations.create(evaluation);
   await services.backtests.markEvaluated(args.runId);
   await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: outcome.decision, reasons: outcome.reasons }));
+  return { decision: outcome.decision, reasons: outcome.reasons };
+}
+
+/** Enqueue a backtest.completed task so the router can act on the evaluation outcome. */
+export async function enqueueBacktestCompleted(
+  services: AppServices,
+  task: ResearchTask,
+  args: {
+    backtestRunId: string;
+    hypothesisId: string;
+    strategyProfileId: string;
+    decision: EvaluationDecision;
+    reasons: string[];
+    cycleDepth: number;
+  },
+): Promise<void> {
+  const completedTaskId = randomUUID();
+  const completedTask: ResearchTask = {
+    id: completedTaskId,
+    taskType: 'backtest.completed',
+    source: task.source,
+    correlationId: task.correlationId,
+    status: 'queued',
+    payload: args,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await services.researchTasks.create(completedTask);
+  const envelope: QueueEnvelope = {
+    taskId: completedTaskId,
+    taskType: 'backtest.completed',
+    correlationId: task.correlationId,
+    source: task.source,
+    attempt: 1,
+    dedupeKey: `backtest.completed:${args.backtestRunId}`,
+  };
+  await services.taskQueue.enqueue(envelope);
 }
 
 export type PlatformTerminalResult =
-  | { kind: 'completed' }
+  | { kind: 'completed'; decision: EvaluationDecision; reasons: string[] }
   | { kind: 'failed'; reason: 'platform_rejected' | 'result_invalid' };
 
 /**
@@ -115,6 +158,6 @@ export async function applyPlatformTerminalOutcome(
     }
     throw err;
   }
-  await finalizeBacktestCompletion(services, task, { runId, hypothesisId, comparison, artifactRefs: [...outcome.artifactIds] });
-  return { kind: 'completed' };
+  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, comparison, artifactRefs: [...outcome.artifactIds] });
+  return { kind: 'completed', decision: completion.decision, reasons: completion.reasons };
 }

@@ -22,6 +22,14 @@ export const ResearchRunCyclePayloadSchema = z.object({
   symbol: z.string().min(1).optional(),
   ts: z.string().min(1).optional(),
   maxHypotheses: z.number().int().positive().optional(),
+  /** Depth in the research→build→backtest cycle chain. 0 = initial run. */
+  cycleDepth: z.number().int().min(0).default(0),
+  /** Context from a previous FAIL / MODIFY evaluation to guide the new cycle. */
+  feedback: z.object({
+    hypothesisId: z.string(),
+    decision: z.string(),
+    reasons: z.array(z.string()),
+  }).optional(),
 });
 
 function errMsg(err: unknown): string {
@@ -175,7 +183,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
       const buildTask: import('../../domain/types.ts').ResearchTask = {
         id: buildTaskId, taskType: 'hypothesis.build', source: task.source,
         correlationId: task.correlationId, status: 'queued',
-        payload: { hypothesisId: hypothesis.id, platformRun: services.defaultPlatformRun },
+        payload: { hypothesisId: hypothesis.id, platformRun: services.defaultPlatformRun, cycleDepth: payload.cycleDepth },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       await services.researchTasks.create(buildTask);
