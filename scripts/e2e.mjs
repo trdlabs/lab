@@ -37,6 +37,7 @@ function fail(reason) { console.error(`[e2e ${elapsed()}] FAIL  ${reason}`); pro
 async function postTask(payload) {
   const res = await fetch(`${INGRESS_URL}/tasks`, {
     method: 'POST',
+    signal: AbortSignal.timeout(15_000),
     headers: { Authorization: `Bearer ${TASK_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
@@ -57,6 +58,7 @@ async function pollEvents(taskId, predicate, timeoutMs, intervalMs = POLL_INTERV
     url.searchParams.set('limit', '50');
 
     const res = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(15_000),
       headers: { Authorization: `Bearer ${READ_TOKEN}` },
     });
     if (!res.ok) throw new Error(`GET /v1/agent-events ${res.status}`);
@@ -69,7 +71,9 @@ async function pollEvents(taskId, predicate, timeoutMs, intervalMs = POLL_INTERV
     if (body.page?.nextCursor) {
       after = body.page.nextCursor;
     }
-    await new Promise(r => setTimeout(r, intervalMs));
+    if (!body.page?.nextCursor) {
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
   }
   return null;
 }
@@ -94,17 +98,22 @@ log(`strategy.onboard taskId=${taskId1}`);
 
 // ── Шаг 2: Ждём profileId ───────────────────────────────────────────────────
 log('waiting for strategy profile (deduped or analyst.completed)…');
-let profileId = await pollEvents(taskId1, ev => {
-  if (ev.type === 'strategy.onboard.deduped') {
-    log(`deduped: strategyId=${ev.payload?.strategyId}`);
-    return ev.payload?.strategyId ?? null;
-  }
-  if (ev.type === 'strategy_analyst.completed') {
-    log('analyst.completed (fresh profile), will re-submit to get profileId…');
-    return 'FRESH';
-  }
-  return false;
-}, ONBOARD_TIMEOUT_MS);
+let profileId;
+try {
+  profileId = await pollEvents(taskId1, ev => {
+    if (ev.type === 'strategy.onboard.deduped') {
+      log(`deduped: strategyId=${ev.payload?.strategyId}`);
+      return ev.payload?.strategyId ?? null;
+    }
+    if (ev.type === 'strategy_analyst.completed') {
+      log('analyst.completed (fresh profile), will re-submit to get profileId…');
+      return 'FRESH';
+    }
+    return false;
+  }, ONBOARD_TIMEOUT_MS);
+} catch (err) {
+  fail(`polling strategy events: ${err.message}`);
+}
 
 if (profileId === null) fail(`strategy.onboard timed out after ${ONBOARD_TIMEOUT_MS / 1000}s`);
 
@@ -155,13 +164,19 @@ log(`research.run_cycle taskId=${taskId2}`);
 
 // ── Шаг 5: Ждём research.run_cycle.completed ────────────────────────────────
 log('waiting for research.run_cycle.completed (up to 8 min)…');
-const cycleResult = await pollEvents(taskId2, ev => {
-  if (ev.type === 'research.run_cycle.completed') return 'DONE';
-  if (ev.type === 'research.run_cycle.failed') return `FAILED:${ev.payload?.error ?? 'unknown'}`;
-  return false;
-}, RESEARCH_TIMEOUT_MS, RESEARCH_POLL_MS);
+let cycleResult;
+try {
+  cycleResult = await pollEvents(taskId2, ev => {
+    if (ev.type === 'research.run_cycle.completed') return 'DONE';
+    if (ev.type === 'research.run_cycle.failed') return `FAILED:${ev.payload?.error ?? 'unknown'}`;
+    return false;
+  }, RESEARCH_TIMEOUT_MS, RESEARCH_POLL_MS);
+} catch (err) {
+  fail(`polling research events: ${err.message}`);
+}
 
 if (!cycleResult) fail(`research.run_cycle timed out after ${RESEARCH_TIMEOUT_MS / 1000}s`);
 if (cycleResult.startsWith('FAILED:')) fail(cycleResult);
 
 log(`PASS  (total ${elapsed()})`);
+process.exit(0);

@@ -28,6 +28,17 @@ echo "[smoke:${MODE}] office (host ports)…"
 curl -fsS "http://localhost:${SRV_PORT}/api/office/agents/statuses" >/dev/null && pass "office server (/api/office/agents/statuses)" || bad "office server"
 curl -fsS "http://localhost:${WEB_PORT}/" | grep -qi "<!doctype html" && pass "office web (/)" || bad "office web"
 
+if [ "$MODE" = "demo" ]; then
+  echo "[smoke:${MODE}] mock-platform (via ingress container)…"
+  MOCK_TOKEN="${MOCK_OPS_TOKEN:-}"
+  $COMPOSE exec -T ingress node -e "fetch('http://mock-platform:8839/ops/discover',{headers:{Authorization:'Bearer ${MOCK_TOKEN}'}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+    && pass "mock-platform /ops/discover" || bad "mock-platform /ops/discover"
+
+  echo "[smoke:${MODE}] backtester (via ingress container)…"
+  $COMPOSE exec -T ingress node -e "fetch('http://backtester:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" \
+    && pass "backtester /health" || bad "backtester /health"
+fi
+
 if [ "$MODE" != "demo" ]; then
   echo "[smoke:${MODE}] optional private Ops Read…"
   if [ -n "${TRADING_PLATFORM_READ_URL:-}" ] && [ -n "${TRADING_PLATFORM_READ_TOKEN:-}" ]; then

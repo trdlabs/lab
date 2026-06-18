@@ -10,3 +10,4 @@ dist
 .env.demo
 .env.local
 .env.vps
+.worktrees/
