@@ -10,4 +10,9 @@ dist
 .env.demo
 .env.local
 .env.vps
+
+# Git worktrees (managed by tooling)
 .worktrees/
+
+# Eval run outputs (generated artifacts)
+docs/eval-outputs/
