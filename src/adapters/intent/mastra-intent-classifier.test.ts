@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Agent } from '@mastra/core/agent';
 import { MastraIntentClassifier } from './mastra-intent-classifier.ts';
 import { ChatIntentSchema } from '../../chat/intent.ts';
+import { ChatIntentProviderSchema } from '../../chat/intent-provider-schema.ts';
 import { loadEnv } from '../../config/env.ts';
 import { resolveLanguageModel } from '../llm/model-provider.ts';
 import { createIntentClassifierAgent } from '../../mastra/agents/intent-classifier.agent.ts';
@@ -40,8 +41,23 @@ describe('MastraIntentClassifier — strict (production default) path', () => {
     const c = new MastraIntentClassifier(agent, 'm');
     const out = await c.classify('hi');
     expect(out).toEqual({ intent: 'help', confidence: 0.9 });
-    expect(calls[0]!.options.structuredOutput?.schema).toBeDefined();
-    expect(calls[0]!.options.structuredOutput?.errorStrategy).toBeUndefined(); // prod call unchanged
+    expect(calls[0]!.options.structuredOutput?.schema).toBe(ChatIntentProviderSchema);
+    expect(calls[0]!.options.structuredOutput?.errorStrategy).toBeUndefined();
+  });
+
+  it('strips null optional fields before returning (OpenAI-compatible provider output)', async () => {
+    const { agent } = mockAgent({
+      object: {
+        intent: 'strategy.onboard', confidence: 0.9,
+        strategyText: 'лонг на отскоке', hypothesisText: null, entityRef: null,
+        taskIdHint: null, requestedOutcome: 'onboard', rationale: null,
+      },
+    });
+    const c = new MastraIntentClassifier(agent, 'm');
+    expect(await c.classify('стратегия')).toEqual({
+      intent: 'strategy.onboard', confidence: 0.9,
+      strategyText: 'лонг на отскоке', requestedOutcome: 'onboard',
+    });
   });
 
   it('propagates a Mastra validation throw (production behaviour preserved)', async () => {

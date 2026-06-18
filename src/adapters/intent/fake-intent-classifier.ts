@@ -31,6 +31,28 @@ function afterColon(message: string): string {
   return i >= 0 ? message.slice(i + 1).trim() : '';
 }
 
+function looksLikeStandaloneStrategyDescription(message: string): boolean {
+  const lower = message.toLowerCase();
+  const signals = [
+    'лонг',
+    'шорт',
+    'свеч',
+    'тейк',
+    'стоп',
+    'dca',
+    'open interest',
+    'oi',
+    'ликвидац',
+    'входим',
+    'вход',
+    'выход',
+    'добор',
+    'безубыт',
+  ];
+  const hits = signals.filter((token) => lower.includes(token)).length;
+  return lower.includes('стратег') && message.trim().length >= 80 && hits >= 3;
+}
+
 function classifyByRules(message: string): ChatIntent {
   const lower = message.toLowerCase();
   const has = (...ks: string[]): boolean => ks.some((k) => lower.includes(k));
@@ -68,6 +90,15 @@ function classifyByRules(message: string): ChatIntent {
       const wantsResearch = has('исследу', 'research');
       return {
         intent: 'strategy.onboard', confidence: 0.9, strategyText: text,
+        requestedOutcome: wantsResearch ? 'research' : 'onboard',
+      };
+    }
+    if (looksLikeStandaloneStrategyDescription(message)) {
+      const wantsResearch = has('исследу', 'research');
+      return {
+        intent: 'strategy.onboard',
+        confidence: 0.9,
+        strategyText: message.trim(),
         requestedOutcome: wantsResearch ? 'research' : 'onboard',
       };
     }

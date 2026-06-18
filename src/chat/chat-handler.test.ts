@@ -76,6 +76,17 @@ describe('handleChatMessage', () => {
     expect(queue.queued).toHaveLength(1);
   });
 
+  it('standalone strategy description creates an onboarding task instead of asking for clarification', async () => {
+    const { d, queue } = deps();
+    const msg = 'Стратегия только в лонг. Работаем на 1m свечах. После резкого пролива цены ищем подтверждённый отскок от локального минимума. Входим в лонг, когда цена начинает восстанавливаться, open interest восстанавливается, и на рынке видны long-ликвидации. Первый тейк на +3.5%, второй тейк на +5%, стоп -12%, выход по времени через 180 минут. Допускается DCA до двух доборов, после первого тейка стоп переносится в безубыток.';
+    const r = await handleChatMessage({ message: msg, session: session(), source: 'web' }, d);
+    expect(r.kind).toBe('task_created');
+    if (r.kind === 'task_created') {
+      expect(r.taskType).toBe('strategy.onboard');
+    }
+    expect(queue.queued).toHaveLength(1);
+  });
+
   it('results.trading -> capability_not_available, no task', async () => {
     const { d, queue } = deps();
     const r = await handleChatMessage({ message: 'покажи результаты торговли за сегодня', session: session(), source: 'web' }, d);

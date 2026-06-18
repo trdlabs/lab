@@ -45,6 +45,15 @@ describe('FakeIntentClassifier (rule-based)', () => {
     expect(r.strategyText).toBeUndefined();
   });
 
+  it('classifies a standalone rich strategy description as onboarding with full strategyText', () => {
+    const message = 'Стратегия только в лонг. Работаем на 1m свечах. После резкого пролива цены ищем подтверждённый отскок от локального минимума. Входим в лонг, когда цена начинает восстанавливаться, open interest восстанавливается, и на рынке видны long-ликвидации. Первый тейк на +3.5%, второй тейк на +5%, стоп -12%, выход по времени через 180 минут. Допускается DCA до двух доборов, после первого тейка стоп переносится в безубыток.';
+    const r = classify(message);
+    expect(r.intent).toBe('strategy.onboard');
+    expect(r.confidence).toBe(0.9);
+    expect(r.strategyText).toBe(message);
+    expect(r.requestedOutcome).toBe('onboard');
+  });
+
   it('classifies "проверь последнюю гипотезу" as hypothesis.build via last_hypothesis', () => {
     const r = classify('проверь последнюю гипотезу');
     expect(r.intent).toBe('hypothesis.build');

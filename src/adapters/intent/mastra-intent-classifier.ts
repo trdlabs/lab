@@ -2,6 +2,8 @@ import type { Agent } from '@mastra/core/agent';
 import type { ZodTypeAny } from 'zod';
 import type { IntentClassifierPort } from '../../ports/intent-classifier.port.ts';
 import { ChatIntentSchema } from '../../chat/intent.ts';
+import { ChatIntentProviderSchema } from '../../chat/intent-provider-schema.ts';
+import { withoutNullProps } from '../../chat/normalize-intent-output.ts';
 
 function buildPrompt(message: string): string {
   return `Classify the following user message.\n\n--- USER MESSAGE START ---\n${message}\n--- USER MESSAGE END ---\n\nReturn the structured intent.`;
@@ -65,12 +67,12 @@ export class MastraIntentClassifier implements IntentClassifierPort {
 
   async classify(message: string): Promise<unknown> {
     if (this.schemaValidation === 'strict') {
-      // PRODUCTION path — Mastra validates inside generate(); the guard re-validates downstream.
+      // PRODUCTION path — OpenAI-compatible providers require all keys in `required` (nullable).
       const result = await this.agent.generate(buildPrompt(message), {
-        structuredOutput: { schema: ChatIntentSchema },
+        structuredOutput: { schema: ChatIntentProviderSchema },
       });
-      // Return raw object; the guard's schema gate is the trust boundary.
-      return result.object;
+      // Normalize null optionals -> absent; the guard re-validates against ChatIntentSchema.
+      return withoutNullProps(result.object);
     }
 
     // EVAL path — never let Mastra's internal zod gate throw; the harness re-validates. Uses
@@ -79,6 +81,7 @@ export class MastraIntentClassifier implements IntentClassifierPort {
     const result: { object?: unknown; text?: unknown } = await this.agent.generate(buildPrompt(message), {
       structuredOutput: { schema: this.requestSchema, errorStrategy: 'warn' },
     });
-    return result.object != null ? result.object : parseRawText(result.text);
+    const raw = result.object != null ? result.object : parseRawText(result.text);
+    return withoutNullProps(raw);
   }
 }

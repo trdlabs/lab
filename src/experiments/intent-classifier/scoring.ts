@@ -3,25 +3,13 @@
 // chat guard re-validates): the classifier output is parsed before anything is read from it.
 // Primary signal = intent match. Secondary signal = key payload-field correctness.
 import { ChatIntentSchema } from '../../chat/intent.ts';
+import { withoutNullProps } from '../../chat/normalize-intent-output.ts';
 import type { CaseResult, EvalCase, EvalCaseExpect, PayloadCheck, ScoreResult } from './types.ts';
 
 export const DEFAULT_THRESHOLD = 0.7;
 
 function nonEmptyString(v: unknown): boolean {
   return typeof v === 'string' && v.trim().length > 0;
-}
-
-/** OpenAI-strict eval outputs express "absent" as null (the eval schema is required-but-nullable).
- *  Drop null-valued top-level keys so the prod ChatIntentSchema gate — where those fields are
- *  `.optional()` (i.e. string|undefined, not null) — treats them as absent instead of rejecting null.
- *  Eval-only normalization; the prod guard is never touched. Non-objects pass through unchanged. */
-function withoutNullProps(raw: unknown): unknown {
-  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (v !== null) out[k] = v;
-  }
-  return out;
 }
 
 /** Best-effort `intent` from a raw (possibly schema-invalid) output, so a deviation is a visible

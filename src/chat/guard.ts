@@ -7,6 +7,7 @@ import { StrategyAnalystInputSchema, type SourceKind } from '../domain/strategy-
 import { ResearchRunCyclePayloadSchema } from '../orchestrator/handlers/research-run-cycle.handler.ts';
 import { HypothesisBuildPayloadSchema } from '../orchestrator/handlers/hypothesis-build.handler.ts';
 import { ChatIntentSchema, type ChatIntent, type AllowedIntent } from './intent.ts';
+import { withoutNullProps } from './normalize-intent-output.ts';
 import {
   outOfScope, help, capabilityNotAvailable, needsClarification, taskStatus, type ChatResponse,
 } from './response.ts';
@@ -20,7 +21,7 @@ export type ParseResult =
 
 /** Schema gate: the single trust boundary for advisory classifier output. */
 export function parseIntent(raw: unknown): ParseResult {
-  const v = validateWithSchema(ChatIntentSchema, raw);
+  const v = validateWithSchema(ChatIntentSchema, withoutNullProps(raw));
   return v.status === 'valid' ? { ok: true, intent: v.data } : { ok: false, issues: v.issues };
 }
 

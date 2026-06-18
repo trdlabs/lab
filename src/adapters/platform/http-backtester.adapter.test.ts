@@ -99,12 +99,12 @@ const opts: SubmitOverlayRunOptions = {
 };
 
 describe('HttpBacktesterAdapter', () => {
-  it('submits via the client with a strategy moduleBundle + baseline moduleRef', async () => {
+  it('submits via the client with an overlay moduleBundle + baseline moduleRef', async () => {
     const fake = new FakeClient();
     const handle = await new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, opts);
     expect(handle.status).toBe('accepted');
     expect(fake.submitted?.moduleRef).toEqual({ id: 'base', version: 'v1' });
-    expect(fake.submitted?.moduleBundle?.manifest.kind).toBe('strategy');
+    expect(fake.submitted?.moduleBundle?.manifest.kind).toBe('overlay');
     expect(fake.submitted?.moduleBundle?.manifest.id).toBe('mod');
     expect(fake.submitted?.correlationId).toBe('c1');
     expect(fake.submitted?.resumeToken).toBe('t1');

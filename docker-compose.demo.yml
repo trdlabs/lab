@@ -20,6 +20,8 @@ services:
       MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-16-synthetic}"
       MOCK_REPLAY_MODE: "${MOCK_REPLAY_MODE:-loop}"
       MOCK_REPLAY_SPEED: "${MOCK_REPLAY_SPEED:-1}"
+    volumes:
+      - ${TRADING_MOCK_PLATFORM_PATH:-../trading-mock-platform}/data/snapshots:/app/data/snapshots:ro
     expose:
       - "8839"
     healthcheck:
@@ -40,6 +42,7 @@ services:
       BACKTESTER_HOST: "0.0.0.0"
       BACKTESTER_PORT: "8080"
       BACKTESTER_AUTH_TOKEN: "${BACKTESTER_AUTH_TOKEN:-demo-backtester-token}"
+      BACKTESTER_ENABLE_OVERLAY_ENGINE: "true"
       BACKTESTER_DATA_SOURCE: "mock"
       BACKTESTER_MOCK_PLATFORM_URL: "http://mock-platform:8839"
       BACKTESTER_MOCK_PLATFORM_TOKEN: "${MOCK_OPS_TOKEN:-}"
