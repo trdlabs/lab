@@ -9,11 +9,14 @@ import type { HypothesisProposalRepository } from '../ports/hypothesis-proposal.
 import type { AgentEventRepository } from '../ports/agent-event.repository.ts';
 import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
+import type { ActionProposal } from '../domain/action-proposal.ts';
+import { createAndEnqueueTask } from '../orchestrator/task-intake.ts';
 import { parseIntent, planChatAction, type PlanDecision } from './guard.ts';
 import { buildActionProposal } from './action-proposal.ts';
+import { resolveConfirmationReply } from './confirmation-resolver.ts';
 import {
-  assistantMessage, rejected, errorResponse,
-  type ChatResponse, type EvidencePresentation, type ProposedActionView,
+  assistantMessage, taskCreated, taskStatus, rejected, errorResponse,
+  type ChatResponse, type EvidencePresentation, type PlannedNextStep, type ProposedActionView,
 } from './response.ts';
 
 export interface ChatHandlerDeps {
@@ -43,6 +46,56 @@ export async function handleChatMessage(input: HandleChatInput, deps: ChatHandle
   const now = (): string => new Date().toISOString();
   const ev = (type: string, payload: Record<string, unknown>): Promise<void> =>
     deps.events.append({ id: randomUUID(), taskId: chatRequestId, type, payload, createdAt: now() });
+
+  // Confirmation consumption (second turn): when the session already holds a pending
+  // proposal, the reply is resolved against the STORED snapshot — never reclassified.
+  // The classifier is deliberately NOT consulted here, and a task is created exactly
+  // once, only on confirmed_now, through the same createAndEnqueueTask chokepoint.
+  const pending = input.session.pendingInteraction;
+  if (pending?.kind === 'action_confirmation') {
+    const proposalId = pending.proposalId;
+    const clearPending = (extra: Partial<ChatSessionContext> = {}): Promise<void> =>
+      deps.sessions.upsert({ ...input.session, ...extra, pendingInteraction: undefined, updatedAt: now() });
+    const reply = resolveConfirmationReply(input.message);
+
+    if (reply === 'cancel') {
+      await deps.proposals.cancelPending(proposalId, sid, now());
+      await clearPending();
+      await ev('chat.proposal.cancelled', { chatRequestId, proposalId, sessionId: sid });
+      return assistantMessage(sid, 'Отменил. Если нужно — пришлите стратегию или запрос заново.', { actions: [] });
+    }
+
+    if (reply === 'unresolved') {
+      // Stay parked on the proposal: do not classify and do not mutate any state.
+      return assistantMessage(sid, 'Не понял ответ. Подтвердите запуск или отмените действие.', {
+        actions: PENDING_ACTIONS,
+        pendingInteractionId: proposalId,
+      });
+    }
+
+    // confirm
+    const result = await deps.proposals.confirmPending(proposalId, sid, now());
+    switch (result.kind) {
+      case 'confirmed_now':
+        return executeConfirmedProposal(result.proposal, input.session, deps, ev, now);
+      case 'already_confirmed': {
+        // Replay: never enqueue again. Surface the already-created task's status.
+        const taskId = result.proposal.confirmedTaskId;
+        if (!taskId) return assistantMessage(sid, 'Подтверждение уже обрабатывается.', { actions: [] });
+        const task = await deps.researchTasks.findById(taskId);
+        return task
+          ? taskStatus(sid, taskId, task.status)
+          : taskCreated(sid, taskId, result.proposal.task.taskType, 'queued');
+      }
+      case 'expired':
+        await clearPending();
+        await ev('chat.proposal.expired', { chatRequestId, proposalId, sessionId: sid });
+        return assistantMessage(sid, 'Срок подтверждения истёк. Пришлите запрос заново.', { actions: [] });
+      case 'not_found':
+        await clearPending();
+        return assistantMessage(sid, 'Не нашёл активного подтверждения. Пришлите запрос заново.', { actions: [] });
+    }
+  }
 
   await ev('chat.intent_classifier.started', {
     chatRequestId, sessionId: sid, adapter: deps.classifier.adapter, model: deps.classifier.model,
@@ -104,11 +157,74 @@ export async function handleChatMessage(input: HandleChatInput, deps: ChatHandle
 
   const interpretation = interpretProposal(decision);
   const evidence: EvidencePresentation[] = [{ kind: 'interpretation', text: interpretation }];
-  const actions: ProposedActionView[] = [
-    { id: 'confirm', label: 'Подтвердить', style: 'primary' },
-    { id: 'cancel', label: 'Отмена', style: 'secondary' },
-  ];
-  return assistantMessage(sid, interpretation, { evidence, actions, pendingInteractionId: proposalId });
+  return assistantMessage(sid, interpretation, { evidence, actions: PENDING_ACTIONS, pendingInteractionId: proposalId });
+}
+
+/** The confirm/cancel view pair offered while a proposal awaits the operator. */
+const PENDING_ACTIONS: ProposedActionView[] = [
+  { id: 'confirm', label: 'Подтвердить', style: 'primary' },
+  { id: 'cancel', label: 'Отмена', style: 'secondary' },
+];
+
+/**
+ * The single place a confirmed proposal turns into a task. Runs the STORED snapshot
+ * through createAndEnqueueTask, recreates the auto-chain ChatPlan when the snapshot
+ * carried one, links the task back to the proposal, and clears the pending state.
+ * Keeping enqueue + chain creation here means the confirm path cannot drift from the
+ * behavior the proposal promised on turn one.
+ */
+async function executeConfirmedProposal(
+  proposal: ActionProposal,
+  session: ChatSessionContext,
+  deps: ChatHandlerDeps,
+  ev: (type: string, payload: Record<string, unknown>) => Promise<void>,
+  now: () => string,
+): Promise<ChatResponse> {
+  const sid = session.sessionId;
+  const intake = await createAndEnqueueTask(
+    {
+      taskType: proposal.task.taskType,
+      source: proposal.source,
+      payload: proposal.task.payload,
+      correlationId: randomUUID(),
+      dedupeKey: proposal.task.dedupeKey,
+    },
+    { repo: deps.researchTasks, queue: deps.queue },
+  );
+
+  let pendingPlanId: string | undefined;
+  let plannedNextStep: PlannedNextStep | undefined;
+  const chain = proposal.task.chain;
+  if (chain) {
+    const planId = randomUUID();
+    const ts = now();
+    await deps.plans.create({
+      id: planId, sessionId: sid, afterTaskId: intake.taskId, nextTaskType: chain.nextTaskType,
+      resolveProfileByFingerprint: chain.resolveProfileByFingerprint, correlationId: randomUUID(),
+      status: 'pending', createdAt: ts, updatedAt: ts,
+    });
+    pendingPlanId = planId;
+    plannedNextStep = { taskType: chain.nextTaskType, after: proposal.task.taskType };
+  }
+
+  await deps.proposals.attachTask(proposal.id, intake.taskId, now());
+
+  await deps.sessions.upsert({
+    ...session,
+    lastResearchTaskId: intake.taskId,
+    lastUserGoal: proposal.task.userGoal,
+    pendingPlanId,
+    pendingInteraction: undefined,
+    updatedAt: now(),
+  });
+
+  await ev('chat.proposal.confirmed', { proposalId: proposal.id, taskId: intake.taskId, sessionId: sid });
+  await ev('chat.task_created', { taskId: intake.taskId, taskType: proposal.task.taskType, sessionId: sid });
+  if (chain) {
+    await ev('chat.plan.created', { planId: pendingPlanId, afterTaskId: intake.taskId, nextTaskType: chain.nextTaskType });
+  }
+
+  return taskCreated(sid, intake.taskId, proposal.task.taskType, intake.status, plannedNextStep);
 }
 
 /** Deterministic operator-facing interpretation, keyed by the proposed action / chain. */
@@ -122,6 +238,7 @@ function interpretProposal(decision: Extract<PlanDecision, { kind: 'propose_task
         : 'Вижу запрос на исследование выбранной стратегии. Подтвердите запуск исследовательского цикла.';
     case 'hypothesis.build':
       return 'Вижу запрос на проверку гипотезы. Подтвердите запуск сборки и бэктеста гипотезы.';
+    // backtest.run is a valid OperatorAction but is not yet routed by planChatAction (CC-5): no propose_task path emits it.
     default:
       return 'Подтвердите запуск предложенного действия.';
   }
