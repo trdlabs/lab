@@ -8,6 +8,7 @@ import {
   type RunStatusView as BtRunStatusView,
   type RunSubmitRequest as BtRunSubmitRequest,
   type ValidationReport as BtValidationReport,
+  type ModuleValidateRequest as BtModuleValidateRequest,
 } from '@trading-backtester/client';
 import type { RunJobHandle, SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -16,7 +17,7 @@ import { HttpBacktesterAdapter, type BacktesterClientLike } from './http-backtes
 
 class FakeClient implements BacktesterClientLike {
   submitted?: BtRunSubmitRequest;
-  resultMode: 'summary' | 'conflict' | 'error' = 'summary';
+  resultMode: 'summary' | 'conflict' | 'error' | 'overlay-summary' = 'summary';
 
   async submitRun(req: BtRunSubmitRequest): Promise<RunJobHandle> {
     this.submitted = req;
@@ -38,6 +39,28 @@ class FakeClient implements BacktesterClientLike {
   async getRunResult(runId: string): Promise<BtRunResultSummary> {
     if (this.resultMode === 'conflict') throw new BacktesterConflictError(409, 'run_not_complete', 'not complete');
     if (this.resultMode === 'error') throw new BacktesterError(500, 'boom', 'server error');
+    if (this.resultMode === 'overlay-summary') {
+      return {
+        runId,
+        status: 'completed',
+        metrics: { pnl: 15, return_pct: 1.5 },
+        artifactRefs: [],
+        evidence: { seed: 42, contractVersion: '017.2', moduleVersions: [], datasetRef: 'd' },
+        comparison: {
+          baselineRunId: 'base-r',
+          variants: [{
+            runId: 'var-r',
+            overlayRefs: [],
+            metricDeltas: {
+              pnl: { baseline: 10, variant: 15, delta: 5 },
+              return_pct: { baseline: 1.0, variant: 1.5, delta: 0.5 },
+            },
+            tradeOutcomeChanged: false,
+            overlayEffectsSummary: { pass: 10, annotate: 2, patch: 1, veto: 0 },
+          }],
+        },
+      };
+    }
     return {
       runId,
       status: 'completed',
@@ -47,7 +70,7 @@ class FakeClient implements BacktesterClientLike {
       resultHash: 'sha256:rh',
     };
   }
-  async validateModule(_req: unknown): Promise<BtValidationReport> {
+  async validateModule(_req: BtModuleValidateRequest): Promise<BtValidationReport> {
     return { status: 'accepted', issues: [], executed: false };
   }
   async getCapabilities(): Promise<BtCapabilityDescriptor> {
@@ -126,5 +149,23 @@ describe('HttpBacktesterAdapter', () => {
     expect((await adapter.discover()).contractVersion).toBe('017.2');
     const datasets = await adapter.listDatasets();
     expect(datasets.datasets[0]?.datasetId).toBe('smoke');
+  });
+
+  it('submitOverlayRun sends engine:overlay in the submit request', async () => {
+    const fake = new FakeClient();
+    await new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, opts);
+    expect(fake.submitted?.engine).toBe('overlay');
+  });
+
+  it('maps an overlay result: runKind=baseline-vs-variant, comparison populated from metricDeltas', async () => {
+    const fake = new FakeClient();
+    fake.resultMode = 'overlay-summary';
+    const res = await new HttpBacktesterAdapter(fake).getRunResult('r');
+    expect(res.ok).toBe(true);
+    if (res.kind !== 'summary') throw new Error('expected summary');
+    expect(res.summary.runKind).toBe('baseline-vs-variant');
+    expect(res.summary.comparison?.baseline.pnl).toBe(10);
+    expect(res.summary.comparison?.variant.pnl).toBe(15);
+    expect(res.summary.comparison?.deltas.pnl).toBe(5);
   });
 });
