@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDbClient } from '../../db/client.ts';
 import { DrizzleChatSessionRepository } from './drizzle-chat-session.repository.ts';
-import { actionProposal, chatSession } from '../../db/schema.ts';
+import { chatSession } from '../../db/schema.ts';
 import type { ChatSessionContext } from '../../ports/chat-session.repository.ts';
 
 const url = process.env.DATABASE_URL;
@@ -17,8 +17,8 @@ d('DrizzleChatSessionRepository (integration)', () => {
   const repo = new DrizzleChatSessionRepository(db);
 
   beforeAll(async () => {
-    // delete action_proposal first (it may reference session rows), then chat_session
-    await db.delete(actionProposal);
+    // This suite only touches chat_session. Clean just that table so it stays isolated
+    // from the action_proposal suite when vitest runs DB suites in parallel (no FK links them).
     await db.delete(chatSession);
   });
   afterAll(async () => { await pool.end(); });
