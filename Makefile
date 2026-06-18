@@ -24,9 +24,11 @@ down:
 smoke:
 	./scripts/smoke.sh $(MODE)
 
-.PHONY: e2e
-e2e: ## Run full E2E cycle (strategy.onboard → research.run_cycle.completed) — requires demo stack running
-	$(COMPOSE) exec -T ingress node --input-type=module < scripts/e2e.mjs
+# Usage: make e2e [MODE=demo]   — requires running demo stack (make demo)
+e2e:
+	docker compose -f docker-compose.yml -f docker-compose.$(or $(MODE),demo).yml \
+	  --env-file .env.$(or $(MODE),demo) exec -T ingress \
+	  node --input-type=module < scripts/e2e.mjs
 
 # Validate all three merges against the committed examples.
 config:
