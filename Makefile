@@ -1,5 +1,7 @@
 # Thin wrappers around the documented docker compose commands.
-.PHONY: demo local vps down smoke config
+COMPOSE = docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo
+
+.PHONY: demo local vps down smoke e2e config
 
 demo: .env.demo
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up --build
@@ -23,6 +25,10 @@ down:
 # Usage: make smoke MODE=demo
 smoke:
 	./scripts/smoke.sh $(MODE)
+
+.PHONY: e2e
+e2e: ## Run full E2E cycle (strategy.onboard → research.run_cycle.completed) — requires demo stack running
+	$(COMPOSE) exec -T ingress node --input-type=module < scripts/e2e.mjs
 
 # Validate all three merges against the committed examples.
 config:
