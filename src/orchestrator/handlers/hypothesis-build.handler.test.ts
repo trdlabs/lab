@@ -115,6 +115,23 @@ describe('hypothesisBuildHandler', () => {
     expect(evTypes).not.toContain('backtest.submitted');
   });
 
+  it('passes non-empty sdkDoc to builder.build', async () => {
+    let capturedSdkDoc: string | undefined;
+    const spyBuilder: BuilderPort = {
+      adapter: 'fake', model: 'spy',
+      build: async (input: BuilderInput): Promise<BuilderOutput> => {
+        capturedSdkDoc = input.sdkDoc;
+        // Delegate to FakeBuilder to produce a valid output
+        const { FakeBuilder } = await import('../../adapters/builder/fake-builder.ts');
+        return new FakeBuilder().build(input);
+      },
+    };
+    const s = await seeded({ builder: spyBuilder });
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    expect(capturedSdkDoc).not.toBe('');
+    expect((capturedSdkDoc ?? '').length).toBeGreaterThan(100);
+  });
+
   it('Build Validator fails (denylist token in bundle) → build_failed with validator issues, no submit', async () => {
     const badBuilder: BuilderPort = {
       adapter: 'fake', model: 'fake',

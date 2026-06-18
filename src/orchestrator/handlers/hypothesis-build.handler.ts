@@ -11,6 +11,7 @@ import type { HypothesisBuild } from '../../domain/hypothesis-build.ts';
 import type { BacktestRun } from '../../domain/backtest-run.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
 import { event, errMsg, computeParamsHash, finalizeBacktestCompletion, sha256, stableStringify } from './backtest-support.ts';
+import { BUILDER_SDK_DOC } from '../../adapters/builder/builder-sdk-doc.ts';
 import { runPlatformBacktest } from './run-platform-backtest.ts';
 
 export const HypothesisBuildPayloadSchema = z.object({
@@ -66,7 +67,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   await services.events.append(event(task.id, 'builder.started', { buildId }));
   let out;
   try {
-    out = await services.builder.build({ hypothesis, profile, sdkDoc: '' });
+    out = await services.builder.build({ hypothesis, profile, sdkDoc: BUILDER_SDK_DOC });
   } catch (err) {
     const issues: ValidationIssue[] = [{ code: 'builder_failed', severity: 'error', path: 'builder', message: errMsg(err) }];
     await services.builds.markBuildFailed(buildId, issues);
