@@ -22,13 +22,38 @@ export const overlay = {
     {
       when: 'OI trend persists for 3+ consecutive bars',
       action: 'skip_entry',     // see ACTION CATALOG below
-      params: { lookback: 3 },
+      params: { lookback: 3, oiDropPct: 5 },  // concrete numeric thresholds, not placeholders
+    },
+  ],
+};
+\`\`\`
+
+### Data-driven rules — more complete example with OI + liquidation conditions
+
+\`\`\`ts
+// index.ts — skip long entry when OI spikes alongside price drop
+export const overlay = {
+  appliesTo: 'long',
+  rules: [
+    {
+      when: 'OI rises >8% over 3 bars while price drops >2%: crowded long dump signal',
+      action: 'skip_entry',
+      params: { oiRiseThresholdPct: 8, priceDropThresholdPct: 2, lookback: 3 },
+    },
+    {
+      when: 'Long liquidations exceed 1.5x short liquidations in last 2 bars',
+      action: 'skip_entry',
+      params: { liquidationRatio: 1.5, lookback: 2 },
     },
   ],
 };
 \`\`\`
 
 ### Overlay with logic (function-based, for conditional checks)
+
+In functional style the return value is an **OverlayDecision** — NOT the same as data-driven action names.
+Valid return kinds: \`'pass'\`, \`'veto'\`, \`'patch'\`, \`'annotate'\`.
+To "skip an entry" functionally, return \`{kind:'veto', reasonCode:'...', rationale:'...'}\`.
 
 \`\`\`ts
 // index.ts
@@ -37,7 +62,7 @@ export const overlay = function apply(ctx) {
   const candles = ctx.data.closedCandles(3);
   const risingCandles = candles.filter((c) => c.close > c.open).length;
 
-  // Skip entry when 2+ of last 3 candles are green (OI trend proxy)
+  // Veto entry when 2+ of last 3 candles are green (OI trend proxy)
   if (ctx.position === null && risingCandles >= 2) {
     return { kind: 'veto', reasonCode: 'consecutive_green_candles', rationale: 'Entry skipped: bullish candle trend suggests OI overextension' };
   }
@@ -113,13 +138,15 @@ interface StrategyContext {
 }
 \`\`\`
 
-## OverlayDecision Union (return from function-based overlay)
+## OverlayDecision Union (return from function-based overlay ONLY)
+
+These return kinds are for **functional overlays** (Style B). Do NOT use them in data-driven rules.
 
 \`\`\`ts
 // Pass through — do nothing, let base strategy proceed
 { kind: 'pass' }
 
-// Veto the base decision (skip entry, block action)
+// Veto the base decision (blocks entry/exit/stop action)
 { kind: 'veto'; reasonCode: string; rationale?: string }
 
 // Patch the base decision (e.g. tighten stop price)
@@ -128,6 +155,9 @@ interface StrategyContext {
 // Annotate only — add metadata without affecting decision
 { kind: 'annotate'; tags?: string[]; notes?: string }
 \`\`\`
+
+> **Important distinction**: Functional overlays return \`{kind:'veto'}\` to skip an entry.
+> Data-driven rules use \`action:'skip_entry'\`. These are two separate style systems — never mix them.
 
 ## ACTION CATALOG (data-driven rules only)
 

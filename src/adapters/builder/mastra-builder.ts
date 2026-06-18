@@ -6,9 +6,10 @@ import { SDK_CONTRACT_VERSION } from '../../domain/module-bundle.ts';
 import { DIRECTIONS } from '../../domain/strategy-profile.ts';
 
 /**
- * LLM-compatible schema: uses z.nullable() on optional string fields so OpenAI strict-mode
- * JSON schema keeps them in the `required` array (z.optional() removes them → validation error).
- * Map null → undefined before passing to BuilderOutputSchema.
+ * LLM-compatible schema:
+ * - z.nullable() on optional strings keeps them in JSON Schema `required` (strict-mode OpenAI).
+ * - `files` uses an array of {name, content} instead of z.record() because OpenAI strict-mode
+ *   rejects `additionalProperties`-based schemas. Converted to Record<string,string> in domain.
  */
 const LlmBuilderOutputSchema = z.object({
   manifest: z.object({
@@ -20,16 +21,18 @@ const LlmBuilderOutputSchema = z.object({
     capabilities: z.array(z.string()),
     sdkContractVersion: z.string().min(1),
   }),
-  files: z.record(z.string()),
+  files: z.array(z.object({ name: z.string().min(1), content: z.string() })).min(1),
   notes: z.string().nullable(),
-}).strict();
+});
 
 type LlmBuilderOutput = z.infer<typeof LlmBuilderOutputSchema>;
 
 function llmOutputToDomain(raw: LlmBuilderOutput): BuilderOutput {
+  const filesRecord: Record<string, string> = {};
+  for (const f of raw.files) filesRecord[f.name] = f.content;
   return BuilderOutputSchema.parse({
     manifest: raw.manifest,
-    files: raw.files,
+    files: filesRecord,
     ...(raw.notes !== null ? { notes: raw.notes } : {}),
   });
 }
@@ -60,7 +63,7 @@ export function buildPromptFor(input: BuilderInput): string {
     '- manifest.exports: ["overlay"]',
     `- manifest.capabilities: only features from requiredFeatures (${hypothesis.requiredFeatures.join(', ')})`,
     `- manifest.sdkContractVersion: "${SDK_CONTRACT_VERSION}"`,
-    '- files["index.ts"]: TypeScript source, MUST export a const named "overlay"',
+    '- files: array of {name, content} objects. MUST include {name:"index.ts", content:"..."} with the overlay export',
     '- No imports, no process.env, no eval, no fetch — pure data/logic only',
     '',
     '=== SDK REFERENCE ===',
