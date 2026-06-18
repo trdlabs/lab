@@ -2,15 +2,16 @@
 import { describe, it, expect } from 'vitest';
 import { hypothesisBuildHandler } from './hypothesis-build.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
+import { MockResearchPlatformAdapter } from '../../adapters/platform/mock-research-platform.adapter.ts';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { HypothesisProposal } from '../../domain/hypothesis.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { BuilderInput, BuilderOutput, BuilderPort } from '../../ports/builder.port.ts';
-import type { PlatformGatewayPort } from '../../ports/platform-gateway.port.ts';
-import { MockPlatformGatewayAdapter } from '../../adapters/platform/mock-platform-gateway.adapter.ts';
 import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
+
+const PLATFORM_RUN = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
 
 function profile(): StrategyProfile {
   const now = '2026-01-01T00:00:00Z';
@@ -36,7 +37,7 @@ function task(payload: Record<string, unknown>): ResearchTask {
   return { id: 't1', taskType: 'hypothesis.build', source: 'operator', correlationId: 'c1', status: 'running', payload, createdAt: now, updatedAt: now };
 }
 async function seeded(over: Partial<AppServices> = {}): Promise<AppServices> {
-  const s = makeServices(over);
+  const s = makeServices({ researchPlatform: new MockResearchPlatformAdapter(), ...over });
   await s.strategyProfiles.create(profile());
   await s.hypotheses.create(hypothesis());
   return s;
@@ -45,13 +46,14 @@ async function seeded(over: Partial<AppServices> = {}): Promise<AppServices> {
 describe('hypothesisBuildHandler', () => {
   it('happy path persists build(candidate→submitted), backtest_run(evaluated), evaluation + full event trail', async () => {
     const s = await seeded();
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
 
     const builds = await s.builds.listByHypothesis('h1');
     expect(builds[0]?.status).toBe('submitted');
     const runs = await s.backtests.listByHypothesis('h1');
     expect(runs[0]?.status).toBe('evaluated');
-    expect(runs[0]?.metrics?.netPnlUsd).toBe(250);
+    expect(runs[0]?.backend).toBe('research_platform');
+    expect(runs[0]?.metrics?.netPnlUsd).toBe(1500);
     const evals = await s.evaluations.listByBacktestRun(runs[0]!.id);
     expect(evals[0]?.decision).toBe('PAPER_CANDIDATE');
 
@@ -64,7 +66,7 @@ describe('hypothesisBuildHandler', () => {
 
   it('attaches overlayMeta (derived from hypothesis+profile) to the built bundle artifact', async () => {
     const s = await seeded();
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
     const builds = await s.builds.listByHypothesis('h1');
     const ref = builds[0]!.bundleArtifactRef!;
     const stored = JSON.parse((await s.artifacts.get(ref)).toString('utf8')) as ModuleBundle;
@@ -73,16 +75,21 @@ describe('hypothesisBuildHandler', () => {
 
   it('same hypothesis + params + bundle does not re-submit (idempotent reuse)', async () => {
     let submitCount = 0;
-    const base = new MockPlatformGatewayAdapter();
-    const platform: PlatformGatewayPort = {
-      getMarketContext: (sym, t) => base.getMarketContext(sym, t),
-      getMarketRegime: (sym, t) => base.getMarketRegime(sym, t),
-      submitBacktest: (req) => { submitCount += 1; return base.submitBacktest(req); },
-      getBacktestResult: (ref) => base.getBacktestResult(ref),
+    const base = new MockResearchPlatformAdapter();
+    const researchPlatform = {
+      discover: base.discover.bind(base),
+      listDatasets: base.listDatasets.bind(base),
+      validateModule: base.validateModule.bind(base),
+      getRunStatus: base.getRunStatus.bind(base),
+      getRunResult: base.getRunResult.bind(base),
+      submitOverlayRun: async (...args: Parameters<typeof base.submitOverlayRun>) => {
+        submitCount += 1;
+        return base.submitOverlayRun(...args);
+      },
     };
-    const s = await seeded({ platform });
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s); // identical inputs → reuse, no second submit
+    const s = await seeded({ researchPlatform });
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s); // identical inputs → reuse, no second submit
     expect(submitCount).toBe(1);
     expect(await s.backtests.listByHypothesis('h1')).toHaveLength(1);
     const evTypes = (await s.events.listByTask('t1')).map((e) => e.type);
@@ -102,7 +109,7 @@ describe('hypothesisBuildHandler', () => {
       build: async (_in: BuilderInput): Promise<BuilderOutput> => { throw new Error('builder boom'); },
     };
     const s = await seeded({ builder: throwingBuilder });
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
 
     const builds = await s.builds.listByHypothesis('h1');
     expect(builds[0]?.status).toBe('build_failed');
@@ -127,7 +134,7 @@ describe('hypothesisBuildHandler', () => {
       },
     };
     const s = await seeded({ builder: spyBuilder });
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
     expect(capturedSdkDoc).not.toBe('');
     expect((capturedSdkDoc ?? '').length).toBeGreaterThan(100);
   });
@@ -141,7 +148,7 @@ describe('hypothesisBuildHandler', () => {
       }),
     };
     const s = await seeded({ builder: badBuilder });
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s);
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
 
     const builds = await s.builds.listByHypothesis('h1');
     expect(builds[0]?.status).toBe('build_failed');

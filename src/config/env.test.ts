@@ -121,7 +121,7 @@ describe('SP-6.2 task + callback ingress tokens', () => {
 describe('loadEnv — SP-7.2b backtest backend', () => {
   it('defaults backtest backend + poll + baseline version', () => {
     const e = loadEnv({ DATABASE_URL: 'x', REDIS_URL: 'y' } as NodeJS.ProcessEnv);
-    expect(e.BACKTEST_BACKEND).toBe('sp4_mock');
+    expect(e.BACKTEST_BACKEND).toBe('research_platform');
     expect(e.PLATFORM_RUN_MAX_POLLS).toBe(30);
     expect(e.PLATFORM_RUN_POLL_DELAY_MS).toBe(2000);
     expect(e.TRADING_PLATFORM_BASELINE_VERSION).toBe('v1');
@@ -138,8 +138,8 @@ describe('loadEnv — SP-7.2b backtest backend', () => {
     expect(e.TRADING_PLATFORM_BASELINE_VERSION).toBe('v3');
   });
 
-  it('falls back to sp4_mock for an unknown backend value', () => {
+  it('falls back to research_platform for an unknown backend value', () => {
     const e = loadEnv({ BACKTEST_BACKEND: 'bogus' } as NodeJS.ProcessEnv);
-    expect(e.BACKTEST_BACKEND).toBe('sp4_mock');
+    expect(e.BACKTEST_BACKEND).toBe('research_platform');
   });
 });

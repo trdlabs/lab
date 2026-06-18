@@ -15,7 +15,7 @@ export interface Env {
   TRADING_PLATFORM_INTEGRATION: 'mock' | 'mcp' | 'backtester';
   BACKTESTER_API_URL?: string;
   BACKTESTER_API_TOKEN?: string;
-  BACKTEST_BACKEND: 'sp4_mock' | 'research_platform';
+  BACKTEST_BACKEND: 'research_platform';
   PLATFORM_RUN_MAX_POLLS: number;
   PLATFORM_RUN_POLL_DELAY_MS: number;
   TRADING_PLATFORM_BASELINE_VERSION: string;
@@ -86,7 +86,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
           : 'mock',
     BACKTESTER_API_URL: source.BACKTESTER_API_URL,
     BACKTESTER_API_TOKEN: source.BACKTESTER_API_TOKEN,
-    BACKTEST_BACKEND: source.BACKTEST_BACKEND === 'research_platform' ? 'research_platform' : 'sp4_mock',
+    BACKTEST_BACKEND: 'research_platform',
     PLATFORM_RUN_MAX_POLLS: parsePositiveInt(source.PLATFORM_RUN_MAX_POLLS, 30),
     PLATFORM_RUN_POLL_DELAY_MS: parsePositiveInt(source.PLATFORM_RUN_POLL_DELAY_MS, 2000),
     TRADING_PLATFORM_BASELINE_VERSION: source.TRADING_PLATFORM_BASELINE_VERSION ?? 'v1',

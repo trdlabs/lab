@@ -8,16 +8,15 @@ import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts
 import { validateBundle } from '../../validation/build-validator.ts';
 import { normalizeFeature, LAB_FEATURE_CATALOG } from '../../domain/hypothesis-rules.ts';
 import type { HypothesisBuild } from '../../domain/hypothesis-build.ts';
-import type { BacktestRun } from '../../domain/backtest-run.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
-import { event, errMsg, computeParamsHash, finalizeBacktestCompletion, sha256, stableStringify } from './backtest-support.ts';
+import { event, errMsg, computeParamsHash, sha256, stableStringify } from './backtest-support.ts';
 import { BUILDER_SDK_DOC } from '../../adapters/builder/builder-sdk-doc.ts';
 import { runPlatformBacktest } from './run-platform-backtest.ts';
 
 export const HypothesisBuildPayloadSchema = z.object({
   hypothesisId: z.string().min(1),
   params: z.record(z.unknown()).optional(),
-  backtestBackend: z.enum(['sp4_mock', 'research_platform']).optional(),
+  backtestBackend: z.enum(['research_platform']).optional(),
   platformRun: z.object({
     datasetId: z.string().min(1),
     symbols: z.array(z.string().min(1)).min(1),
@@ -55,9 +54,8 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   };
   await services.builds.createGenerating(build);
 
-  const backend = payload.backtestBackend ?? services.backtestBackend;
-  if (backend === 'research_platform' && payload.platformRun === undefined) {
-    const issues: ValidationIssue[] = [{ code: 'missing_platform_run_config', severity: 'error', path: 'platformRun', message: 'platformRun is required when backtestBackend is research_platform' }];
+  if (payload.platformRun === undefined) {
+    const issues: ValidationIssue[] = [{ code: 'missing_platform_run_config', severity: 'error', path: 'platformRun', message: 'platformRun is required' }];
     await services.builds.markBuildFailed(buildId, issues);
     await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['missing_platform_run_config'] }));
     return;
@@ -92,11 +90,8 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   await services.builds.markCandidate(buildId, { bundleHash: bundle.bundleHash, bundleArtifactRef: ref, manifest: bundle.manifest });
   await services.events.append(event(task.id, 'artifact.stored', { buildId, artifactId: ref.artifact_id }));
 
-  // Backend-aware identity (sp4_mock hash stays byte-identical; research_platform folds in run config + baseline).
   const baselineRef = { id: `strategy:${profile.id}`, version: services.baselineVersion };
-  const paramsHash = backend === 'research_platform'
-    ? computeParamsHash('research_platform', params, { platformRun: payload.platformRun!, baselineRef })
-    : computeParamsHash('sp4_mock', params);
+  const paramsHash = computeParamsHash(params, { platformRun: payload.platformRun!, baselineRef });
 
   const existingRun = await services.backtests.findByIdentity(hypothesis.id, paramsHash, bundle.bundleHash);
   if (existingRun) {
@@ -104,50 +99,17 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
     return;
   }
 
-  if (backend === 'research_platform') {
-    const { datasets } = await services.researchPlatform.listDatasets();
-    if (datasets.length === 0) {
-      const issues: ValidationIssue[] = [{ code: 'datasets_unavailable', severity: 'error', path: '', message: 'No datasets available from research platform' }];
-      await services.builds.markBuildFailed(buildId, issues);
-      await services.events.append(event(task.id, 'research_platform.datasets_unavailable', { buildId, reason: 'no datasets returned — research platform may be misconfigured or data source unavailable' }));
-      await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['datasets_unavailable'] }));
-      return;
-    }
-    const resumeToken = sha256(stableStringify({ v: 1, hypothesisId: hypothesis.id, paramsHash, bundleHash: bundle.bundleHash }));
-    await runPlatformBacktest({
-      services, task, buildId, bundle, profile, hypothesisId: hypothesis.id,
-      params, platformRun: payload.platformRun!, paramsHash, baselineRef, resumeToken,
-    });
+  const { datasets } = await services.researchPlatform.listDatasets();
+  if (datasets.length === 0) {
+    const issues: ValidationIssue[] = [{ code: 'datasets_unavailable', severity: 'error', path: '', message: 'No datasets available from research platform' }];
+    await services.builds.markBuildFailed(buildId, issues);
+    await services.events.append(event(task.id, 'research_platform.datasets_unavailable', { buildId, reason: 'no datasets returned — research platform may be misconfigured or data source unavailable' }));
+    await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['datasets_unavailable'] }));
     return;
   }
-
-  // sp4_mock path (unchanged behavior).
-  const baselineModuleId = baselineRef.id;
-  const variantModuleId = bundle.manifest.moduleId;
-  const runRef = await services.platform.submitBacktest({ correlationId: task.correlationId, baselineModuleId, variantModuleId, params });
-
-  const runId = randomUUID();
-  const run: BacktestRun = {
-    id: runId, hypothesisBuildId: buildId, hypothesisId: hypothesis.id, strategyProfileId: profile.id,
-    platformRunId: runRef.platformRunId, correlationId: task.correlationId, params, paramsHash, bundleHash: bundle.bundleHash,
-    status: 'submitted', baselineModuleId, variantModuleId,
-    metrics: null, baselineMetrics: null, deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null,
-    artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: SDK_CONTRACT_VERSION,
-    backend: 'sp4_mock', resumeToken: null, platformRun: null,
-    submittedAt: now(), finishedAt: null, createdAt: now(), updatedAt: now(),
-  };
-  await services.backtests.createSubmitted(run);
-  await services.builds.markSubmitted(buildId);
-  await services.events.append(event(task.id, 'backtest.submitted', { runId, platformRunId: runRef.platformRunId }));
-
-  // Resolve result (mock returns synchronously)
-  const envelope = await services.platform.getBacktestResult(runRef);
-  if (envelope.runStatus !== 'completed' || !envelope.comparison) {
-    await services.backtests.markRejected(runId);
-    await services.events.append(event(task.id, 'backtest.failed', { runId, runStatus: envelope.runStatus, hasComparison: !!envelope.comparison }));
-    return;
-  }
-  await finalizeBacktestCompletion(services, task, {
-    runId, hypothesisId: hypothesis.id, comparison: envelope.comparison, artifactRefs: envelope.artifactRefs,
+  const resumeToken = sha256(stableStringify({ v: 1, hypothesisId: hypothesis.id, paramsHash, bundleHash: bundle.bundleHash }));
+  await runPlatformBacktest({
+    services, task, buildId, bundle, profile, hypothesisId: hypothesis.id,
+    params, platformRun: payload.platformRun!, paramsHash, baselineRef, resumeToken,
   });
 };

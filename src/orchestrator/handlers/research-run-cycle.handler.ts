@@ -175,7 +175,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
       const buildTask: import('../../domain/types.ts').ResearchTask = {
         id: buildTaskId, taskType: 'hypothesis.build', source: task.source,
         correlationId: task.correlationId, status: 'queued',
-        payload: { hypothesisId: hypothesis.id },
+        payload: { hypothesisId: hypothesis.id, platformRun: services.defaultPlatformRun },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       await services.researchTasks.create(buildTask);
