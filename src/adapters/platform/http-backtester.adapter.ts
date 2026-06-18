@@ -19,6 +19,8 @@ import type {
   RunStatusView as BtRunStatusView,
   RunSubmitRequest as BtRunSubmitRequest,
   ValidationReport as BtValidationReport,
+  ComparisonSummary as BtComparisonSummary,
+  MetricDelta as BtMetricDelta,
 } from '@trading-backtester/client';
 import { BacktesterConflictError, BacktesterError } from '@trading-backtester/client';
 import type {
@@ -90,14 +92,29 @@ function baselineOnlyComparison(metrics: Record<string, number>): {
   return { baseline: { ...metrics }, variant: {}, deltas: {} };
 }
 
+function toSdkComparison(c: BtComparisonSummary): { baseline: Record<string, number>; variant: Record<string, number>; deltas: Record<string, number> } {
+  const first = c.variants[0];
+  if (!first) return { baseline: {}, variant: {}, deltas: {} };
+  const baseline: Record<string, number> = {};
+  const variant: Record<string, number> = {};
+  const deltas: Record<string, number> = {};
+  for (const [key, md] of Object.entries(first.metricDeltas) as [string, BtMetricDelta][]) {
+    baseline[key] = md.baseline;
+    variant[key] = md.variant;
+    deltas[key] = md.delta;
+  }
+  return { baseline, variant, deltas };
+}
+
 function toSdkSummary(s: BtRunResultSummary): Extract<RunResultView, { kind: 'summary' }>['summary'] {
+  const hasComparison = s.comparison !== undefined;
   return {
     runId: s.runId,
     status: s.status,
-    runKind: 'baseline-only',
+    runKind: hasComparison ? 'baseline-vs-variant' : 'baseline-only',
     validationIssues: [],
     metrics: s.metrics,
-    comparison: baselineOnlyComparison(s.metrics),
+    comparison: hasComparison ? toSdkComparison(s.comparison!) : baselineOnlyComparison(s.metrics),
     coverage: [],
     artifactRefs: s.artifactRefs.map((a) => ({
       artifactId: a.artifactId,
@@ -166,6 +183,7 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort {
   async submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
     const req: BtRunSubmitRequest = {
       mode: 'research',
+      engine: 'overlay',
       moduleRef: opts.baselineModuleRef,
       moduleBundle: toBacktesterBundle(bundle),
       datasetRef: opts.run.datasetId,
