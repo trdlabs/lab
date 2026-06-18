@@ -30,14 +30,12 @@ export function stableStringify(value: unknown): string {
   return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
 
-/** Backend-aware identity hash. sp4_mock stays byte-identical to the legacy hash. */
+/** Identity hash for research_platform runs. */
 export function computeParamsHash(
-  backend: 'sp4_mock' | 'research_platform',
   params: Record<string, unknown>,
-  ctx?: { platformRun: PlatformRunConfig; baselineRef: Ref },
+  ctx: { platformRun: PlatformRunConfig; baselineRef: Ref },
 ): string {
-  if (backend === 'sp4_mock') return sha256(stableStringify(params));
-  const { platformRun, baselineRef } = ctx!;
+  const { platformRun, baselineRef } = ctx;
   return sha256(stableStringify({
     backend: 'research_platform',
     params,

@@ -123,6 +123,7 @@ export function composeRuntime() {
     backtestBackend: env.BACKTEST_BACKEND,
     platformPoll: { maxPolls: env.PLATFORM_RUN_MAX_POLLS, pollDelayMs: env.PLATFORM_RUN_POLL_DELAY_MS },
     baselineVersion: env.TRADING_PLATFORM_BASELINE_VERSION,
+    defaultPlatformRun: { datasetId: 'default', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-12-31' }, seed: 42 },
   };
 
   const router = new WorkflowRouter();

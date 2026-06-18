@@ -47,9 +47,10 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     evaluatorThresholds: DEFAULT_EVALUATOR_THRESHOLDS,
     chatSessions: new InMemoryChatSessionRepository(),
     chatPlans: new InMemoryChatPlanRepository(),
-    backtestBackend: 'sp4_mock',
+    backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',
+    defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
     ...overrides,
   };
 }

@@ -92,14 +92,6 @@ describe('hypothesisBuildHandler — research_platform backend', () => {
     expect(evTypes).not.toContain('evaluation.completed');
   });
 
-  it('a research_platform run does NOT collide with an sp4_mock run for the same hypothesis+params+bundle', async () => {
-    const s = await seeded({ researchPlatform: new MockResearchPlatformAdapter() });
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1' }), s); // sp4_mock (default)
-    await hypothesisBuildHandler(task({ hypothesisId: 'h1', backtestBackend: 'research_platform', platformRun: PLATFORM_RUN }), s);
-    const runs = await s.backtests.listByHypothesis('h1');
-    expect(runs.map((r) => r.backend).sort()).toEqual(['research_platform', 'sp4_mock']);
-  });
-
   it('research_platform: listDatasets returns [] → datasets_unavailable event + build_failed, no submit', async () => {
     let submitted = false;
     const stub = {
