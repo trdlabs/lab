@@ -139,6 +139,17 @@ Measure real-model interpretation quality (subject/goal/constraint extraction)
 with a labelled set, mirroring the intent-classifier eval harness. The current
 mastra adapter has a correct prompt but its live quality is unmeasured.
 
+### Model cascade for hypotheses (cheap-first, escalate-on-failure)  — backlog
+Extend the existing research retry loop (`enqueueResearchRetry`, capped `MAX_CYCLE_DEPTH`) into a model
+**cascade**: default to the cheap model (grok-4.3) for hypothesis generation, and on a backtest
+FAIL/MODIFY escalate to the expensive model (gpt-5.5) for a bounded number of attempts, then stop. The
+gate is the deterministic backtest `Evaluation` (not a judge) — aligns with "validation ≠ quality". This
+is a **model-cascade + Iterative-Refinement** pattern (NOT agentic RAG — that is a retrieval loop).
+Caveats: each attempt costs a full backtest cycle (not just tokens), so the cycle cap + the token/cost
+kill-switch bound it; and since the analyst eval showed grok-4.3 ≈ gpt-5.5 on hypothesis quality, an
+eval must first confirm escalation actually recovers grok's failures before it's worth the extra cost.
+Needs its own design/plan.
+
 ## SDK boundaries + distribution (cross-cutting)
 
 A cross-repo architectural initiative to replace the committed, platform-owned vendored
@@ -186,3 +197,11 @@ public Git history (see research §11).
 - **Independent eval corpus**: the golden corpus is curated to labels; build an
   independent corpus + a live latency eval for a rigorous retrieval benchmark before
   promoting any reranker by eval evidence.
+- **Builder Reflexion (codegen self-correction)**: `hypothesisBuildHandler` → `MastraBuilder.build`
+  → `validateBundle` is a single pass — an invalid/failing bundle errors without self-correction. Add a
+  bounded Reflexion loop (validation/sandbox errors → back into the builder context → capped retry) to
+  lift codegen yield. Kill-switched on attempt count. (Agent-pattern checkup, 2026-06-19.)
+- **Token/cost kill-switch**: we cap *time* (retrieval soft/hard deadlines, reranker timeout) and
+  *depth* (`MAX_CYCLE_DEPTH`), but not *tokens/$* per request. Add a cumulative token/cost budget guard
+  (mirror `RetrievalBudget`) that aborts over-budget work. Phoenix/Mastra provide the usage *numbers*;
+  the *enforcement* (hard abort) is ours. Matters as agentic loops + the discovery floor grow.
