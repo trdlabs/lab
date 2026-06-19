@@ -33,7 +33,11 @@ function toDomain(row: Row): BacktestRun {
 }
 
 export class DrizzleBacktestReadAdapter implements BacktestReadPort {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   async list(q: BacktestListQuery): Promise<BacktestRun[]> {
     const conds: SQL[] = [];

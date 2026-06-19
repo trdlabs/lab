@@ -9,7 +9,11 @@ function cmpDesc(a: BacktestRun, b: BacktestRun): number {
 }
 
 export class InMemoryBacktestReadAdapter implements BacktestReadPort {
-  constructor(private readonly seed: BacktestRun[] = []) {}
+  private readonly seed: BacktestRun[];
+
+  constructor(seed: BacktestRun[] = []) {
+    this.seed = seed;
+  }
 
   async list(q: BacktestListQuery): Promise<BacktestRun[]> {
     let rows = [...this.seed];

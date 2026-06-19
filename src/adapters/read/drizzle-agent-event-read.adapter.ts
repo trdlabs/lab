@@ -4,7 +4,11 @@ import { agentEvent, researchTask } from '../../db/schema.ts';
 import type { AgentEventReadPort, AgentEventListQuery, AgentEventRow } from '../../ports/agent-event-read.port.ts';
 
 export class DrizzleAgentEventReadAdapter implements AgentEventReadPort {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   async list(q: AgentEventListQuery): Promise<AgentEventRow[]> {
     const conds: SQL[] = [];

@@ -15,7 +15,11 @@ interface PageEnvelope<T> { readonly items: readonly T[]; readonly nextCursor: s
 /** Live BotResultsReadPort over the Ops Read Surface A (ops.3). Pagination is hidden: each list
  *  method walks the opaque cursor to completion and returns a flat array. */
 export class HttpOpsReadAdapter implements BotResultsReadPort {
-  constructor(private readonly client: OpsReadClient) {}
+  private readonly client: OpsReadClient;
+
+  constructor(client: OpsReadClient) {
+    this.client = client;
+  }
 
   async listBotRuns(filter?: BotRunsFilter): Promise<readonly BotRunRecord[]> {
     const base = new URLSearchParams();

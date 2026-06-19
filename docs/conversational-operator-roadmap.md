@@ -21,7 +21,7 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 | — | Phoenix observability | 🔜 Backlog |
 | — | Answer Synthesizer (optional) | 🔜 Backlog |
 | — | Agentic RAG (bounded corrective) | 🕓 Later (only if eval justifies) |
-| — | Tech debt: strip-types boot fix | ⚠️ Should land soon (blocks `pnpm ingress`/`worker`) |
+| — | Tech debt: strip-types boot fix | ✅ Shipped (branch `fix/strip-types-boot`) |
 
 ## Shipped
 
@@ -112,10 +112,13 @@ mastra adapter has a correct prompt but its live quality is unmeasured.
 
 ## Tech debt
 
-- **strip-types boot fix**: `pnpm ingress` / `pnpm worker` cannot boot on `main`
-  because ~8 older source files use TS parameter properties (compile under tsc/Vitest,
-  crash under `node --experimental-strip-types`). All conversational-operator code is
-  strip-types-safe; this pre-existing issue deserves its own fix slice.
+- **strip-types boot fix** ✅ — the parameter-property constructors in runtime code (10
+  files: read adapters, platform adapters, the agent-activity projection) were converted to
+  explicit field declarations + assignment, so `pnpm ingress` / `pnpm worker` boot under
+  `node --experimental-strip-types` (they now reach the runtime `DATABASE_URL` check, not a
+  parse error). A TypeScript-compiler-AST guard test
+  (`src/strip-types-no-param-properties.test.ts`) fails the suite if a parameter property is
+  reintroduced anywhere node strip-types loads (`src/` + `scripts/`, excluding tests).
 - **Independent eval corpus**: the golden corpus is curated to labels; build an
   independent corpus + a live latency eval for a rigorous retrieval benchmark before
   promoting any reranker by eval evidence.

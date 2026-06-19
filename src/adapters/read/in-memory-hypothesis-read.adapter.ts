@@ -8,7 +8,11 @@ function cmpDesc(a: HypothesisProposal, b: HypothesisProposal): number {
 }
 
 export class InMemoryHypothesisReadAdapter implements HypothesisReadPort {
-  constructor(private readonly seed: HypothesisProposal[] = []) {}
+  private readonly seed: HypothesisProposal[];
+
+  constructor(seed: HypothesisProposal[] = []) {
+    this.seed = seed;
+  }
 
   async list(q: HypothesisListQuery): Promise<HypothesisProposal[]> {
     let rows = [...this.seed];

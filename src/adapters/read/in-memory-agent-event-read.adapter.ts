@@ -7,7 +7,11 @@ function cmpAsc(a: AgentEventRow, b: AgentEventRow): number {
 }
 
 export class InMemoryAgentEventReadAdapter implements AgentEventReadPort {
-  constructor(private readonly seed: AgentEventRow[] = []) {}
+  private readonly seed: AgentEventRow[];
+
+  constructor(seed: AgentEventRow[] = []) {
+    this.seed = seed;
+  }
 
   async list(q: AgentEventListQuery): Promise<AgentEventRow[]> {
     let rows = [...this.seed];
