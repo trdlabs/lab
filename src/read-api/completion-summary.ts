@@ -27,15 +27,15 @@ export interface SummaryLinks { taskId: string; profileId?: string; hypothesisId
 export interface BacktestCompletedCompletionSummary {
   kind: 'backtest.completed'; taskId: string; status: string; profile: ProfileRef | null;
   hypothesis: HypothesisRef | null; decision: EvaluationDecisionLabel;
-  metrics: KeyMetrics; reasons: string[]; willRetry: boolean; links: SummaryLinks;
-  warnings: string[];
+  metrics: KeyMetrics; reasons: readonly string[]; willRetry: boolean; links: SummaryLinks;
+  warnings: readonly string[];
 }
 
 export interface RunCycleCompletionSummary {
   kind: 'research.run_cycle'; taskId: string; status: string; profile: ProfileRef | null;
   counts: { proposed: number; validated: number; rejected: number; deduped: number; criticReviews: number; backtestsEnqueued: number };
-  topHypotheses: HypothesisRef[]; nextStep?: { taskType: string }; links: SummaryLinks;
-  warnings: string[];
+  topHypotheses: readonly HypothesisRef[]; nextStep?: { taskType: string }; links: SummaryLinks;
+  warnings: readonly string[];
 }
 
 export type CompletionSummary = BacktestCompletedCompletionSummary | RunCycleCompletionSummary; // extended in later tasks

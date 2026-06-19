@@ -131,4 +131,26 @@ describe('buildCompletionSummary — degradation observability', () => {
     if (s?.kind !== 'backtest.completed') throw new Error('wrong kind');
     expect(s.warnings).toEqual([]);
   });
+
+  it('run_cycle: records events_read_failed + warns when the event read throws; counts fall back to zero', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => ({
+        id: 'rc1', taskType: 'research.run_cycle', source: 'operator', correlationId: 'c1',
+        status: 'completed', payload: { strategyProfileId: 'p1' },
+        createdAt: '2026-06-19T00:00:00.000Z', updatedAt: '2026-06-19T00:00:00.000Z',
+      }) },
+      strategyProfiles: { findById: async () => ({ id: 'p1', coreIdea: 'fade pumps', direction: 'short' }) },
+      agentEvents: { list: async () => { throw new Error('stream down'); } },
+      hypotheses: { list: async () => [], getById: async () => null },
+    });
+
+    const s = await buildCompletionSummary(deps, 'rc1');
+    if (s?.kind !== 'research.run_cycle') throw new Error('wrong kind');
+    // events read failed → observable code + zero counts, but the profile (a separate read) survives
+    expect(s.warnings).toContain('events_read_failed');
+    expect(s.counts).toEqual({ proposed: 0, validated: 0, rejected: 0, deduped: 0, criticReviews: 0, backtestsEnqueued: 0 });
+    expect(s.profile).toEqual({ id: 'p1', coreIdea: 'fade pumps', direction: 'short' });
+    expect(warnSpy).toHaveBeenCalled();
+  });
 });

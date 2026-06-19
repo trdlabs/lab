@@ -394,7 +394,7 @@ Expected: FAIL — onboard returns `null` (default branch).
 export interface OnboardCompletionSummary {
   kind: 'strategy.onboard'; taskId: string; status: string;
   profile: ProfileRef | null; nextStep?: { taskType: string }; links: SummaryLinks;
-  warnings: string[];
+  warnings: readonly string[];
 }
 // update: export type CompletionSummary = BacktestCompletedCompletionSummary | RunCycleCompletionSummary | OnboardCompletionSummary;
 
