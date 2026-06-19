@@ -430,3 +430,196 @@ describe('OperatorRetrieval (strategy turn)', () => {
     expect(evidence.subjectHash.startsWith('sha256:')).toBe(true);
   });
 });
+
+// ---------- reranking tests ----------
+
+import { FakeReranker } from '../../test/support/fake-reranker.ts';
+import type { RerankConfig } from './rerank-policy.ts';
+
+/** Extends the base makeRetrieval harness with reranker deps. */
+function makeRetrievalWithReranker(opts: {
+  embedding?: EmbeddingPort;
+  profiles?: InMemoryStrategyProfileRepository;
+  similarity?: StrategySimilarityPort;
+  clock: () => number;
+  scheduler: Scheduler;
+  isoNow?: () => string;
+  softDeadlineMs?: number;
+  hardDeadlineMs?: number;
+  reranker?: FakeReranker;
+  rerankConfig?: RerankConfig;
+}) {
+  return new OperatorRetrieval({
+    embedding: opts.embedding ?? new FakeEmbedding(),
+    strategyProfiles: opts.profiles ?? new InMemoryStrategyProfileRepository(),
+    similarity: opts.similarity ?? new InMemoryStrategySimilarityAdapter(),
+    clock: opts.clock,
+    scheduler: opts.scheduler,
+    isoNow: opts.isoNow ?? (() => '2026-06-19T00:00:00.000Z'),
+    softDeadlineMs: opts.softDeadlineMs,
+    hardDeadlineMs: opts.hardDeadlineMs,
+    reranker: opts.reranker,
+    rerankConfig: opts.rerankConfig,
+  });
+}
+
+const defaultRerankConfig: RerankConfig = {
+  timeoutMs: 500,
+  limit: 5,
+  minCandidates: 10,
+  rrfMargin: 0.002,
+};
+
+describe('OperatorRetrieval — reranking', () => {
+  it('reranks fused candidates when show_similar trigger fires (FakeReranker reverses RRF order)', async () => {
+    // Two candidates: p-sim-1 (rrfScore 0.9) and p-sim-2 (rrfScore 0.5).
+    // FakeReranker default key is -rrfScore, so sorted ascending = [0.9→-0.9, 0.5→-0.5]
+    // which means p-sim-2 comes first (higher -rrfScore → lower sort value → wait, key = -rrf)
+    // Actually: sort key for p-sim-1 = -0.9, p-sim-2 = -0.5. Ascending sort: -0.9 < -0.5 → p-sim-1 first.
+    // So FakeReranker with default key (-rrfScore) sorts by HIGHEST rrfScore first — same as RRF.
+    // To prove reorder, use a key that reverses: (c) => c.rrfScore (ascending → lowest first).
+    const c1 = simCandidate({ strategyProfileId: 'p-high', rrfScore: 0.9 });
+    const c2 = simCandidate({ strategyProfileId: 'p-low', rrfScore: 0.1 });
+    const similarity = new InMemoryStrategySimilarityAdapter({ fixtures: [c1, c2] });
+    // key = c.rrfScore ascending => lowest rrfScore first => p-low first, p-high second
+    const reranker = new FakeReranker({ key: (c) => c.rrfScore });
+    const { clock, scheduler } = fakeClock();
+
+    const retrieval = makeRetrievalWithReranker({
+      similarity, clock, scheduler, reranker, rerankConfig: defaultRerankConfig,
+    });
+    const evidence = await retrieval.collect({
+      turn: { ...strategyTurn, goal: 'show_similar' },
+      message, sessionId: 's1', retrievalId: 'r1',
+    });
+
+    // After rerank the order is reversed: p-low before p-high.
+    expect(evidence.similarStrategies.map((c) => c.strategyProfileId)).toEqual(['p-low', 'p-high']);
+    // No rerank_failed warning on success.
+    expect(evidence.warningCodes).not.toContain('rerank_failed');
+    // rerankMs timing recorded.
+    expect(typeof evidence.timingsMs.rerankMs).toBe('number');
+    expect(evidence.status).toBe('complete');
+  });
+
+  it('does NOT rerank when no reranker dep is configured (RRF order preserved, no warning)', async () => {
+    const c1 = simCandidate({ strategyProfileId: 'p-first', rrfScore: 0.9 });
+    const c2 = simCandidate({ strategyProfileId: 'p-second', rrfScore: 0.5 });
+    const similarity = new InMemoryStrategySimilarityAdapter({ fixtures: [c1, c2] });
+    const { clock, scheduler } = fakeClock();
+
+    // No reranker passed — use base makeRetrieval.
+    const retrieval = makeRetrieval({ similarity, clock, scheduler });
+    const evidence = await retrieval.collect({
+      turn: { ...strategyTurn, goal: 'show_similar' },
+      message, sessionId: 's1', retrievalId: 'r1',
+    });
+
+    // RRF order unchanged: p-first before p-second.
+    expect(evidence.similarStrategies.map((c) => c.strategyProfileId)).toEqual(['p-first', 'p-second']);
+    expect(evidence.warningCodes).not.toContain('rerank_failed');
+    expect(evidence.timingsMs.rerankMs).toBeUndefined();
+    expect(evidence.status).toBe('complete');
+  });
+
+  it('reranker throws → RRF order preserved + rerank_failed warning', async () => {
+    const c1 = simCandidate({ strategyProfileId: 'p-first', rrfScore: 0.9 });
+    const c2 = simCandidate({ strategyProfileId: 'p-second', rrfScore: 0.5 });
+    const similarity = new InMemoryStrategySimilarityAdapter({ fixtures: [c1, c2] });
+    const reranker = new FakeReranker({ behavior: 'throw' });
+    const { clock, scheduler } = fakeClock();
+
+    const retrieval = makeRetrievalWithReranker({
+      similarity, clock, scheduler, reranker, rerankConfig: defaultRerankConfig,
+    });
+    const evidence = await retrieval.collect({
+      turn: { ...strategyTurn, goal: 'show_similar' },
+      message, sessionId: 's1', retrievalId: 'r1',
+    });
+
+    // RRF order preserved: p-first before p-second.
+    expect(evidence.similarStrategies.map((c) => c.strategyProfileId)).toEqual(['p-first', 'p-second']);
+    expect(evidence.warningCodes).toContain('rerank_failed');
+    expect(evidence.status).toBe('degraded');
+  });
+
+  it('reranker timeout → RRF order preserved + rerank_failed warning, no hang', { timeout: 10000 }, async () => {
+    // A reranker that hangs until aborted via its signal.
+    const hangingReranker: FakeReranker = Object.assign(new FakeReranker(), {
+      rerank: (_q: string, _candidates: readonly SimilarStrategyCandidate[], _limit: number, signal?: AbortSignal): Promise<readonly SimilarStrategyCandidate[]> => {
+        return new Promise((_resolve, reject) => {
+          if (signal?.aborted) return void reject(new DOMException('aborted', 'AbortError'));
+          signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+        });
+      },
+    });
+
+    const c1 = simCandidate({ strategyProfileId: 'p-first', rrfScore: 0.9 });
+    const c2 = simCandidate({ strategyProfileId: 'p-second', rrfScore: 0.5 });
+    const similarity = new InMemoryStrategySimilarityAdapter({ fixtures: [c1, c2] });
+    const { clock, scheduler, advance } = fakeClock(0);
+
+    const rerankConfig: RerankConfig = { timeoutMs: 200, limit: 5, minCandidates: 10, rrfMargin: 0.002 };
+    const retrieval = makeRetrievalWithReranker({
+      similarity, clock, scheduler,
+      reranker: hangingReranker,
+      rerankConfig,
+      softDeadlineMs: 5000,
+      hardDeadlineMs: 10000,
+    });
+
+    const promise = retrieval.collect({
+      turn: { ...strategyTurn, goal: 'show_similar' },
+      message, sessionId: 's1', retrievalId: 'r1',
+    });
+
+    // Settle microtasks so the orchestrator reaches and is suspended at the reranker await.
+    // The chain: collect → #runHybrid → embed(sync tick) → similarity(sync tick) → #withTimeout → rerank await.
+    // Each await adds a microtask tick; flush generously.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    // Fire the rerank timeout (200ms) via the fake scheduler — aborts the reranker signal.
+    advance(200);
+
+    // After abort fires synchronously, microtasks propagate the rejection through raceSignal.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    const evidence = await promise;
+
+    // RRF order preserved: p-first before p-second.
+    expect(evidence.similarStrategies.map((c) => c.strategyProfileId)).toEqual(['p-first', 'p-second']);
+    expect(evidence.warningCodes).toContain('rerank_failed');
+    expect(evidence.status).toBe('degraded');
+  });
+
+  it('exact-hit path (goal !== show_similar) → #runHybrid never runs → no rerank called', async () => {
+    const profiles = new InMemoryStrategyProfileRepository();
+    await profiles.create(makeProfile({ id: 'p-exact', sourceFingerprint: subjectHash }));
+    let rerankCalled = false;
+    const spyReranker: FakeReranker = Object.assign(new FakeReranker(), {
+      rerank: async (...args: Parameters<FakeReranker['rerank']>) => {
+        rerankCalled = true;
+        return new FakeReranker().rerank(...args);
+      },
+    });
+    const similarity = new InMemoryStrategySimilarityAdapter({ fixtures: [simCandidate()] });
+    const { clock, scheduler } = fakeClock();
+
+    const retrieval = makeRetrievalWithReranker({
+      profiles, similarity, clock, scheduler,
+      reranker: spyReranker,
+      rerankConfig: defaultRerankConfig,
+    });
+    // goal: 'analyze' (default) → exact-hit is authoritative, hybrid + reranker skipped.
+    const evidence = await retrieval.collect({
+      turn: { ...strategyTurn, goal: 'analyze' },
+      message, sessionId: 's1', retrievalId: 'r1',
+    });
+
+    expect(evidence.exactLookup).toBe('hit');
+    expect(evidence.similarStrategies).toEqual([]);
+    expect(rerankCalled).toBe(false);
+    expect(evidence.warningCodes).not.toContain('rerank_failed');
+    expect(evidence.status).toBe('complete');
+  });
+});

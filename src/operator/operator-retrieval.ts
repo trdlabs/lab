@@ -12,8 +12,9 @@ import type {
 import { sourceFingerprint } from '../domain/fingerprint.ts';
 import type { EmbeddingPort } from '../ports/embedding.port.ts';
 import type { StrategyProfileRepository } from '../ports/strategy-profile.repository.ts';
-import type { StrategySimilarityPort } from '../ports/strategy-similarity.port.ts';
+import type { StrategySimilarityPort, RerankerPort } from '../ports/strategy-similarity.port.ts';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
+import { shouldRerank, type RerankConfig } from './rerank-policy.ts';
 
 export const DEFAULT_SOFT_DEADLINE_MS = 5000;
 export const DEFAULT_HARD_DEADLINE_MS = 10000;
@@ -25,6 +26,7 @@ export const RETRIEVAL_WARNINGS = {
   similarityAborted: 'similarity_aborted',
   similarityFailed: 'similarity_failed',
   embedFailed: 'embed_failed',
+  rerankFailed: 'rerank_failed',
 } as const;
 
 /**
@@ -103,6 +105,10 @@ export interface OperatorRetrievalDeps {
   lexicalLimit?: number;
   vectorLimit?: number;
   fusedLimit?: number;
+  /** Optional reranker; when absent the RRF order is the final order. */
+  reranker?: RerankerPort;
+  /** Required when `reranker` is set; ignored otherwise. */
+  rerankConfig?: RerankConfig;
 }
 
 const isAbortError = (err: unknown): boolean =>
@@ -351,7 +357,33 @@ export class OperatorRetrieval implements OperatorRetrievalPort {
     // Carry through the adapter's own degradation codes verbatim.
     for (const code of result.degradedReasonCodes) warnings.add(code);
 
-    const candidates = [...result.candidates];
+    let candidates = [...result.candidates];
+
+    // §7 conditional reranking — RRF order is the baseline + the fallback.
+    const reranker = this.#deps.reranker;
+    const rcfg = this.#deps.rerankConfig;
+    if (reranker && rcfg) {
+      const remainingMs = budget.remaining(this.#deps.clock());
+      if (shouldRerank({ candidates, goal: input.turn.goal, remainingMs, cfg: rcfg })) {
+        const rerankStart = this.#deps.clock();
+        try {
+          const reranked = await this.#withTimeout(
+            (signal) => reranker.rerank(message, candidates, rcfg.limit, signal),
+            Math.min(rcfg.timeoutMs, remainingMs),
+            budget,
+          );
+          candidates = [...reranked];
+        } catch (err) {
+          warnings.add(RETRIEVAL_WARNINGS.rerankFailed);
+          if (isAbortError(err) || budget.hardExpired(this.#deps.clock())) {
+            warnings.add(RETRIEVAL_WARNINGS.hardDeadline);
+          }
+          // candidates keeps the RRF order
+        }
+        timingsMs.rerankMs = this.#deps.clock() - rerankStart;
+      }
+    }
+
     onCandidates(candidates);
     for (const c of candidates) {
       evidenceRefs.push({
@@ -361,6 +393,27 @@ export class OperatorRetrieval implements OperatorRetrievalPort {
         observedAt: this.#deps.isoNow(),
       });
     }
+  }
+
+  /**
+   * Races `fn(signal)` against a scheduler-fired timeout AND the budget hard-deadline.
+   * The returned AbortController is linked to `budget.signal` so a hard-deadline abort
+   * propagates into the reranker. The scheduler fires an independent per-rerank timeout.
+   * Either abort source triggers rejection via `raceSignal`, preserving the RRF fallback.
+   */
+  #withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number, budget: RetrievalBudget): Promise<T> {
+    const ctl = new AbortController();
+    const onAbort = () => ctl.abort(budget.signal.reason);
+    if (budget.signal.aborted) {
+      ctl.abort(budget.signal.reason);
+    } else {
+      budget.signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const cancel = this.#deps.scheduler(ms, () => ctl.abort(new DOMException('rerank timeout', 'AbortError')));
+    return raceSignal(fn(ctl.signal), ctl.signal).finally(() => {
+      cancel();
+      budget.signal.removeEventListener('abort', onAbort);
+    });
   }
 }
 
