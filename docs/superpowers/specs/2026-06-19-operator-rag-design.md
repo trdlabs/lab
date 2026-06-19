@@ -324,6 +324,21 @@ Ragas and DeepEval are not dependencies in this slice. They may later be used as
 
 ## 11. Observability contract
 
+Canonical audit event names (canonical implemented names):
+
+```text
+chat.turn.interpreted
+chat.retrieval.completed
+chat.proposal.created
+chat.proposal.confirmed
+chat.proposal.cancelled
+chat.proposal.expired
+chat.proposal.unresolved_reply
+chat.task_created
+retrieval.strategy_indexed
+retrieval.strategy_index_failed
+```
+
 Emit audit events now with fields that can later become Phoenix/OpenTelemetry span attributes:
 
 ```text

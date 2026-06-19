@@ -88,3 +88,60 @@ chat.task_created
 ## Out of scope
 
 No browser-facing endpoint, no streaming assistant responses, no command channel, no chat transcript UI. SP-6 SSE (`GET /v1/stream`) is a separate read-side boundary and is unaffected. See `docs/superpowers/specs/2026-06-14-trading-lab-sp6.1-chat-ingress-boundary-design.md`.
+
+## Operator RAG (evidence-first retrieval)
+
+### Evidence flow
+
+```
+TurnInterpreter (one LLM call)
+  -> OperatorRetrievalPlanner
+       -> exact fingerprint lookup
+       -> structured repository reads
+       -> PostgreSQL FTS (lexical, top-50)    ┐ parallel
+       -> pgvector similarity search (top-50) ┘
+  -> RRF fusion (k=60)
+  -> conditional reranker (fail-soft)
+  -> EvidencePolicy
+  -> evidence-first assistant_message + proposed actions
+  -> deterministic confirmation guard
+  -> task enqueued (only after explicit confirm)
+```
+
+One LLM call interprets the turn. All retrieval and proposal policy is deterministic. No task is created before the operator sends an explicit confirmation.
+
+### Feature flag
+
+`OPERATOR_RAG_ENABLED` (default **false**). When false, `DisabledOperatorRetrieval` is used — it makes zero embedding or database calls and the chat flow works normally, just without similarity evidence. When true, both `DATABASE_URL` and `OPENROUTER_API_KEY` are required.
+
+### Embedding model / dimension lock
+
+Provider: `openrouter`. Model: `baai/bge-m3`. Dimension: **1024**.
+
+Configuration fails closed: if `OPERATOR_EMBEDDING_DIMENSIONS` is set to any value other than 1024, `loadEnv` throws at startup before any request is served. Vectors from different models or normalization rules are never mixed in one active index; changing the model requires a new `OPERATOR_RETRIEVAL_INDEX_VERSION` and a full reindex.
+
+### Deadlines
+
+| Boundary | Meaning |
+|---|---|
+| **5 s soft** | No new retrieval or model calls are started after this point |
+| **10 s hard** | Any remaining in-flight work is aborted; available (possibly degraded) evidence is returned |
+
+A timeout never produces a false "nothing found" result. Partial-source failure becomes an explicit `EvidenceWarning` in the response; the user can decide whether to proceed.
+
+### Operational commands
+
+| Command | Default mode | With `--run` |
+|---|---|---|
+| `pnpm operator-rag:reindex` | Dry run — scans profiles and reports stale/missing projections | Paid: embeds and upserts each stale projection |
+| `pnpm operator-rag:eval` | Dry run — prints eval config and dataset summary | Paid: runs retrieval against the golden dataset and writes reports under `.artifacts/` |
+
+Dry run is the default for both commands; add `--run` to execute the paid/write path.
+
+### Why PostgreSQL FTS is NOT called BM25
+
+v1 uses PostgreSQL built-in `ts_rank_cd` lexical ranking via the `simple` text-search configuration. This is full-text ranking, not BM25. Strict BM25 scoring would require a separate extension or external service and is explicitly out of scope for this version. Do not describe the FTS branch as BM25 in code, docs, or metrics.
+
+### Fingerprint is the only exact-duplicate authority
+
+Fingerprint lookup (`StrategyProfileRepository.findByFingerprint`) is the sole mechanism that may declare two strategies identical. Semantic similarity results from RRF or the reranker are always labelled "similar" — never "the same". This rule is enforced by `EvidencePolicy` and asserted in integration tests.
