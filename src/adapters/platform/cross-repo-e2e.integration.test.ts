@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { BacktesterClient } from '@trading-backtester/client';
+import { BacktesterClient } from '@trading-backtester/sdk/client';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { SDK_CONTRACT_VERSION } from '../../domain/module-bundle.ts';
 import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';

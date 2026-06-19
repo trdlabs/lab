@@ -3,7 +3,7 @@ import type { ResearchPlatformPort } from '../../ports/research-platform.port.ts
 import { MockResearchPlatformAdapter } from './mock-research-platform.adapter.ts';
 import { LazyMcpResearchPlatformAdapter } from './mcp-research-platform.adapter.ts';
 import { loadResearchPlatformConfig, createGatewayTransport } from './mcp-research-transport.ts';
-import { BacktesterClient } from '@trading-backtester/client';
+import { BacktesterClient } from '@trading-backtester/sdk/client';
 import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';
 
 /**

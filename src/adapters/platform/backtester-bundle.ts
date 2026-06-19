@@ -1,23 +1,25 @@
 // Map a lab ModuleBundle → the backtester's submitted moduleBundle wire shape.
 //
-// Map the lab module taxonomy onto the backtester wire kind. The current cross-repo
-// demo path submits hypothesis overlays through the backtester overlay engine, so
-// `hypothesis_overlay` must surface as the backtester `overlay` kind.
+// The lab taxonomy maps onto the backtester wire kind: the cross-repo demo path submits hypothesis
+// overlays through the backtester overlay engine, so `hypothesis_overlay` surfaces as the backtester
+// `overlay` kind. The canonical executable bundle is built via the SDK builder so it is exactly the
+// inline bundle the service accepts (canonical file ordering, frozen, pinned bundleContractVersion).
 
-import { BUNDLE_CONTRACT_VERSION, type ModuleBundle as BacktesterModuleBundle } from '@trading-backtester/client';
+import { createModuleBundle, createModuleManifest } from '@trading-backtester/sdk/builder';
+import type { ModuleBundle as BacktesterModuleBundle } from '@trading-backtester/sdk/contracts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 
 export function toBacktesterBundle(bundle: ModuleBundle): BacktesterModuleBundle {
   const kind = bundle.manifest.moduleKind === 'hypothesis_overlay' ? 'overlay' : 'strategy';
-  return {
-    manifest: {
-      id: bundle.manifest.moduleId,
-      // The lab manifest has no version; prefer the overlay manifest meta, else a stable default.
-      version: bundle.overlayMeta?.version ?? '1.0.0',
-      kind,
-      bundleContractVersion: BUNDLE_CONTRACT_VERSION,
-    },
+  // The lab manifest has no version; prefer the overlay manifest meta, else a stable default.
+  const manifest = createModuleManifest({
+    id: bundle.manifest.moduleId,
+    version: bundle.overlayMeta?.version ?? '1.0.0',
+    kind,
+  });
+  return createModuleBundle({
+    manifest,
     entry: bundle.manifest.entry,
     files: bundle.files,
-  };
+  });
 }
