@@ -48,6 +48,11 @@ import type { StrategyRetrievalIndexerPort } from './orchestrator/app-services.t
 import { OpenRouterEmbeddingAdapter } from './adapters/embedding/openrouter-embedding.adapter.ts';
 import { PgStrategyRetrievalIndexAdapter } from './adapters/repository/pg-strategy-retrieval-index.adapter.ts';
 import { PgHybridStrategySimilarityAdapter } from './adapters/similarity/pg-hybrid-strategy-similarity.adapter.ts';
+import { resolveLanguageModel } from './adapters/llm/model-provider.ts';
+import { createRerankerScorer } from './mastra/agents/reranker.agent.ts';
+import { MastraRerankerAdapter } from './adapters/reranker/mastra-reranker.adapter.ts';
+import type { RerankerPort } from './ports/strategy-similarity.port.ts';
+import type { RerankConfig } from './operator/rerank-policy.ts';
 import { OperatorRetrieval, realScheduler } from './operator/operator-retrieval.ts';
 import { DisabledOperatorRetrieval } from './operator/disabled-operator-retrieval.ts';
 import { StrategyRetrievalIndexer } from './operator/strategy-retrieval-indexer.ts';
@@ -127,10 +132,28 @@ export function buildOperatorRag(
   });
   const similarity = new PgHybridStrategySimilarityAdapter(db);
 
+  // §7 conditional reranker — scaffold, OFF unless OPERATOR_RERANKER=mastra. RRF stays the baseline +
+  // fallback. Scaffold note: reuses the operator interpreter model for the relevance scorer and
+  // metadata-only candidate text; a dedicated reranker model + richer candidate text are finalized in
+  // the future enable-slice (gated on an independent eval corpus).
+  let reranker: RerankerPort | undefined;
+  if (env.OPERATOR_RERANKER === 'mastra') {
+    const scorer = createRerankerScorer(resolveLanguageModel(env, env.INTENT_CLASSIFIER_MODEL).model);
+    reranker = new MastraRerankerAdapter(scorer);
+  }
+  const rerankConfig: RerankConfig = {
+    timeoutMs: env.OPERATOR_RERANK_TIMEOUT_MS,
+    limit: env.OPERATOR_RERANK_LIMIT,
+    minCandidates: env.OPERATOR_RERANK_MIN_CANDIDATES,
+    rrfMargin: env.OPERATOR_RERANK_RRF_MARGIN,
+  };
+
   const retrieval = new OperatorRetrieval({
     embedding,
     strategyProfiles,
     similarity,
+    ...(reranker ? { reranker } : {}),
+    rerankConfig,
     clock: () => performance.now(),
     scheduler: realScheduler,
     isoNow: () => new Date().toISOString(),
