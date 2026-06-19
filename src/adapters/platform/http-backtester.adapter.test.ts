@@ -1,15 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import {
-  BacktesterConflictError,
-  BacktesterError,
-  type CapabilityDescriptor as BtCapabilityDescriptor,
-  type DatasetDescriptor as BtDatasetDescriptor,
-  type RunResultSummary as BtRunResultSummary,
-  type RunStatusView as BtRunStatusView,
-  type RunSubmitRequest as BtRunSubmitRequest,
-  type ValidationReport as BtValidationReport,
-  type ModuleValidateRequest as BtModuleValidateRequest,
-} from '@trading-backtester/client';
+import { BacktesterConflictError, BacktesterError } from '@trading-backtester/sdk/client';
+import type {
+  CapabilityDescriptor as BtCapabilityDescriptor,
+  DatasetDescriptor as BtDatasetDescriptor,
+  RunResultSummary as BtRunResultSummary,
+  RunStatusView as BtRunStatusView,
+  RunSubmitRequest as BtRunSubmitRequest,
+  ValidationReport as BtValidationReport,
+  ModuleValidateRequest as BtModuleValidateRequest,
+} from '@trading-backtester/sdk/contracts';
 import type { RunJobHandle, SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { GatewayRunError } from './gateway-errors.ts';
