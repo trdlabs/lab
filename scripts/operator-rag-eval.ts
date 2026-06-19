@@ -98,7 +98,9 @@ async function main(): Promise<number> {
   const { PgHybridStrategySimilarityAdapter } = await import('../src/adapters/similarity/pg-hybrid-strategy-similarity.adapter.ts');
 
   // OpenRouterEmbeddingAdapter(model, apiKey, fetchFn?)
-  const EMBEDDING_MODEL = 'text-embedding-3-small';
+  // Model is LOCKED to the Operator embedding model (baai/bge-m3, 1024 dims): the adapter
+  // rejects any non-1024 vector, and the corpus projection must use the same model.
+  const EMBEDDING_MODEL = process.env.OPERATOR_EMBEDDING_MODEL ?? 'baai/bge-m3';
   const embeddingAdapter = new OpenRouterEmbeddingAdapter(EMBEDDING_MODEL, process.env.OPENROUTER_API_KEY!);
   // createDbClient returns { db, pool }
   const { db } = createDbClient(process.env.DATABASE_URL!);
