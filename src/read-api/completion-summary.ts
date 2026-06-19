@@ -38,7 +38,13 @@ export interface RunCycleCompletionSummary {
   warnings: readonly string[];
 }
 
-export type CompletionSummary = BacktestCompletedCompletionSummary | RunCycleCompletionSummary; // extended in later tasks
+export interface OnboardCompletionSummary {
+  kind: 'strategy.onboard'; taskId: string; status: string;
+  profile: ProfileRef | null; nextStep?: { taskType: string }; links: SummaryLinks;
+  warnings: readonly string[];
+}
+
+export type CompletionSummary = BacktestCompletedCompletionSummary | RunCycleCompletionSummary | OnboardCompletionSummary;
 
 export interface CompletionSummaryDeps {
   researchTasks: Pick<ResearchTaskRepository, 'findById'>;
@@ -138,6 +144,26 @@ async function buildRunCycle(deps: CompletionSummaryDeps, task: ResearchTask): P
   };
 }
 
+async function buildOnboard(deps: CompletionSummaryDeps, task: ResearchTask): Promise<OnboardCompletionSummary> {
+  const warnings: string[] = [];
+  const safe = makeSafe(task.id, warnings);
+  const events = (await safe('events_read_failed', () => deps.agentEvents.list({ taskId: task.id, limit: 50 }))) ?? [];
+  let profileId: string | undefined;
+  for (const e of events) {
+    const pl = e.payload as { profileId?: unknown; strategyId?: unknown };
+    if (typeof pl.profileId === 'string' && pl.profileId) { profileId = pl.profileId; break; }
+    if (typeof pl.strategyId === 'string' && pl.strategyId) { profileId = pl.strategyId; break; }
+  }
+  const profile = profileId ? await safe('profile_read_failed', () => deps.strategyProfiles.findById(profileId!)) : null;
+  return {
+    kind: 'strategy.onboard', taskId: task.id, status: task.status,
+    profile: profile ? toProfileRef(profile) : null,
+    nextStep: { taskType: 'research.run_cycle' },
+    links: { taskId: task.id, profileId },
+    warnings,
+  };
+}
+
 export async function buildCompletionSummary(deps: CompletionSummaryDeps, taskId: string): Promise<CompletionSummary | null> {
   let task: ResearchTask | null;
   try {
@@ -150,6 +176,7 @@ export async function buildCompletionSummary(deps: CompletionSummaryDeps, taskId
   switch (task.taskType) {
     case 'backtest.completed': return buildBacktestCompleted(deps, task);
     case 'research.run_cycle': return buildRunCycle(deps, task);
+    case 'strategy.onboard': return buildOnboard(deps, task);
     default: return null;
   }
 }

@@ -154,3 +154,34 @@ describe('buildCompletionSummary — degradation observability', () => {
     expect(warnSpy).toHaveBeenCalled();
   });
 });
+
+describe('buildCompletionSummary — strategy.onboard', () => {
+  const onboardTask = (over: Record<string, unknown> = {}) => ({
+    id: 'ob1', taskType: 'strategy.onboard', source: 'operator', correlationId: 'c1',
+    status: 'completed', payload: {}, createdAt: '2026-06-19T00:00:00.000Z', updatedAt: '2026-06-19T00:00:00.000Z', ...over,
+  });
+
+  it('resolves the created profile from a task event payload (profileId or strategyId) and sets nextStep', async () => {
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => onboardTask() },
+      agentEvents: { list: async () => [
+        { id: 'e1', taskId: 'ob1', type: 'strategy_analyst.started', payload: {}, createdAt: '2026-06-19T00:00:00.000Z' },
+        { id: 'e2', taskId: 'ob1', type: 'strategy_analyst.completed', payload: { profileId: 'p9', direction: 'long' }, createdAt: '2026-06-19T00:00:01.000Z' },
+      ] },
+      strategyProfiles: { findById: async (id: string) => id === 'p9' ? { id: 'p9', coreIdea: 'breakout', direction: 'long' } : null },
+    });
+    const s = await buildCompletionSummary(deps, 'ob1');
+    if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
+    expect(s.profile).toEqual({ id: 'p9', coreIdea: 'breakout', direction: 'long' });
+    expect(s.nextStep).toEqual({ taskType: 'research.run_cycle' });
+    expect(s.links).toEqual({ taskId: 'ob1', profileId: 'p9' });
+  });
+
+  it('degrades to profile:null when no event carries a profile id', async () => {
+    const deps = fakeDeps({ researchTasks: { findById: async () => onboardTask() } });
+    const s = await buildCompletionSummary(deps, 'ob1');
+    if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
+    expect(s.profile).toBeNull();
+    expect(s.links.profileId).toBeUndefined();
+  });
+});
