@@ -16,11 +16,12 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 | 2 | Operator RAG baseline | ✅ Shipped |
 | 3 | Meaningful completion replies | ⏳ Next |
 | — | Reranker follow-up | ⏳ Next (baseline eval now exists) |
-| 4 | Bot catalog + entity disambiguation | 🔜 Backlog |
-| 5 | Researcher / Artifact RAG | 🔜 Backlog |
+| 4 | Bot catalog + entity disambiguation | ⛔ Deferred — needs platform SDK + bot-identity DTO (see SDK initiative) |
+| 5 | Researcher / Artifact RAG | ⛔ Deferred — needs backtester SDK artifact API (see SDK initiative) |
 | — | Phoenix observability | 🔜 Backlog |
 | — | Answer Synthesizer (optional) | 🔜 Backlog |
 | — | Agentic RAG (bounded corrective) | 🕓 Later (only if eval justifies) |
+| — | SDK boundaries + distribution (cross-cutting) | 🔬 Researched — own brainstorm/spec pending |
 | — | Tech debt: strip-types boot fix | ✅ Shipped (branch `fix/strip-types-boot`) |
 
 ## Shipped
@@ -80,16 +81,22 @@ A baseline eval exists, so the conditional `MastraRerankerAdapter` (the
 and enabled only if it shows ≥ +0.02 nDCG@5 over the RRF baseline within the
 latency budget. Needs its own design/plan. Reference: operator-rag design §7.
 
-### 4. Bot catalog + entity disambiguation
+### 4. Bot catalog + entity disambiguation  — ⛔ DEFERRED (SDK dependency)
 A lab-side `BotCatalogReadPort` (stable botId, aliases, strategy ref, market/symbol/
 timeframe/direction, status) backed by the platform SDK; `entity_disambiguation`
 pending-interaction + ranked candidate selection. If the upstream surface lacks
 the identity metadata, extending it is an explicit prerequisite. Reference: design §8.
+**Deferred** until the new `@trading-platform/sdk` lands with a stable bot-identity DTO —
+the catalog should bind to that surface, not the legacy vendored SDK. See *SDK boundaries
++ distribution* below.
 
-### 5. Researcher / Artifact RAG
+### 5. Researcher / Artifact RAG  — ⛔ DEFERRED (SDK dependency)
 A second index over research-report / hypothesis-rationale / critic-output / notes
 chunks (with profileId/taskId/type/timestamp metadata) for explanatory answers
 ("what was tried before", "why was this hypothesis rejected"). Reference: research §5.
+**Deferred** until the `@trading-backtester/sdk` artifact API (`/artifacts` descriptors /
+references / pagination DTO) is fixed — the index keys off that contract. See *SDK
+boundaries + distribution* below.
 
 ### Phoenix observability
 The audit events already emit Phoenix/OpenTelemetry-compatible attributes; wire the
@@ -109,6 +116,41 @@ cases demonstrably fail single-shot/bounded retrieval.
 Measure real-model interpretation quality (subject/goal/constraint extraction)
 with a labelled set, mirroring the intent-classifier eval harness. The current
 mastra adapter has a correct prompt but its live quality is unmeasured.
+
+## SDK boundaries + distribution (cross-cutting)
+
+A cross-repo architectural initiative to replace the committed, platform-owned vendored
+SDK tarball (and the sibling `file:../trading-backtester/...` client dependency) with **two
+independently-versioned SDKs by bounded context**, delivered via **GitHub Release assets**
+(no npmjs, no sibling checkouts, no registry credentials). Research + conclusions:
+`docs/research/2026-06-19-sdk-boundaries-and-distribution.md` (branch
+`docs/sdk-boundaries-distribution`). This is **research input, not an approved spec** — it
+needs its own `superpowers:brainstorming` → spec → plan, and a re-check of all repos, before
+implementation.
+
+**Target split:**
+- **`@trading-platform/sdk`** (new public repo `trading-platform-sdk`): platform data /
+  catalog, historical-data DTO+client, ops-read (bot/paper/live observations),
+  paper-candidate intake, platform capabilities/versioning, platform HTTP/MCP transports.
+  Sheds its legacy builder / backtest-lifecycle surface.
+- **`@trading-backtester/sdk`** (in the already-public `trading-backtester` as
+  `packages/sdk`, subpath exports `/builder` `/client` `/contracts` `/artifacts`): the
+  source of truth for module build / validate / run / result / artifacts. The current
+  `@trading-backtester/client` stays as a deprecated compat wrapper for one migration window.
+- **Delivery:** consumers pin exact GitHub Release `.tgz` URLs (+ SHA-256 checksum / source
+  manifest); `pnpm-lock.yaml` records URL + integrity. Replaces `vendor/trading-platform-sdk/*.tgz`
+  and the `file:` client dep. Clean-clone install with no sibling checkout is a done-criterion.
+
+**Impact on the operator roadmap:**
+- **Independent** of this initiative (can proceed now): Slice 3 (completion replies), the
+  Reranker follow-up, Phoenix observability, and the shipped strip-types boot fix.
+- **Slice 4 (Bot catalog)** — deferred until the platform SDK + a stable bot-identity DTO land.
+- **Slice 5 (Researcher / Artifact RAG)** — deferred until the backtester SDK artifact API lands.
+- Do **not** start Slice 4 or Slice 5 until their respective SDK surfaces are fixed.
+
+Out of scope for the initiative itself: npmjs / private registry publication, moving any SDK
+into `trading-mock-platform`, a single universal package, live-execution changes, or rewriting
+public Git history (see research §11).
 
 ## Tech debt
 
