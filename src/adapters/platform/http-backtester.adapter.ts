@@ -144,7 +144,11 @@ function toSdkValidationReport(r: BtValidationReport): ValidationReport {
 }
 
 export class HttpBacktesterAdapter implements ResearchPlatformPort {
-  constructor(private readonly client: BacktesterClientLike) {}
+  private readonly client: BacktesterClientLike;
+
+  constructor(client: BacktesterClientLike) {
+    this.client = client;
+  }
 
   async discover(): Promise<ResearchCapabilityDescriptor> {
     const caps = await this.client.getCapabilities();

@@ -26,7 +26,10 @@ export class AgentActivityProjection {
   private readonly state = new Map<AgentId, AgentState>();
   private cursor: Cursor | null = null;
 
-  constructor(private readonly traceLimit: number) {
+  private readonly traceLimit: number;
+
+  constructor(traceLimit: number) {
+    this.traceLimit = traceLimit;
     for (const id of KNOWN_AGENT_IDS) this.state.set(id, freshIdle());
   }
 

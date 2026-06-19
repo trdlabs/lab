@@ -22,11 +22,15 @@ export class PgNotifyAgentEventStream implements AgentEventStreamPort {
   private draining = false;
   private stopped = false;
 
-  constructor(
-    private readonly pool: Pool,
-    private readonly reader: AgentEventReadPort,
-    private readonly opts: PgNotifyOpts,
-  ) {}
+  private readonly pool: Pool;
+  private readonly reader: AgentEventReadPort;
+  private readonly opts: PgNotifyOpts;
+
+  constructor(pool: Pool, reader: AgentEventReadPort, opts: PgNotifyOpts) {
+    this.pool = pool;
+    this.reader = reader;
+    this.opts = opts;
+  }
 
   // startCursor = the projection's post-rebuild position; catch-up resumes AFTER it.
   // Falsy (null/undefined) → cursor stays unset (catch-up reads from the start of agent_event).

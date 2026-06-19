@@ -20,7 +20,11 @@ function toDomain(row: Row): HypothesisProposal {
 }
 
 export class DrizzleHypothesisReadAdapter implements HypothesisReadPort {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   async list(q: HypothesisListQuery): Promise<HypothesisProposal[]> {
     const conds: SQL[] = [];
