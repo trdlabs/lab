@@ -48,7 +48,7 @@ Worker drains
 ### Key invariants
 
 - **Pending confirm/cancel bypasses the LLM classifier.** When `session.pendingInteraction` is set, the second turn is resolved against the STORED proposal using an exact allow-list only (`да`, `подтверждаю`, `подтвердить`, `1` → confirm; `нет`, `отмена`, `отменить`, `0` → cancel; anything else → `unresolved`, stays parked). The classifier is NOT consulted.
-- **Raw strategy text is absent from audit events.** `chat.proposal.created` carries only IDs / task type / expiry — never the message body. The `messageChars` field logs length only. Privacy is asserted in the E2E test (`test/e2e/chat-to-task.test.ts`).
+- **Raw strategy text is absent from audit events.** `chat.proposal.created` carries only IDs / task type / expiry — never the message body. The `messageChars` field logs length only. Privacy is asserted in the E2E tests (`test/e2e/chat-to-task.test.ts`, `test/e2e/operator-rag-to-proposal.test.ts`).
 - **`pendingPlanId` is the post-task auto-chain pointer.** It points at the `ChatPlan` that `advanceChatPlan` will consume to enqueue the next task after completion. It is NOT the conversational confirmation pointer — that is `pendingInteraction.proposalId` (cleared on confirm or cancel).
 - **Confirmation is idempotent.** A duplicate confirm replays the already-created task's status; it never enqueues a second time.
 
@@ -100,8 +100,7 @@ TurnInterpreter (one LLM call)
        -> structured repository reads
        -> PostgreSQL FTS (lexical, top-50)    ┐ parallel
        -> pgvector similarity search (top-50) ┘
-  -> RRF fusion (k=60)
-  -> conditional reranker (fail-soft)
+  -> RRF fusion (k=60) → final ranking   [a RerankerPort seam exists but is NOT implemented in this baseline; reranking is a separate future plan]
   -> EvidencePolicy
   -> evidence-first assistant_message + proposed actions
   -> deterministic confirmation guard
@@ -144,4 +143,4 @@ v1 uses PostgreSQL built-in `ts_rank_cd` lexical ranking via the `simple` text-s
 
 ### Fingerprint is the only exact-duplicate authority
 
-Fingerprint lookup (`StrategyProfileRepository.findByFingerprint`) is the sole mechanism that may declare two strategies identical. Semantic similarity results from RRF or the reranker are always labelled "similar" — never "the same". This rule is enforced by `EvidencePolicy` and asserted in integration tests.
+Fingerprint lookup (`StrategyProfileRepository.findByFingerprint`) is the sole mechanism that may declare two strategies identical. Semantic similarity results from RRF are always labelled "similar" — never "the same". This rule is enforced by `EvidencePolicy` and asserted in integration tests.
