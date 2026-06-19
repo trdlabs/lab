@@ -153,6 +153,22 @@ describe('buildCompletionSummary — degradation observability', () => {
     expect(s.profile).toEqual({ id: 'p1', coreIdea: 'fade pumps', direction: 'short' });
     expect(warnSpy).toHaveBeenCalled();
   });
+
+  it('onboard: records events_read_failed + warns when the event read throws', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => ({
+        id: 'ob1', taskType: 'strategy.onboard', source: 'operator', correlationId: 'c1',
+        status: 'completed', payload: {}, createdAt: '2026-06-19T00:00:00.000Z', updatedAt: '2026-06-19T00:00:00.000Z',
+      }) },
+      agentEvents: { list: async () => { throw new Error('stream down'); } },
+    });
+    const s = await buildCompletionSummary(deps, 'ob1');
+    if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
+    expect(s.warnings).toContain('events_read_failed');
+    expect(s.profile).toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+  });
 });
 
 describe('buildCompletionSummary — strategy.onboard', () => {
@@ -183,5 +199,23 @@ describe('buildCompletionSummary — strategy.onboard', () => {
     if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
     expect(s.profile).toBeNull();
     expect(s.links.profileId).toBeUndefined();
+  });
+});
+
+describe('buildCompletionSummary — null contract', () => {
+  it('returns null for an unknown task', async () => {
+    expect(await buildCompletionSummary(fakeDeps(), 'missing')).toBeNull();
+  });
+  it('returns null for a non-completed task', async () => {
+    const deps = fakeDeps({ researchTasks: { findById: async () => ({ id: 't', taskType: 'research.run_cycle', status: 'running', payload: {}, source: 'operator', correlationId: 'c', createdAt: '', updatedAt: '' }) } });
+    expect(await buildCompletionSummary(deps, 't')).toBeNull();
+  });
+  it('returns null for a completed but unsupported task type', async () => {
+    const deps = fakeDeps({ researchTasks: { findById: async () => ({ id: 't', taskType: 'hypothesis.build', status: 'completed', payload: {}, source: 'operator', correlationId: 'c', createdAt: '', updatedAt: '' }) } });
+    expect(await buildCompletionSummary(deps, 't')).toBeNull();
+  });
+  it('does not throw when researchTasks.findById rejects (graceful)', async () => {
+    const deps = fakeDeps({ researchTasks: { findById: async () => { throw new Error('db down'); } } });
+    expect(await buildCompletionSummary(deps, 't')).toBeNull();
   });
 });
