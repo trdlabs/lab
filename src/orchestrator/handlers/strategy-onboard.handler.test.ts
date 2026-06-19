@@ -4,6 +4,8 @@ import { makeServices } from '../../../test/support/make-services.ts';
 import { sourceFingerprint } from '../../domain/fingerprint.ts';
 import { FakeStrategyAnalyst } from '../../adapters/analyst/fake-strategy-analyst.ts';
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
+import type { StrategyRetrievalIndexerPort } from '../app-services.ts';
+import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 
 const task = (payload: Record<string, unknown>): ResearchTask => ({
@@ -43,6 +45,25 @@ describe('strategyOnboardHandler', () => {
   it('throws on an invalid payload', async () => {
     const services = makeServices();
     await expect(strategyOnboardHandler(task({ kind: 'tweet' }), services)).rejects.toThrow(/invalid strategy.onboard payload/);
+  });
+
+  it('invokes the retrieval indexer with the persisted profile after onboarding', async () => {
+    const indexed: StrategyProfile[] = [];
+    const indexer: StrategyRetrievalIndexerPort = { index: async (p) => { indexed.push(p); } };
+    const services = makeServices({ strategyRetrievalIndexer: indexer });
+    await strategyOnboardHandler(task(validPayload), services);
+    const fp = sourceFingerprint('article', validPayload.content);
+    expect(indexed).toHaveLength(1);
+    expect(indexed[0]?.sourceFingerprint).toBe(fp);
+  });
+
+  it('completes onboarding even if the indexer is fail-soft (never throws)', async () => {
+    // The real indexer never throws; this asserts the handler does not depend on its outcome.
+    const indexer: StrategyRetrievalIndexerPort = { index: async () => { /* swallow, fail-soft */ } };
+    const services = makeServices({ strategyRetrievalIndexer: indexer });
+    await expect(strategyOnboardHandler(task(validPayload), services)).resolves.toBeUndefined();
+    const fp = sourceFingerprint('article', validPayload.content);
+    expect(await services.strategyProfiles.findByFingerprint(fp)).not.toBeNull();
   });
 
   it('records a failed audit event and rethrows when the analyst throws', async () => {

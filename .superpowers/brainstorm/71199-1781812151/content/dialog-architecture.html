@@ -1,0 +1,68 @@
+<h2>От маршрутизатора команд к осмысленному оператору</h2>
+<p class="subtitle">Главное изменение: сначала понять объект и контекст, затем отдельно выбрать действие.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Сейчас: один ход = один intent</div>
+    <div class="mockup-body">
+      <div class="label">Сообщение пользователя</div>
+      <div class="placeholder">«Входим в лонг после пролива...»</div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder">LLM выбирает одну команду</div>
+      <p style="text-align:center">↓</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="placeholder">strategy.onboard</div>
+        <div class="placeholder">hypothesis.build</div>
+      </div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder">Guard: enqueue или шаблонная ошибка</div>
+      <p class="subtitle">Проблема: распознавание предмета и выбор действия слиты. Ошибка intent сразу становится неправильным действием.</p>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Цель: understand → enrich → propose → execute</div>
+    <div class="mockup-body">
+      <div class="label">1. Понять предмет сообщения</div>
+      <div class="placeholder">strategy_description, bot_question, results_query...</div>
+      <p style="text-align:center">↓</p>
+      <div class="label">2. Обогатить фактами</div>
+      <div class="placeholder">Fingerprint, профиль, похожие стратегии, последние результаты</div>
+      <p style="text-align:center">↓</p>
+      <div class="label">3. Предложить следующий шаг</div>
+      <div class="placeholder">«Похоже на новую стратегию. Проанализировать или сначала найти похожие?»</div>
+      <p style="text-align:center">↓ пользователь выбирает</p>
+      <div class="label">4. Детерминированно выполнить</div>
+      <div class="placeholder">Guard → queue / read-only ответ</div>
+      <p class="subtitle">LLM формулирует и распознаёт, но не создаёт задачи напрямую.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Новое состояние сессии</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>subject</strong><br>Что обсуждаем</div>
+    <div class="placeholder"><strong>evidence</strong><br>Что найдено в системе</div>
+    <div class="placeholder"><strong>pending action</strong><br>Какой выбор ожидаем</div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>Что это даёт</h4>
+    <ul>
+      <li>Не нужны префиксы «Стратегия:» и «исследуй».</li>
+      <li>Короткие ответы «да», «покажи», «второй вариант» понятны из контекста.</li>
+      <li>Дубликаты и результаты становятся частью ответа, а не скрытой логикой.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Что принципиально ограничиваем</h4>
+    <ul>
+      <li>Без согласия не запускаем дорогой research/backtest.</li>
+      <li>LLM не пишет в очередь и не обходит guard.</li>
+      <li>Диалог остаётся предметным, а не general-purpose ChatGPT.</li>
+    </ul>
+  </div>
+</div>

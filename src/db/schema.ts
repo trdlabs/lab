@@ -1,6 +1,7 @@
-import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision, vector, customType } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
-import type { ArtifactRef } from '../domain/types.ts';
+import type { ArtifactRef, TaskSource } from '../domain/types.ts';
 import type { RuleAction, ExpectedEffect, HypothesisProposalDraft } from '../domain/hypothesis.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
@@ -8,6 +9,19 @@ import type { ModuleManifest } from '../domain/module-bundle.ts';
 import type { BacktestMetricBlock, ComparisonSummary } from '../ports/platform-gateway.port.ts';
 import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
+import type { ActionProposalStatus, ProposedTaskSnapshot, OperatorAction } from '../domain/action-proposal.ts';
+import type { PendingOperatorInteraction } from '../ports/chat-session.repository.ts';
+import type { EvidenceRef, StrategyRetrievalMetadata } from '../domain/strategy-retrieval.ts';
+
+// Postgres tsvector has no first-class Drizzle column type. This customType lets us
+// DECLARE the column so drizzle-kit tracks it; the GENERATED ALWAYS expression that
+// fills it from `content` is added by hand in migration 0010 (drizzle-kit cannot
+// emit a tsvector generated-column expression for a customType).
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
 
 export const researchTask = pgTable('research_task', {
   id: text('id').primaryKey(),
@@ -186,6 +200,7 @@ export const chatSession = pgTable('chat_session', {
   lastBacktestRunId: text('last_backtest_run_id'),
   lastUserGoal: text('last_user_goal'),
   pendingPlanId: text('pending_plan_id'),
+  pendingInteraction: jsonb('pending_interaction').$type<PendingOperatorInteraction>(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -203,4 +218,47 @@ export const chatPlan = pgTable('chat_plan', {
   // Powers the worker hook query: findPendingByAfterTaskId(afterTaskId).
   afterStatusIdx: index('chat_plan_after_task_status_idx').on(t.afterTaskId, t.status),
   sessionIdx: index('chat_plan_session_idx').on(t.sessionId),
+}));
+
+export const actionProposal = pgTable('action_proposal', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull(),
+  subjectHash: text('subject_hash').notNull(),
+  action: text('action').notNull().$type<OperatorAction>(),
+  source: text('source').notNull().$type<TaskSource>(),
+  task: jsonb('task').notNull().$type<ProposedTaskSnapshot>(),
+  status: text('status').notNull().$type<ActionProposalStatus>(),
+  evidenceRefs: jsonb('evidence_refs').notNull().default(sql`'[]'::jsonb`).$type<EvidenceRef[]>(),
+  evidenceWarnings: jsonb('evidence_warnings').notNull().default(sql`'[]'::jsonb`).$type<string[]>(),
+  confirmedTaskId: text('confirmed_task_id'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  sessionStatusIdx: index('action_proposal_session_status_idx').on(t.sessionId, t.status),
+}));
+
+// Rebuildable retrieval projection for Operator strategy lookup. One row per strategy
+// profile; embeddings are 1024-dim (baai/bge-m3). `search_vector` is a STORED generated
+// column derived from `content` via to_tsvector('simple', ...). The (index_version,
+// embedding_model) pair lets the indexer rebuild on model/version bumps and lets readers
+// exclude stale projections. Never stores raw secrets; `content` is the canonical,
+// already-redacted projection text.
+export const strategyRetrievalDocument = pgTable('strategy_retrieval_document', {
+  strategyProfileId: text('strategy_profile_id').primaryKey(),
+  content: text('content').notNull(),
+  contentHash: text('content_hash').notNull(),
+  embedding: vector('embedding', { dimensions: 1024 }),
+  // Declared so drizzle-kit tracks the column; the GENERATED ALWAYS expression is
+  // (re)asserted by hand in migration 0010. Kept aligned here so future generates do
+  // not see drift.
+  searchVector: tsvector('search_vector').generatedAlwaysAs(sql`to_tsvector('simple', "content")`),
+  embeddingModel: text('embedding_model').notNull(),
+  indexVersion: integer('index_version').notNull(),
+  metadata: jsonb('metadata').notNull().$type<StrategyRetrievalMetadata>(),
+  indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  searchVectorGin: index('strategy_retrieval_document_search_vector_gin').using('gin', t.searchVector),
+  embeddingHnsw: index('strategy_retrieval_document_embedding_hnsw').using('hnsw', t.embedding.op('vector_cosine_ops')),
+  versionModelIdx: index('strategy_retrieval_document_version_model_idx').on(t.indexVersion, t.embeddingModel),
 }));

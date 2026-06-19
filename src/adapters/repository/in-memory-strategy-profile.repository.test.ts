@@ -33,4 +33,27 @@ describe('InMemoryStrategyProfileRepository', () => {
     await repo.create(profile({ id: 'a', sourceFingerprint: 'sha256:dup' }));
     await expect(repo.create(profile({ id: 'b', sourceFingerprint: 'sha256:dup' }))).rejects.toThrow(/fingerprint/);
   });
+
+  it('listAll returns all profiles ordered by createdAt ASC, id ASC', async () => {
+    const repo = new InMemoryStrategyProfileRepository();
+    await repo.create(profile({ id: 'c', sourceFingerprint: 'sha256:c', createdAt: '2026-06-13T00:00:00Z' }));
+    await repo.create(profile({ id: 'a', sourceFingerprint: 'sha256:a', createdAt: '2026-06-11T00:00:00Z' }));
+    await repo.create(profile({ id: 'b', sourceFingerprint: 'sha256:b', createdAt: '2026-06-12T00:00:00Z' }));
+    const all = await repo.listAll();
+    expect(all.map((p) => p.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('listAll breaks ties by id when createdAt is equal', async () => {
+    const repo = new InMemoryStrategyProfileRepository();
+    await repo.create(profile({ id: 'z', sourceFingerprint: 'sha256:z', createdAt: '2026-06-11T00:00:00Z' }));
+    await repo.create(profile({ id: 'a', sourceFingerprint: 'sha256:a', createdAt: '2026-06-11T00:00:00Z' }));
+    await repo.create(profile({ id: 'm', sourceFingerprint: 'sha256:m', createdAt: '2026-06-11T00:00:00Z' }));
+    const all = await repo.listAll();
+    expect(all.map((p) => p.id)).toEqual(['a', 'm', 'z']);
+  });
+
+  it('listAll returns empty array when no profiles exist', async () => {
+    const repo = new InMemoryStrategyProfileRepository();
+    expect(await repo.listAll()).toEqual([]);
+  });
 });

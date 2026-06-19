@@ -1,0 +1,65 @@
+<h2>Уточнение дизайна: Hybrid Search + Reranking</h2>
+<p class="subtitle">Техника с курса подходит. Важно применить её после точных доменных lookup и к правильным индексам.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Retrieval pipeline</div>
+  <div class="mockup-body">
+    <div class="placeholder"><strong>0. Metadata filter</strong><br>тип документа, рынок, язык, timeframe, доступность результата</div>
+    <p style="text-align:center">↓</p>
+    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center">
+      <div class="placeholder"><strong>BM25 — top Klex</strong><br>точные термины, тикеры, индикаторы, формулы</div>
+      <div style="font-size:28px">+</div>
+      <div class="placeholder"><strong>Vector — top Kvec</strong><br>перефразирование, семантика торговой идеи</div>
+    </div>
+    <p style="text-align:center">↓</p>
+    <div class="placeholder"><strong>RRF — candidate set</strong><br>объединяет ранги без калибровки BM25/vector scores</div>
+    <p style="text-align:center">↓</p>
+    <div class="placeholder"><strong>Cross-encoder reranker</strong><br>оценивает query + candidate совместно и возвращает top N</div>
+    <p style="text-align:center">↓</p>
+    <div class="placeholder"><strong>Evidence mapper</strong><br>добавляет source ID, тип, freshness и предупреждение «similar, not duplicate»</div>
+  </div>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Индекс A — Strategy Profiles</div>
+    <div class="mockup-body">
+      <div class="placeholder">Один документ на профиль + нормализованные признаки</div>
+      <ul>
+        <li>Поиск похожих торговых идей</li>
+        <li>Metadata: market, timeframe, direction</li>
+        <li>Результат: профиль + similarity evidence</li>
+      </ul>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Индекс B — Research Artifacts</div>
+    <div class="mockup-body">
+      <div class="placeholder">Чанки отчётов, гипотез, критики и объяснений</div>
+      <ul>
+        <li>Ответы «почему» и «что уже пробовали»</li>
+        <li>Metadata: profileId, taskId, artifact type</li>
+        <li>Результат: фрагменты с source refs</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Что не проходит через hybrid search</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>Exact duplicate</strong><br>только fingerprint lookup</div>
+    <div class="placeholder"><strong>Metrics/status</strong><br>только repositories/read ports</div>
+    <div class="placeholder"><strong>Task execution</strong><br>только confirmation guard</div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>Почему схема сильная</h4><ul><li>BM25 сохраняет точные доменные термины.</li><li>Vectors находят перефразированные идеи.</li><li>RRF не требует сравнивать несовместимые scores.</li><li>Cross-encoder улучшает точность малого финального top.</li></ul></div>
+  <div class="cons"><h4>Ограничения</h4><ul><li>50/50/20/5 — стартовые параметры, а не закон.</li><li>Нужны multilingual embedding и reranker для русского/английского.</li><li>На маленькой базе reranking может не окупить задержку.</li><li>Качество проверяется eval-набором, не визуально.</li></ul></div>
+</div>
+
+<div class="section">
+  <h3>Рекомендуемые метрики</h3>
+  <div class="placeholder"><code>Recall@20</code> после RRF · <code>nDCG@5</code> после reranker · <code>Precision@5</code> · false-duplicate rate · p95 latency</div>
+</div>

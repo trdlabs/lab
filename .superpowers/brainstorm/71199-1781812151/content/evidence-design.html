@@ -1,0 +1,47 @@
+<h2>Раздел 2. Evidence Enricher и RAG</h2>
+<p class="subtitle">Каждый факт имеет источник, свежесть и уровень доверия. RAG не заменяет доменные запросы.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Приоритет источников</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div class="placeholder"><strong>1. Exact</strong><br>Fingerprint, ID, task status<br><small>авторитетный факт</small></div>
+      <div class="placeholder"><strong>2. Structured</strong><br>Profiles, hypotheses, backtests, bot runs<br><small>typed ports</small></div>
+      <div class="placeholder"><strong>3. Similarity</strong><br>Embeddings + признаки стратегии<br><small>рекомендация, не dedupe</small></div>
+      <div class="placeholder"><strong>4. RAG</strong><br>Отчёты, заметки, артефакты<br><small>контекст с цитатами</small></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Пакет фактов для стратегии</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>Subject snapshot</strong><br>market, timeframe, direction, entry, exit, risk, sourceTextHash</div>
+    <div class="placeholder"><strong>Existing knowledge</strong><br>exactMatch, similarProfiles[], analysisSummary, hypotheses[]</div>
+    <div class="placeholder"><strong>Observed results</strong><br>backtests[], botRuns[], activeTasks[], freshness</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Как ищем похожие стратегии</h3>
+  <div class="placeholder"><strong>Hybrid score</strong> = semantic embedding + совпадение рынка/таймфрейма/направления + сходство entry/exit/risk rules</div>
+  <p class="subtitle">Exact fingerprint решает только идентичность. Hybrid similarity помогает найти смысловые аналоги, но ответ обязан говорить «похожа», а не «та же самая».</p>
+</div>
+
+<div class="section">
+  <h3>Что делает RAG</h3>
+  <div class="pros-cons">
+    <div class="pros"><h4>Разрешено</h4><ul><li>Найти объяснение прошлой гипотезы.</li><li>Извлечь выводы researcher/critic из артефактов.</li><li>Подкрепить ответ ссылками на профиль, run и документ.</li></ul></div>
+    <div class="cons"><h4>Запрещено</h4><ul><li>Определять task status из текста.</li><li>Придумывать метрики при отсутствии run result.</li><li>Объявлять semantic match точным дубликатом.</li></ul></div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Пример ответа до подтверждения</div>
+  <div class="mockup-body">
+    <div class="placeholder"><strong>Я понял:</strong> long-стратегия отскока на 1m с DCA и двумя тейками.</div>
+    <div class="placeholder" style="margin-top:8px"><strong>В базе:</strong> точного совпадения нет. Есть 2 похожих профиля; лучший совпадает по входу и направлению, но использует другой стоп.</div>
+    <div class="placeholder" style="margin-top:8px"><strong>Предлагаю:</strong> создать новый профиль и провести анализ. Это ещё не запускает research или backtest.</div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="mock-button">Подтвердить анализ</button><button class="mock-button">Показать похожие</button><button class="mock-button">Уточнить стратегию</button><button class="mock-button">Отмена</button></div>
+  </div>
+</div>

@@ -1,0 +1,58 @@
+<h2>Operator RAG: budgeted retrieval runtime</h2>
+<p class="subtitle">Цель: полезный ответ за 5 секунд, контролируемая деградация до жёсткого лимита 10 секунд.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Основной поток</div>
+  <div class="mockup-body">
+    <div class="placeholder"><strong>0–1.5s · Turn Interpreter</strong><br>subject, goal, constraints, references, confidence</div>
+    <p style="text-align:center">↓</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <div class="placeholder"><strong>Exact + Structured</strong><br>fingerprint, profiles, tasks, results<br><small>авторитетные факты</small></div>
+      <div class="placeholder"><strong>Lexical FTS</strong><br>PostgreSQL text search<br><small>точные термины</small></div>
+      <div class="placeholder"><strong>Vector</strong><br>pgvector/HNSW<br><small>семантические аналоги</small></div>
+    </div>
+    <p style="text-align:center">↓ 1.5–3.0s, источники выполняются параллельно</p>
+    <div class="placeholder"><strong>RRF</strong><br>слияние lexical/vector ranks в bounded candidate set</div>
+    <p style="text-align:center">↓</p>
+    <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center">
+      <div class="placeholder"><strong>Однозначный top</strong><br>пропустить reranker</div>
+      <div style="font-size:28px">или</div>
+      <div class="placeholder"><strong>Неоднозначные кандидаты</strong><br>rerank top-20 → top-5, бюджет до 1.5s</div>
+    </div>
+    <p style="text-align:center">↓</p>
+    <div class="placeholder"><strong>Evidence Policy + Response</strong><br>typed facts, sources, freshness, warnings, proposed actions</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Когда включается reranker</h3>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+    <div class="placeholder">Нет exact match</div>
+    <div class="placeholder">Scores верхних кандидатов близки</div>
+    <div class="placeholder">Пользователь просит сравнить</div>
+    <div class="placeholder">Кандидатов больше policy threshold</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Deadline policy</h3>
+  <div class="pros-cons">
+    <div class="pros"><h4>До 5 секунд</h4><ul><li>Вернуть все завершившиеся авторитетные факты.</li><li>Добавить hybrid similarity, если она готова.</li><li>Reranker запускается только при оставшемся бюджете.</li></ul></div>
+    <div class="cons"><h4>5–10 секунд</h4><ul><li>Не начинать новые LLM/retrieval вызовы.</li><li>Завершить уже начатую безопасную сборку ответа.</li><li>На 10s отменить остаток и вернуть degraded evidence.</li></ul></div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Пример деградированного ответа</div>
+  <div class="mockup-body">
+    <div class="placeholder"><strong>Проверено:</strong> точного совпадения стратегии в базе нет.</div>
+    <div class="placeholder" style="margin-top:8px"><strong>Найдено:</strong> 3 лексически похожих профиля.</div>
+    <div class="placeholder" style="margin-top:8px"><strong>Ограничение:</strong> семантический поиск не успел завершиться, поэтому список аналогов может быть неполным.</div>
+    <div class="placeholder" style="margin-top:8px"><strong>Следующий шаг:</strong> подтвердить анализ или повторить расширенный поиск.</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Инварианты</h3>
+  <div class="placeholder">Timeout не превращается в «ничего не найдено» · partial evidence маркируется · exact/structured выше similarity · retrieval никогда не создаёт task · proposal всё равно требует confirmation</div>
+</div>

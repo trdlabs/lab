@@ -14,5 +14,8 @@ dist
 # Git worktrees (managed by tooling)
 .worktrees/
 
+# Superpowers visual companion runtime state (keep brainstorm content/*.html)
+/.superpowers/brainstorm/*/state/
+
 # Eval run outputs (generated artifacts)
 docs/eval-outputs/

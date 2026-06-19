@@ -1,16 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { parseIntent, planChatAction, type PlanArgs } from './guard.ts';
+import { parseTurn, planChatAction, type PlanArgs } from './guard.ts';
 import { sourceFingerprint } from '../domain/fingerprint.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
 import { InMemoryStrategyProfileRepository } from '../adapters/repository/in-memory-strategy-profile.repository.ts';
 import { InMemoryHypothesisProposalRepository } from '../adapters/repository/in-memory-hypothesis-proposal.repository.ts';
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
+import type { InterpretedTurn } from './turn-interpretation.ts';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
 import type { ResearchTask } from '../domain/types.ts';
 
 const session = (over: Partial<ChatSessionContext> = {}): ChatSessionContext => ({
   sessionId: 's1', updatedAt: '2026-06-13T00:00:00Z', ...over,
+});
+
+/** Build a valid InterpretedTurn with sensible defaults. */
+const turn = (over: Partial<InterpretedTurn> = {}): InterpretedTurn => ({
+  subject: 'strategy', constraints: {}, references: [], confidence: 0.9, ...over,
 });
 
 function mkDeps() {
@@ -21,9 +27,9 @@ function mkDeps() {
   };
 }
 
-function args(intentOver: Partial<PlanArgs> = {}, deps = mkDeps()): { plan: PlanArgs; deps: ReturnType<typeof mkDeps> } {
+function args(over: Partial<PlanArgs> = {}, deps = mkDeps()): { plan: PlanArgs; deps: ReturnType<typeof mkDeps> } {
   return {
-    plan: { message: 'm', session: session(), minConfidence: 0.6, deps, ...intentOver },
+    plan: { message: 'm', session: session(), minConfidence: 0.6, deps, ...over },
     deps,
   };
 }
@@ -47,28 +53,43 @@ const task = (id: string): ResearchTask => ({
   payload: {}, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
 });
 
-describe('parseIntent (schema gate)', () => {
-  it('accepts a valid intent', () => {
-    const r = parseIntent({ intent: 'help', confidence: 0.9 });
+describe('parseTurn (schema gate)', () => {
+  it('accepts a valid interpreted turn', () => {
+    const r = parseTurn({ subject: 'strategy', strategyText: 'x', constraints: {}, references: [], confidence: 0.9 });
     expect(r.ok).toBe(true);
   });
-  it('rejects malformed classifier output', () => {
-    const r = parseIntent({ intent: 'transfer.funds', confidence: 2 });
+  it('normalizes provider null optionals before validation', () => {
+    const r = parseTurn({
+      subject: 'strategy', goal: null, strategyText: 'x',
+      constraints: { market: null, timeframe: '1m', symbol: null, direction: null },
+      references: [], confidence: 0.9,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.turn.goal).toBeUndefined();
+      expect(r.turn.constraints).toEqual({ timeframe: '1m' });
+    }
+  });
+  it('rejects malformed interpreter output', () => {
+    const r = parseTurn({ subject: 'transfer.funds', confidence: 2 });
     expect(r.ok).toBe(false);
   });
 });
 
 describe('planChatAction', () => {
-  it('out_of_scope bypasses confidence and responds statically', async () => {
+  it('unknown subject -> out_of_scope', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'out_of_scope', confidence: 0.1 }, plan);
+    const d = await planChatAction(turn({ subject: 'unknown', confidence: 0.95 }), plan);
     expect(d.kind).toBe('respond');
-    if (d.kind === 'respond') expect(d.response.kind).toBe('out_of_scope');
+    if (d.kind === 'respond') {
+      expect(d.response.kind).toBe('out_of_scope');
+      expect(d.auditReason).toBe('interpreter_unknown_subject');
+    }
   });
 
   it('low confidence -> needs_clarification, no task', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'strategy.onboard', confidence: 0.2, strategyText: 'x' }, plan);
+    const d = await planChatAction(turn({ subject: 'strategy', confidence: 0.2, strategyText: 'x' }), plan);
     expect(d.kind).toBe('respond');
     if (d.kind === 'respond') {
       expect(d.response.kind).toBe('needs_clarification');
@@ -76,102 +97,107 @@ describe('planChatAction', () => {
     }
   });
 
-  it('results.trading -> capability_not_available', async () => {
+  it('results subject -> capability_not_available with capability results.trading', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'results.trading', confidence: 0.9 }, plan);
-    expect(d.kind === 'respond' && d.response.kind).toBe('capability_not_available');
+    const d = await planChatAction(turn({ subject: 'results', confidence: 0.9 }), plan);
+    expect(d.kind).toBe('respond');
+    if (d.kind === 'respond') {
+      expect(d.response.kind).toBe('capability_not_available');
+      if (d.response.kind === 'capability_not_available') {
+        expect(d.response.capability).toBe('results.trading');
+      }
+    }
   });
 
-  it('results.backtest -> capability_not_available', async () => {
+  it('bot subject -> capability_not_available with capability bot.status', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'results.backtest', confidence: 0.9 }, plan);
-    expect(d.kind === 'respond' && d.response.kind).toBe('capability_not_available');
+    const d = await planChatAction(turn({ subject: 'bot', confidence: 0.9 }), plan);
+    expect(d.kind).toBe('respond');
+    if (d.kind === 'respond') {
+      expect(d.response.kind).toBe('capability_not_available');
+      if (d.response.kind === 'capability_not_available') {
+        expect(d.response.capability).toBe('bot.status');
+      }
+    }
   });
 
-  it('task.status with a resolvable session pointer -> task_status', async () => {
+  it('task subject with a resolvable session pointer -> task_status', async () => {
     const { plan, deps } = args({ session: session({ lastResearchTaskId: 't1' }) });
     await deps.researchTasks.create(task('t1'));
-    const d = await planChatAction({ intent: 'task.status', confidence: 0.9 }, plan);
+    const d = await planChatAction(turn({ subject: 'task', confidence: 0.9 }), plan);
     expect(d.kind === 'respond' && d.response.kind).toBe('task_status');
   });
 
-  it('task.status with nothing resolvable -> needs_clarification', async () => {
+  it('task subject resolves an untrusted reference id via findById', async () => {
+    const { plan, deps } = args();
+    await deps.researchTasks.create(task('t9'));
+    const d = await planChatAction(turn({ subject: 'task', confidence: 0.9, references: ['t9'] }), plan);
+    expect(d.kind === 'respond' && d.response.kind).toBe('task_status');
+  });
+
+  it('task subject with nothing resolvable -> needs_clarification', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'task.status', confidence: 0.9 }, plan);
+    const d = await planChatAction(turn({ subject: 'task', confidence: 0.9 }), plan);
     expect(d.kind === 'respond' && d.response.kind).toBe('needs_clarification');
   });
 
-  it('strategy.onboard with text -> create_task, no chain', async () => {
+  it('strategy subject (goal undefined) -> propose_task, action=strategy.analyze, no chain', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'strategy.onboard', confidence: 0.9, strategyText: 'go long on oi' }, plan);
-    expect(d.kind).toBe('create_task');
-    if (d.kind === 'create_task') {
+    const d = await planChatAction(turn({ subject: 'strategy', confidence: 0.9, strategyText: 'go long on oi' }), plan);
+    expect(d.kind).toBe('propose_task');
+    if (d.kind === 'propose_task') {
+      expect(d.action).toBe('strategy.analyze');
       expect(d.taskType).toBe('strategy.onboard');
       expect(d.payload).toEqual({ kind: 'manual_description', content: 'go long on oi' });
       expect(d.chain).toBeUndefined();
     }
   });
 
-  it('strategy.onboard + research outcome -> create_task with chain fingerprint', async () => {
+  it('strategy subject goal=analyze -> propose_task action=strategy.analyze, no chain', async () => {
+    const { plan } = args();
+    const d = await planChatAction(turn({ subject: 'strategy', goal: 'analyze', confidence: 0.9, strategyText: 'go long on oi' }), plan);
+    expect(d.kind).toBe('propose_task');
+    if (d.kind === 'propose_task') {
+      expect(d.action).toBe('strategy.analyze');
+      expect(d.chain).toBeUndefined();
+    }
+  });
+
+  it('strategy subject falls back to the raw message when strategyText is absent', async () => {
+    const { plan } = args({ message: 'standalone strategy body' });
+    const d = await planChatAction(turn({ subject: 'strategy', confidence: 0.9 }), plan);
+    expect(d.kind).toBe('propose_task');
+    if (d.kind === 'propose_task') {
+      expect(d.payload).toEqual({ kind: 'manual_description', content: 'standalone strategy body' });
+    }
+  });
+
+  it('strategy subject + goal=research -> propose_task action=research.run_cycle taskType=strategy.onboard with chain', async () => {
     const { plan } = args();
     const text = 'go long on oi spike';
-    const d = await planChatAction(
-      { intent: 'strategy.onboard', confidence: 0.9, strategyText: text, requestedOutcome: 'research' }, plan,
-    );
-    expect(d.kind).toBe('create_task');
-    if (d.kind === 'create_task') {
-      expect(d.chain?.nextTaskType).toBe('research.run_cycle');
+    const d = await planChatAction(turn({ subject: 'strategy', goal: 'research', confidence: 0.9, strategyText: text }), plan);
+    expect(d).toMatchObject({ kind: 'propose_task', action: 'research.run_cycle', taskType: 'strategy.onboard', chain: { nextTaskType: 'research.run_cycle' } });
+    if (d.kind === 'propose_task') {
       expect(d.chain?.resolveProfileByFingerprint).toBe(sourceFingerprint('manual_description', text));
     }
   });
 
-  it('strategy.onboard without text -> needs_clarification', async () => {
-    const { plan } = args();
-    const d = await planChatAction({ intent: 'strategy.onboard', confidence: 0.9 }, plan);
-    expect(d.kind === 'respond' && d.response.kind).toBe('needs_clarification');
-  });
-
-  it('research.run_cycle with strategy text -> onboard create_task with chain', async () => {
-    const { plan } = args();
-    const d = await planChatAction({ intent: 'research.run_cycle', confidence: 0.9, strategyText: 'new strat' }, plan);
-    expect(d.kind).toBe('create_task');
-    if (d.kind === 'create_task') {
-      expect(d.taskType).toBe('strategy.onboard');
-      expect(d.chain?.nextTaskType).toBe('research.run_cycle');
-    }
-  });
-
-  it('research.run_cycle via last_strategy -> create_task research.run_cycle', async () => {
-    const { plan, deps } = args({ session: session({ lastStrategyProfileId: 'p1' }) });
-    await deps.strategyProfiles.create(profile('p1'));
-    const d = await planChatAction({ intent: 'research.run_cycle', confidence: 0.9 }, plan);
-    expect(d.kind).toBe('create_task');
-    if (d.kind === 'create_task') {
-      expect(d.taskType).toBe('research.run_cycle');
-      expect(d.payload).toEqual({ strategyProfileId: 'p1', cycleDepth: 0 });
-    }
-  });
-
-  it('research.run_cycle with no resolvable strategy -> needs_clarification', async () => {
-    const { plan } = args();
-    const d = await planChatAction({ intent: 'research.run_cycle', confidence: 0.9 }, plan);
-    expect(d.kind === 'respond' && d.response.kind).toBe('needs_clarification');
-  });
-
-  it('hypothesis.build via latest validated by profile -> create_task', async () => {
+  it('hypothesis subject via latest validated by profile -> propose_task action=hypothesis.build', async () => {
     const { plan, deps } = args({ session: session({ lastStrategyProfileId: 'p1' }) });
     await deps.hypotheses.create(validatedHyp('h1', 'p1'));
-    const d = await planChatAction({ intent: 'hypothesis.build', confidence: 0.9 }, plan);
-    expect(d.kind).toBe('create_task');
-    if (d.kind === 'create_task') {
+    await deps.strategyProfiles.create(profile('p1'));
+    const d = await planChatAction(turn({ subject: 'hypothesis', confidence: 0.9 }), plan);
+    expect(d.kind).toBe('propose_task');
+    if (d.kind === 'propose_task') {
+      expect(d.action).toBe('hypothesis.build');
       expect(d.taskType).toBe('hypothesis.build');
       expect(d.payload).toEqual({ hypothesisId: 'h1', cycleDepth: 0 });
     }
   });
 
-  it('hypothesis.build with no resolvable hypothesis -> needs_clarification', async () => {
+  it('hypothesis subject with no resolvable hypothesis -> needs_clarification', async () => {
     const { plan } = args();
-    const d = await planChatAction({ intent: 'hypothesis.build', confidence: 0.9 }, plan);
+    const d = await planChatAction(turn({ subject: 'hypothesis', confidence: 0.9 }), plan);
     expect(d.kind === 'respond' && d.response.kind).toBe('needs_clarification');
   });
 });

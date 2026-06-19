@@ -6,7 +6,6 @@ import { InMemoryHypothesisProposalRepository } from '../adapters/repository/in-
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
 import type { ResearchTask } from '../domain/types.ts';
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
-import type { ChatIntent } from './intent.ts';
 
 const session = (over: Partial<ChatSessionContext> = {}): ChatSessionContext => ({
   sessionId: 's1', updatedAt: '2026-06-13T00:00:00Z', ...over,
@@ -36,26 +35,22 @@ function deps(): RefResolverDeps & {
   };
 }
 
-const noHint: ChatIntent = { intent: 'task.status', confidence: 0.9 };
-
 describe('resolveStatusTask', () => {
   it('resolves the session pointer when the task exists', async () => {
     const d = deps();
     await d.researchTasks.create(task('t1'));
-    expect((await resolveStatusTask(noHint, session({ lastResearchTaskId: 't1' }), d))?.id).toBe('t1');
+    expect((await resolveStatusTask(undefined, session({ lastResearchTaskId: 't1' }), d))?.id).toBe('t1');
   });
 
   it('verifies an untrusted taskIdHint against the repo', async () => {
     const d = deps();
     await d.researchTasks.create(task('t9'));
-    const intent: ChatIntent = { intent: 'task.status', confidence: 0.9, taskIdHint: 't9' };
-    expect((await resolveStatusTask(intent, session(), d))?.id).toBe('t9');
+    expect((await resolveStatusTask('t9', session(), d))?.id).toBe('t9');
   });
 
   it('returns null when neither pointer nor hint resolves', async () => {
     const d = deps();
-    const intent: ChatIntent = { intent: 'task.status', confidence: 0.9, taskIdHint: 'ghost' };
-    expect(await resolveStatusTask(intent, session(), d)).toBeNull();
+    expect(await resolveStatusTask('ghost', session(), d)).toBeNull();
   });
 });
 

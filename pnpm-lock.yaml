@@ -778,7 +778,7 @@ packages:
     resolution: {directory: ../trading-backtester/packages/client, type: directory}
 
   '@trading-platform/sdk@file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz':
-    resolution: {integrity: sha512-d7YME49uLbX7CGjZPou3gUdjpv1THM4V1fPXP7XSeol3sbsvV5TGLhFlcktjnMVyxhovhIDQexOKRhYeSnu7eQ==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz}
+    resolution: {integrity: sha512-+xLOB5Dt22I1ZfufXW3IjdPW9kOlkqPTP8dd3dn/mJp2b/mQHbOWqCBWh3xM+VFm7QqsPDMZASgdKPGWF03t1A==, tarball: file:vendor/trading-platform-sdk/trading-platform-sdk-0.3.0.tgz}
     version: 0.3.0
     peerDependencies:
       '@modelcontextprotocol/sdk': ^1.29.0

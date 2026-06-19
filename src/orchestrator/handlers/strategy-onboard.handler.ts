@@ -81,4 +81,9 @@ export const strategyOnboardHandler: WorkflowHandler = async (task, services) =>
     updatedAt: now,
   };
   await services.strategyProfiles.create(profile);
+
+  // Fail-soft retrieval indexing: build the operator-RAG projection for this profile.
+  // index() NEVER throws — onboarding completes whether or not the projection lands
+  // (it emits retrieval.strategy_indexed / retrieval.strategy_index_failed internally).
+  await services.strategyRetrievalIndexer.index(profile);
 };

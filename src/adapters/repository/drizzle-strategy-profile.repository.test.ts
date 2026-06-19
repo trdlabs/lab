@@ -46,4 +46,20 @@ d('DrizzleStrategyProfileRepository (integration)', () => {
     await repo.create(profile({ sourceFingerprint: fp }));
     await expect(repo.create(profile({ sourceFingerprint: fp }))).rejects.toThrow();
   });
+
+  it('listAll returns profiles ordered by createdAt ASC, id ASC', async () => {
+    const t1 = new Date('2026-06-11T00:00:00Z').toISOString();
+    const t2 = new Date('2026-06-12T00:00:00Z').toISOString();
+    const t3 = new Date('2026-06-13T00:00:00Z').toISOString();
+    // Insert in non-chronological order
+    await repo.create(profile({ id: 'zz', sourceFingerprint: 'sha256:zz', createdAt: t3 }));
+    await repo.create(profile({ id: 'aa', sourceFingerprint: 'sha256:list-aa', createdAt: t1 }));
+    await repo.create(profile({ id: 'mm', sourceFingerprint: 'sha256:list-mm', createdAt: t2 }));
+    const all = await repo.listAll();
+    // Filter to the ones we just inserted (beforeAll deleted everything, but other tests
+    // may have inserted rows already — safe because beforeAll cleared the table)
+    const ids = all.map((p) => p.id);
+    const relevant = ids.filter((id) => ['zz', 'aa', 'mm'].includes(id));
+    expect(relevant).toEqual(['aa', 'mm', 'zz']);
+  });
 });

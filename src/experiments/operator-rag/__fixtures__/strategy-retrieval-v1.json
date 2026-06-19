@@ -1,0 +1,212 @@
+[
+  {
+    "id": "exact-copy-en-1",
+    "query": "long open interest momentum strategy on BTC/USDT 1h timeframe",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-oi-long-001"],
+    "gradedRelevance": {
+      "strat-btc-oi-long-001": 3,
+      "strat-btc-oi-long-002": 2,
+      "strat-eth-oi-long-003": 1,
+      "strat-btc-rsi-short-010": 0
+    },
+    "expectedExactId": "strat-btc-oi-long-001"
+  },
+  {
+    "id": "exact-copy-en-2",
+    "query": "RSI oversold reversal BTC 4h with stop loss at 2%",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-rsi-long-004"],
+    "gradedRelevance": {
+      "strat-btc-rsi-long-004": 3,
+      "strat-btc-rsi-long-005": 2,
+      "strat-eth-rsi-long-006": 1,
+      "strat-btc-oi-long-001": 0
+    },
+    "expectedExactId": "strat-btc-rsi-long-004"
+  },
+  {
+    "id": "ru-paraphrase-oi-1",
+    "query": "стратегия на рост открытого интереса для BTC на часовом таймфрейме",
+    "language": "ru",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-oi-long-001", "strat-btc-oi-long-002"],
+    "gradedRelevance": {
+      "strat-btc-oi-long-001": 3,
+      "strat-btc-oi-long-002": 2,
+      "strat-eth-oi-long-003": 1,
+      "strat-btc-rsi-short-010": 0
+    }
+  },
+  {
+    "id": "ru-paraphrase-rsi-1",
+    "query": "RSI перепроданность разворот биткоин 4 часа стоп лосс два процента",
+    "language": "ru",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-rsi-long-004"],
+    "gradedRelevance": {
+      "strat-btc-rsi-long-004": 3,
+      "strat-btc-rsi-long-005": 2,
+      "strat-eth-rsi-long-006": 1,
+      "strat-btc-oi-long-001": 0
+    }
+  },
+  {
+    "id": "ru-paraphrase-breakout-1",
+    "query": "пробой уровня сопротивления Ethereum дневной тайм фрейм с фиксацией прибыли",
+    "language": "ru",
+    "filters": { "symbol": "ETH/USDT" },
+    "expectedRelevantIds": ["strat-eth-breakout-007", "strat-eth-breakout-008"],
+    "gradedRelevance": {
+      "strat-eth-breakout-007": 3,
+      "strat-eth-breakout-008": 2,
+      "strat-btc-breakout-009": 1,
+      "strat-btc-oi-long-001": 0
+    }
+  },
+  {
+    "id": "en-paraphrase-oi-momentum",
+    "query": "OI-driven momentum trade crypto hourly bars",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-oi-long-001", "strat-btc-oi-long-002", "strat-eth-oi-long-003"],
+    "gradedRelevance": {
+      "strat-btc-oi-long-001": 3,
+      "strat-btc-oi-long-002": 3,
+      "strat-eth-oi-long-003": 2,
+      "strat-btc-rsi-long-004": 0
+    }
+  },
+  {
+    "id": "en-paraphrase-rsi-reversal",
+    "query": "buy the dip RSI signal 4-hour candles with tight stop",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-rsi-long-004", "strat-btc-rsi-long-005"],
+    "gradedRelevance": {
+      "strat-btc-rsi-long-004": 3,
+      "strat-btc-rsi-long-005": 2,
+      "strat-eth-rsi-long-006": 2,
+      "strat-btc-oi-long-001": 0
+    }
+  },
+  {
+    "id": "mixed-oi-longs",
+    "query": "long OI momentum BTC/USDT открытый интерес пробой вверх",
+    "language": "mixed",
+    "filters": { "symbol": "BTC/USDT" },
+    "expectedRelevantIds": ["strat-btc-oi-long-001", "strat-btc-oi-long-002"],
+    "gradedRelevance": {
+      "strat-btc-oi-long-001": 3,
+      "strat-btc-oi-long-002": 2,
+      "strat-eth-oi-long-003": 0,
+      "strat-btc-rsi-long-004": 0
+    }
+  },
+  {
+    "id": "mixed-rsi-stop",
+    "query": "RSI перепроданность 1H BTC стоп лосс tight stop oversold bounce",
+    "language": "mixed",
+    "filters": { "symbol": "BTC/USDT", "timeframe": "1h" },
+    "expectedRelevantIds": ["strat-btc-rsi-long-005"],
+    "gradedRelevance": {
+      "strat-btc-rsi-long-005": 3,
+      "strat-btc-rsi-long-004": 2,
+      "strat-eth-rsi-long-006": 1,
+      "strat-btc-oi-long-001": 0
+    }
+  },
+  {
+    "id": "mixed-breakout-ru-en",
+    "query": "breakout resistance ETH/USDT пробой сопротивления дневной таймфрейм",
+    "language": "mixed",
+    "filters": { "symbol": "ETH/USDT" },
+    "expectedRelevantIds": ["strat-eth-breakout-007"],
+    "gradedRelevance": {
+      "strat-eth-breakout-007": 3,
+      "strat-eth-breakout-008": 2,
+      "strat-btc-breakout-009": 1,
+      "strat-btc-oi-long-001": 0
+    }
+  },
+  {
+    "id": "negative-shared-entry-diff-risk-1",
+    "query": "long open interest BTC with aggressive 5% stop loss",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-oi-aggressive-011"],
+    "gradedRelevance": {
+      "strat-btc-oi-aggressive-011": 3,
+      "strat-btc-oi-long-001": 1,
+      "strat-btc-oi-long-002": 0,
+      "strat-btc-rsi-long-004": 0
+    }
+  },
+  {
+    "id": "negative-shared-entry-diff-risk-2",
+    "query": "OI momentum entry BTC conservative 0.5% stop loss low risk",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": ["strat-btc-oi-conservative-012"],
+    "gradedRelevance": {
+      "strat-btc-oi-conservative-012": 3,
+      "strat-btc-oi-long-001": 1,
+      "strat-btc-oi-aggressive-011": 0,
+      "strat-btc-rsi-long-004": 0
+    }
+  },
+  {
+    "id": "negative-shared-symbol-diff-strategy-1",
+    "query": "BTC/USDT RSI mean reversion not momentum",
+    "language": "en",
+    "filters": { "symbol": "BTC/USDT" },
+    "expectedRelevantIds": ["strat-btc-rsi-long-004", "strat-btc-rsi-long-005", "strat-btc-rsi-short-010"],
+    "gradedRelevance": {
+      "strat-btc-rsi-long-004": 3,
+      "strat-btc-rsi-long-005": 2,
+      "strat-btc-rsi-short-010": 2,
+      "strat-btc-oi-long-001": 0,
+      "strat-btc-oi-long-002": 0,
+      "strat-btc-oi-aggressive-011": 0
+    }
+  },
+  {
+    "id": "negative-shared-symbol-diff-direction",
+    "query": "BTC short strategy high open interest liquidation cascade",
+    "language": "en",
+    "filters": { "direction": "short" },
+    "expectedRelevantIds": ["strat-btc-rsi-short-010", "strat-btc-liq-short-013"],
+    "gradedRelevance": {
+      "strat-btc-liq-short-013": 3,
+      "strat-btc-rsi-short-010": 2,
+      "strat-btc-oi-long-001": 0,
+      "strat-btc-rsi-long-004": 0
+    }
+  },
+  {
+    "id": "no-match-exotic-asset",
+    "query": "Solana SOL/USDT perpetual funding rate strategy",
+    "language": "en",
+    "filters": { "symbol": "SOL/USDT" },
+    "expectedRelevantIds": [],
+    "gradedRelevance": {}
+  },
+  {
+    "id": "no-match-unknown-indicator",
+    "query": "zigzag oscillator crossover derivative 15m bars",
+    "language": "en",
+    "filters": {},
+    "expectedRelevantIds": [],
+    "gradedRelevance": {}
+  },
+  {
+    "id": "ru-no-match-obscure",
+    "query": "стратегия на основе волн Эллиотта с фракталами на Solana",
+    "language": "ru",
+    "filters": { "symbol": "SOL/USDT" },
+    "expectedRelevantIds": [],
+    "gradedRelevance": {}
+  }
+]

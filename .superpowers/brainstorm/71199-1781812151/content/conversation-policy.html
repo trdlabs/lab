@@ -1,0 +1,47 @@
+<h2>Раздел 3. Диалоговая политика, сбои и проверки</h2>
+<p class="subtitle">Подтверждение требуется для вычислительных и изменяющих состояние действий. Read-only ответы выполняются сразу.</p>
+
+<div class="section">
+  <h3>Поведение по сценариям</h3>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+    <div class="placeholder"><strong>Новое описание стратегии</strong><br>Понять → обогатить → предложить analysis → ждать подтверждения.</div>
+    <div class="placeholder"><strong>«Проанализируй эту стратегию»</strong><br>Понять явную цель → обогатить → показать точный план → всё равно ждать подтверждения.</div>
+    <div class="placeholder"><strong>Стратегия уже есть</strong><br>Показать профиль и свежие результаты → предложить show details / re-analysis / research.</div>
+    <div class="placeholder"><strong>«Как торгует бот?»</strong><br>Сразу прочитать и показать результаты → отдельно предложить research улучшений.</div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Правила pending proposal</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div class="placeholder"><strong>Confirm</strong><br>«да», кнопка или точное действие → guard</div>
+      <div class="placeholder"><strong>Change</strong><br>«другой период» → обновить draft, повторно enrich</div>
+      <div class="placeholder"><strong>New subject</strong><br>новая стратегия → старый proposal superseded</div>
+      <div class="placeholder"><strong>Cancel/expiry</strong><br>закрыть без задачи; повторное «да» не работает</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Сбои не должны превращаться в выдуманные факты</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>DB/read-port unavailable</strong><br>«Не удалось проверить историю» + proposal без утверждения об отсутствии данных.</div>
+    <div class="placeholder"><strong>RAG/reranker unavailable</strong><br>Продолжить exact + structured lookup; отметить, что похожие материалы не проверены.</div>
+    <div class="placeholder"><strong>Evidence stale</strong><br>Перед confirm перепроверить изменяемые ссылки и task state; при конфликте обновить proposal.</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Минимальный тестовый контракт</h3>
+  <div class="pros-cons">
+    <div class="pros"><h4>Должно работать</h4><ul><li>Standalone strategy без magic-фраз создаёт proposal, не task.</li><li>Явное «проанализируй» также создаёт proposal.</li><li>«Да» исполняет ровно сохранённый proposal один раз.</li><li>Вопрос о результатах отвечает read-only без confirmation.</li></ul></div>
+    <div class="cons"><h4>Должно блокироваться</h4><ul><li>Просроченное или повторное подтверждение.</li><li>Подмена payload между proposal и confirm.</li><li>Semantic match как exact duplicate.</li><li>Research/backtest без confirmation event.</li></ul></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Наблюдаемость</h3>
+  <div class="placeholder"><code>turn.understood → evidence.collected → proposal.created → proposal.confirmed|changed|cancelled|expired → task.created</code></div>
+  <p class="subtitle">В audit events храним IDs и hashes, но не сырой текст стратегии и не секреты.</p>
+</div>

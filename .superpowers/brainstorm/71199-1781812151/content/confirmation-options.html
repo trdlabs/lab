@@ -1,0 +1,83 @@
+<h2>Как должен выглядеть обязательный запрос подтверждения</h2>
+<p class="subtitle">Во всех вариантах задача не создаётся до явного согласия пользователя.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:18px">
+      <div class="mockup">
+        <div class="mockup-header">Вариант A — простое подтверждение</div>
+        <div class="mockup-body">
+          <div class="placeholder">Вижу стратегию и запрос на анализ. Продолжить?</div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="mock-button">Да</button>
+            <button class="mock-button">Нет</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Минимальный gate</h3>
+      <p>Быстро реализуется, но пользователь не видит, что конкретно будет запущено.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:18px">
+      <div class="mockup">
+        <div class="mockup-header">Вариант B — evidence-first confirmation</div>
+        <div class="mockup-body">
+          <div class="placeholder"><strong>Понял:</strong> long mean-reversion, 1m, DCA ×2</div>
+          <div class="placeholder" style="margin-top:8px"><strong>Нашёл:</strong> точного совпадения нет; 2 похожих профиля</div>
+          <div class="placeholder" style="margin-top:8px"><strong>Предлагаю:</strong> создать профиль → провести анализ</div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="mock-button">Подтвердить анализ</button>
+            <button class="mock-button">Показать похожие</button>
+            <button class="mock-button">Изменить</button>
+            <button class="mock-button">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Осмысленное подтверждение — рекомендую</h3>
+      <p>Пауза приносит пользу: проверяет понимание и предлагает альтернативы на основании данных.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:18px">
+      <div class="mockup">
+        <div class="mockup-header">Вариант C — диалоговый мастер</div>
+        <div class="mockup-body">
+          <div class="placeholder">Шаг 1: проверить распознанные правила</div>
+          <div class="placeholder" style="margin-top:8px">Шаг 2: выбрать данные и период</div>
+          <div class="placeholder" style="margin-top:8px">Шаг 3: выбрать analysis / research / backtest</div>
+          <div class="placeholder" style="margin-top:8px">Шаг 4: подтвердить запуск</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. Многошаговый мастер</h3>
+      <p>Максимальный контроль, но слишком много трения для обычного сообщения.</p>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>Почему B</h4>
+    <ul>
+      <li>Одно полезное подтверждение вместо формального вопроса.</li>
+      <li>Показывает найденные дубликаты и результаты до запуска.</li>
+      <li>Одинаково работает для analysis, research и backtest.</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Правило явного согласия</h4>
+    <ul>
+      <li>«Да», кнопка подтверждения или точное название действия.</li>
+      <li>Новый предметный запрос заменяет старое предложение.</li>
+      <li>Предложение истекает и никогда не запускается автоматически.</li>
+    </ul>
+  </div>
+</div>

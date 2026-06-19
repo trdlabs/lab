@@ -1,0 +1,59 @@
+<h2>Operator RAG: LLM-роли, storage и framework boundaries</h2>
+<p class="subtitle">Не две LLM на каждый turn: один обязательный structured call и один условный grounded call.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Обычный strategy/proposal turn</div>
+    <div class="mockup-body">
+      <div class="placeholder"><strong>1 LLM: Turn Interpreter</strong><br>эволюция текущего intent classifier</div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder"><strong>0 LLM: retrieval</strong><br>repositories + FTS + pgvector + RRF + optional cross-encoder</div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder"><strong>0 LLM: policy/render</strong><br>детерминированный evidence-first confirmation</div>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Сложный read-only вопрос</div>
+    <div class="mockup-body">
+      <div class="placeholder"><strong>1 LLM: Turn Interpreter</strong><br>что сравнить и какие ограничения</div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder"><strong>Retrieval</strong><br>grounded evidence package</div>
+      <p style="text-align:center">↓</p>
+      <div class="placeholder"><strong>Optional 2nd LLM: Answer Synthesizer</strong><br>только объяснение по переданным source refs</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>PostgreSQL как retrieval platform</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>Canonical tables</strong><br>profiles, tasks, runs, hypotheses<br><small>источник истины</small></div>
+    <div class="placeholder"><strong>FTS projection</strong><br>tsvector + GIN + metadata<br><small>lexical candidates</small></div>
+    <div class="placeholder"><strong>Vector projection</strong><br>embedding + HNSW + metadata<br><small>semantic candidates</small></div>
+  </div>
+  <p class="subtitle">Retrieval projections пересоздаваемы. Они ссылаются на canonical IDs и не становятся владельцами доменных данных.</p>
+</div>
+
+<div class="section">
+  <h3>Два индекса, разные документы</h3>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+    <div class="placeholder"><strong>Strategy Profile Index — первый</strong><br>один документ на профиль; market, timeframe, direction, entry, exit, risk; поиск аналогов для Operator</div>
+    <div class="placeholder"><strong>Research Artifact Index — позже</strong><br>чанки отчётов и критики; объяснения для Operator/Researcher</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Hexagonal boundaries</h3>
+  <div class="placeholder"><code>StrategySimilarityPort</code> · <code>EmbeddingPort</code> · <code>RerankerPort</code> · позже <code>ArtifactRetrievalPort</code></div>
+  <p class="subtitle">Mastra/модель/SQL находятся в adapters. Operator зависит только от typed ports и evidence DTO.</p>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>Берём готовое</h4><ul><li>Mastra chunk/embed/rerank/scorers при соответствии API.</li><li>pgvector/HNSW и PostgreSQL FTS/GIN.</li><li>Provider SDK для embedding/reranker.</li></ul></div>
+  <div class="cons"><h4>Оставляем своим кодом</h4><ul><li>RRF и latency policy.</li><li>Authority/freshness/source mapping.</li><li>Exact fingerprint и proposal policy.</li><li>Fallback и audit semantics.</li></ul></div>
+</div>
+
+<div class="section">
+  <h3>Что точно не входит в первый slice</h3>
+  <div class="placeholder">BM25 extension · внешний search cluster · artifact chunking · query-rewrite loop · Answer Synthesizer · Phoenix deployment</div>
+</div>

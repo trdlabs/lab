@@ -37,11 +37,24 @@ import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evalu
 import type { BuilderPort } from './ports/builder.port.ts';
 import { composeMastra } from './mastra/compose-mastra.ts';
 import type { MastraRuntime } from './mastra/compose-mastra.ts';
-import { FakeIntentClassifier } from './adapters/intent/fake-intent-classifier.ts';
-import { MastraIntentClassifier } from './adapters/intent/mastra-intent-classifier.ts';
+import { FakeTurnInterpreter } from './adapters/intent/fake-turn-interpreter.ts';
+import { MastraTurnInterpreter } from './adapters/intent/mastra-turn-interpreter.ts';
 import { DrizzleChatSessionRepository } from './adapters/repository/drizzle-chat-session.repository.ts';
 import { DrizzleChatPlanRepository } from './adapters/repository/drizzle-chat-plan.repository.ts';
-import type { IntentClassifierPort } from './ports/intent-classifier.port.ts';
+import { DrizzleActionProposalRepository } from './adapters/repository/drizzle-action-proposal.repository.ts';
+import type { TurnInterpreterPort } from './ports/turn-interpreter.port.ts';
+import type { OperatorRetrievalPort } from './ports/operator-retrieval.port.ts';
+import type { StrategyRetrievalIndexerPort } from './orchestrator/app-services.ts';
+import { OpenRouterEmbeddingAdapter } from './adapters/embedding/openrouter-embedding.adapter.ts';
+import { PgStrategyRetrievalIndexAdapter } from './adapters/repository/pg-strategy-retrieval-index.adapter.ts';
+import { PgHybridStrategySimilarityAdapter } from './adapters/similarity/pg-hybrid-strategy-similarity.adapter.ts';
+import { OperatorRetrieval, realScheduler } from './operator/operator-retrieval.ts';
+import { DisabledOperatorRetrieval } from './operator/disabled-operator-retrieval.ts';
+import { StrategyRetrievalIndexer } from './operator/strategy-retrieval-indexer.ts';
+import { NoopStrategyRetrievalIndexer } from './operator/noop-strategy-retrieval-indexer.ts';
+import type { Db } from './db/client.ts';
+import type { StrategyProfileRepository } from './ports/strategy-profile.repository.ts';
+import type { AgentEventRepository } from './ports/agent-event.repository.ts';
 import type { ChatAppDeps } from './chat/chat-app.ts';
 import { sql } from 'drizzle-orm';
 import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis-read.adapter.ts';
@@ -73,11 +86,70 @@ function buildCritic(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): Critic
   return new FakeCritic();
 }
 
-function buildIntentClassifier(rt: MastraRuntime): IntentClassifierPort {
-  const e = rt.agents.intentClassifier;
-  if (e) return new MastraIntentClassifier(e.agent, e.label);
-  console.warn('[composition] INTENT_CLASSIFIER_ADAPTER is not "mastra"; using FakeIntentClassifier (rule-based)');
-  return new FakeIntentClassifier();
+function buildTurnInterpreter(rt: MastraRuntime): TurnInterpreterPort {
+  const e = rt.agents.turnInterpreter;
+  if (e) return new MastraTurnInterpreter(e.agent, e.label);
+  console.warn('[composition] INTENT_CLASSIFIER_ADAPTER is not "mastra"; using FakeTurnInterpreter (rule-based)');
+  return new FakeTurnInterpreter();
+}
+
+export interface OperatorRag {
+  retrieval: OperatorRetrievalPort;
+  indexer: StrategyRetrievalIndexerPort;
+}
+
+/**
+ * Operator RAG wiring, gated on OPERATOR_RAG_ENABLED.
+ *
+ * Disabled (default): inject DisabledOperatorRetrieval + a no-op indexer. ZERO embedding
+ * calls, no OPENROUTER_API_KEY required — the embedding adapter is never constructed.
+ *
+ * Enabled: require OPENROUTER_API_KEY (DATABASE_URL is already required upstream), then
+ * construct the OpenRouter embedding adapter, pg index + hybrid similarity adapters, and
+ * the deadline-aware OperatorRetrieval + fail-soft StrategyRetrievalIndexer.
+ */
+export function buildOperatorRag(
+  env: ReturnType<typeof loadEnv>,
+  db: Db,
+  strategyProfiles: StrategyProfileRepository,
+  events: AgentEventRepository,
+): OperatorRag {
+  if (!env.OPERATOR_RAG_ENABLED) {
+    return { retrieval: new DisabledOperatorRetrieval(), indexer: new NoopStrategyRetrievalIndexer() };
+  }
+
+  if (!env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is required when OPERATOR_RAG_ENABLED=true');
+
+  const embedding = new OpenRouterEmbeddingAdapter(env.OPERATOR_EMBEDDING_MODEL, env.OPENROUTER_API_KEY);
+  const indexPort = new PgStrategyRetrievalIndexAdapter(db, {
+    embeddingModel: env.OPERATOR_EMBEDDING_MODEL,
+    indexVersion: env.OPERATOR_RETRIEVAL_INDEX_VERSION,
+  });
+  const similarity = new PgHybridStrategySimilarityAdapter(db);
+
+  const retrieval = new OperatorRetrieval({
+    embedding,
+    strategyProfiles,
+    similarity,
+    clock: () => performance.now(),
+    scheduler: realScheduler,
+    isoNow: () => new Date().toISOString(),
+    softDeadlineMs: env.OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS,
+    hardDeadlineMs: env.OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS,
+    lexicalLimit: env.OPERATOR_RETRIEVAL_LEXICAL_LIMIT,
+    vectorLimit: env.OPERATOR_RETRIEVAL_VECTOR_LIMIT,
+    fusedLimit: env.OPERATOR_RETRIEVAL_FUSED_LIMIT,
+  });
+
+  const indexer = new StrategyRetrievalIndexer(
+    embedding,
+    indexPort,
+    { embeddingModel: env.OPERATOR_EMBEDDING_MODEL, indexVersion: env.OPERATOR_RETRIEVAL_INDEX_VERSION },
+    () => new Date().toISOString(),
+    events,
+  );
+
+  return { retrieval, indexer };
 }
 
 function buildBuilder(rt: MastraRuntime): BuilderPort {
@@ -86,6 +158,9 @@ function buildBuilder(rt: MastraRuntime): BuilderPort {
   console.warn('[composition] BUILDER_ADAPTER is not "mastra"; using FakeBuilder (template bundles)');
   return new FakeBuilder();
 }
+
+/** Operator confirmation window for a proposed chat action — policy, not deployment tuning. */
+const CHAT_PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
 export function composeRuntime() {
   const env = loadEnv();
@@ -98,14 +173,19 @@ export function composeRuntime() {
   const queue = new BullMqQueueAdapter(env.REDIS_URL);
 
   const hypotheses = new DrizzleHypothesisProposalRepository(db);
+  const strategyProfiles = new DrizzleStrategyProfileRepository(db);
+  const events = new DrizzleAgentEventRepository(db);
+
+  // Operator RAG (retrieval + fail-soft indexer), gated on OPERATOR_RAG_ENABLED.
+  const operatorRag = buildOperatorRag(env, db, strategyProfiles, events);
 
   const services: AppServices = {
     taskQueue: queue,
     researchTasks: new DrizzleResearchTaskRepository(db),
-    strategyProfiles: new DrizzleStrategyProfileRepository(db),
+    strategyProfiles,
     analyst: buildAnalyst(mastraRuntime),
     artifacts: new LocalFileArtifactStore(env.ARTIFACT_DIR),
-    events: new DrizzleAgentEventRepository(db),
+    events,
     platform: new MockPlatformGatewayAdapter(),
     researchPlatform: selectResearchPlatform(env.TRADING_PLATFORM_INTEGRATION),
     botResults: selectBotResults(process.env),
@@ -123,6 +203,8 @@ export function composeRuntime() {
     evaluatorThresholds: env.evaluatorThresholds,
     chatSessions: new DrizzleChatSessionRepository(db),
     chatPlans: new DrizzleChatPlanRepository(db),
+    actionProposals: new DrizzleActionProposalRepository(db),
+    strategyRetrievalIndexer: operatorRag.indexer,
     backtestBackend: env.BACKTEST_BACKEND,
     platformPoll: { maxPolls: env.PLATFORM_RUN_MAX_POLLS, pollDelayMs: env.PLATFORM_RUN_POLL_DELAY_MS },
     backtestCallbackUrl: buildBacktestCallbackUrl(env.TRADING_LAB_CALLBACK_PUBLIC_URL, env.TRADING_LAB_CALLBACK_TOKEN),
@@ -138,7 +220,8 @@ export function composeRuntime() {
   router.register('backtest.completed', backtestCompletedHandler);
 
   const chat: ChatAppDeps = {
-    classifier: buildIntentClassifier(mastraRuntime),
+    interpreter: buildTurnInterpreter(mastraRuntime),
+    retrieval: operatorRag.retrieval,
     sessions: services.chatSessions,
     plans: services.chatPlans,
     researchTasks: services.researchTasks,
@@ -146,6 +229,8 @@ export function composeRuntime() {
     hypotheses: services.hypotheses,
     events: services.events,
     queue,
+    proposals: services.actionProposals,
+    proposalTtlMs: CHAT_PROPOSAL_TTL_MS,
     minConfidence: env.INTENT_CLASSIFIER_MIN_CONFIDENCE,
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
     authToken: env.TRADING_LAB_CHAT_TOKEN,

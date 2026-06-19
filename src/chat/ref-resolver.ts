@@ -5,7 +5,6 @@ import type { ResearchTaskRepository } from '../ports/research-task.repository.t
 import type { StrategyProfileRepository } from '../ports/strategy-profile.repository.ts';
 import type { HypothesisProposalRepository } from '../ports/hypothesis-proposal.repository.ts';
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
-import type { ChatIntent } from './intent.ts';
 
 export interface RefResolverDeps {
   researchTasks: Pick<ResearchTaskRepository, 'findById'>;
@@ -14,22 +13,30 @@ export interface RefResolverDeps {
 }
 
 /** Resolve a task for task.status: session pointer first, then the UNTRUSTED taskIdHint
- *  (verified via findById). Returns the verified task or null. */
+ *  (verified via findById). Returns the verified task or null. The hint is whatever the
+ *  turn interpreter surfaced (a reference string) — never trusted without a findById. */
 export async function resolveStatusTask(
-  intent: ChatIntent, session: ChatSessionContext, deps: RefResolverDeps,
+  taskIdHint: string | undefined, session: ChatSessionContext, deps: RefResolverDeps,
 ): Promise<ResearchTask | null> {
   if (session.lastResearchTaskId) {
     const t = await deps.researchTasks.findById(session.lastResearchTaskId);
     if (t) return t;
   }
-  if (intent.taskIdHint) {
-    const t = await deps.researchTasks.findById(intent.taskIdHint);
+  if (taskIdHint) {
+    const t = await deps.researchTasks.findById(taskIdHint);
     if (t) return t;
   }
   return null;
 }
 
-/** Resolve the strategy profile for research.run_cycle from last_strategy. Verified. */
+/**
+ * Resolve the strategy profile for research.run_cycle from last_strategy. Verified.
+ *
+ * @intentionally-retained — future seam for a "research existing strategy by session pointer"
+ * slice where the operator can trigger research on a previously onboarded profile without
+ * re-pasting the strategy text. This path was intentionally dropped in the current slice and
+ * is NOT called from the chat runtime or guard. Do not delete.
+ */
 export async function resolveResearchProfile(
   session: ChatSessionContext, deps: RefResolverDeps,
 ): Promise<StrategyProfile | null> {

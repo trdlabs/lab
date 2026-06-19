@@ -143,3 +143,55 @@ describe('loadEnv — SP-7.2b backtest backend', () => {
     expect(e.BACKTEST_BACKEND).toBe('research_platform');
   });
 });
+
+describe('RAG retrieval config', () => {
+  it('defaults all RAG fields correctly', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.OPERATOR_RAG_ENABLED).toBe(false);
+    expect(env.OPERATOR_EMBEDDING_PROVIDER).toBe('openrouter');
+    expect(env.OPERATOR_EMBEDDING_MODEL).toBe('baai/bge-m3');
+    expect(env.OPERATOR_EMBEDDING_DIMENSIONS).toBe(1024);
+    expect(env.OPERATOR_RETRIEVAL_INDEX_VERSION).toBe(1);
+    expect(env.OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS).toBe(5000);
+    expect(env.OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS).toBe(10000);
+    expect(env.OPERATOR_RETRIEVAL_LEXICAL_LIMIT).toBe(50);
+    expect(env.OPERATOR_RETRIEVAL_VECTOR_LIMIT).toBe(50);
+    expect(env.OPERATOR_RETRIEVAL_FUSED_LIMIT).toBe(20);
+  });
+
+  it('reads overrides for RAG fields', () => {
+    const env = loadEnv({
+      OPERATOR_RAG_ENABLED: 'true',
+      OPERATOR_EMBEDDING_MODEL: 'openai/text-embedding-3-small',
+      OPERATOR_RETRIEVAL_INDEX_VERSION: '2',
+      OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS: '3000',
+      OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS: '8000',
+      OPERATOR_RETRIEVAL_LEXICAL_LIMIT: '100',
+      OPERATOR_RETRIEVAL_VECTOR_LIMIT: '75',
+      OPERATOR_RETRIEVAL_FUSED_LIMIT: '30',
+    } as NodeJS.ProcessEnv);
+    expect(env.OPERATOR_RAG_ENABLED).toBe(true);
+    expect(env.OPERATOR_EMBEDDING_MODEL).toBe('openai/text-embedding-3-small');
+    expect(env.OPERATOR_RETRIEVAL_INDEX_VERSION).toBe(2);
+    expect(env.OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS).toBe(3000);
+    expect(env.OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS).toBe(8000);
+    expect(env.OPERATOR_RETRIEVAL_LEXICAL_LIMIT).toBe(100);
+    expect(env.OPERATOR_RETRIEVAL_VECTOR_LIMIT).toBe(75);
+    expect(env.OPERATOR_RETRIEVAL_FUSED_LIMIT).toBe(30);
+  });
+
+  it('throws when OPERATOR_EMBEDDING_DIMENSIONS is not 1024', () => {
+    expect(() =>
+      loadEnv({ OPERATOR_EMBEDDING_DIMENSIONS: '768' } as NodeJS.ProcessEnv),
+    ).toThrow(/1024/);
+  });
+
+  it('throws when OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS < OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS', () => {
+    expect(() =>
+      loadEnv({
+        OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS: '8000',
+        OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS: '4000',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/timeout/i);
+  });
+});

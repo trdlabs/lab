@@ -14,6 +14,7 @@ function toDomain(row: Row): ChatSessionContext {
     lastBacktestRunId: row.lastBacktestRunId ?? undefined,
     lastUserGoal: row.lastUserGoal ?? undefined,
     pendingPlanId: row.pendingPlanId ?? undefined,
+    pendingInteraction: row.pendingInteraction ?? undefined,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -38,6 +39,7 @@ export class DrizzleChatSessionRepository implements ChatSessionRepository {
       lastBacktestRunId: ctx.lastBacktestRunId ?? null,
       lastUserGoal: ctx.lastUserGoal ?? null,
       pendingPlanId: ctx.pendingPlanId ?? null,
+      pendingInteraction: ctx.pendingInteraction ?? null,
       updatedAt: new Date(ctx.updatedAt),
     };
     await this.db.insert(chatSession).values(values).onConflictDoUpdate({
@@ -49,6 +51,7 @@ export class DrizzleChatSessionRepository implements ChatSessionRepository {
         lastBacktestRunId: values.lastBacktestRunId,
         lastUserGoal: values.lastUserGoal,
         pendingPlanId: values.pendingPlanId,
+        pendingInteraction: values.pendingInteraction,
         updatedAt: values.updatedAt,
       },
     });

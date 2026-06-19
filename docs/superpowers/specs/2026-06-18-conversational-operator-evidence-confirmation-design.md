@@ -273,15 +273,19 @@ The office renders actions as buttons but plain-text clients can answer with an 
 
 ## 12. Observability and privacy
 
-Emit the lifecycle:
+Emit the lifecycle (canonical implemented names):
 
 ```text
-chat.turn.understood
-chat.evidence.collected
+chat.turn.interpreted
+chat.retrieval.completed
 chat.proposal.created
-chat.proposal.confirmed | changed | cancelled | expired | superseded
-chat.entity_disambiguation.created | resolved
+chat.proposal.confirmed
+chat.proposal.cancelled
+chat.proposal.expired
+chat.proposal.unresolved_reply
 chat.task_created
+retrieval.strategy_indexed
+retrieval.strategy_index_failed
 ```
 
 Events store entity IDs, proposal IDs, counts, adapter/model identifiers, latency, hashes, and warning codes. They do not store raw strategy text, retrieved private document bodies, credentials, or secrets.

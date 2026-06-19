@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { strategyProfile } from '../../db/schema.ts';
 import type { StrategyProfile, AnalystProfileOutput, Direction } from '../../domain/strategy-profile.ts';
@@ -52,5 +52,13 @@ export class DrizzleStrategyProfileRepository implements StrategyProfileReposito
   async findByFingerprint(fp: string): Promise<StrategyProfile | null> {
     const rows = await this.db.select().from(strategyProfile).where(eq(strategyProfile.sourceFingerprint, fp)).limit(1);
     return rows[0] ? toDomain(rows[0]) : null;
+  }
+
+  async listAll(): Promise<StrategyProfile[]> {
+    const rows = await this.db
+      .select()
+      .from(strategyProfile)
+      .orderBy(asc(strategyProfile.createdAt), asc(strategyProfile.id));
+    return rows.map(toDomain);
   }
 }

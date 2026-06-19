@@ -19,7 +19,18 @@ import type { EvaluationRepository } from '../ports/evaluation.repository.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
 import type { ChatSessionRepository } from '../ports/chat-session.repository.ts';
 import type { ChatPlanRepository } from '../ports/chat-plan.repository.ts';
+import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
 import type { TaskQueuePort } from '../ports/task-queue.port.ts';
+import type { StrategyProfile } from '../domain/strategy-profile.ts';
+
+/**
+ * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
+ * a no-op implementation is injected when OPERATOR_RAG_ENABLED=false. index() NEVER throws —
+ * onboarding completes whether or not the projection lands.
+ */
+export interface StrategyRetrievalIndexerPort {
+  index(profile: StrategyProfile): Promise<void>;
+}
 
 export interface AppServices {
   taskQueue: TaskQueuePort;
@@ -45,6 +56,9 @@ export interface AppServices {
   evaluatorThresholds: EvaluatorThresholds;
   chatSessions: ChatSessionRepository;
   chatPlans: ChatPlanRepository;
+  actionProposals: ActionProposalRepository;
+  /** Fail-soft retrieval indexer invoked after a strategy profile is persisted (onboarding). */
+  strategyRetrievalIndexer: StrategyRetrievalIndexerPort;
   backtestBackend: 'research_platform';
   platformPoll: { maxPolls: number; pollDelayMs: number };
   /** When set, passed to platform/backtester submit as completion webhook URL. */

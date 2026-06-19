@@ -64,6 +64,20 @@
       "when": 1781600767893,
       "tag": "0008_orange_masked_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781820118031,
+      "tag": "0009_conversational_operator_confirmation",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781826797893,
+      "tag": "0010_operator_rag_baseline",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,8 @@
     "researcher:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/researcher-eval.ts",
     "builder:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/builder-eval.ts",
     "intent:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/intent-classifier-eval.ts",
+    "operator-rag:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/operator-rag-eval.ts",
+    "operator-rag:reindex": "node --experimental-strip-types --env-file-if-exists=.env scripts/operator-rag-reindex.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

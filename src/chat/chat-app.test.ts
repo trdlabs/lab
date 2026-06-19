@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { createChatApp, type ChatAppDeps } from './chat-app.ts';
-import { FakeIntentClassifier } from '../adapters/intent/fake-intent-classifier.ts';
+import { FakeTurnInterpreter } from '../adapters/intent/fake-turn-interpreter.ts';
+import { FakeOperatorRetrieval } from '../../test/support/fake-operator-retrieval.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
 import { InMemoryStrategyProfileRepository } from '../adapters/repository/in-memory-strategy-profile.repository.ts';
 import { InMemoryHypothesisProposalRepository } from '../adapters/repository/in-memory-hypothesis-proposal.repository.ts';
 import { InMemoryAgentEventRepository } from '../adapters/repository/in-memory-agent-event.repository.ts';
 import { InMemoryChatSessionRepository } from '../adapters/repository/in-memory-chat-session.repository.ts';
 import { InMemoryChatPlanRepository } from '../adapters/repository/in-memory-chat-plan.repository.ts';
+import { InMemoryActionProposalRepository } from '../adapters/repository/in-memory-action-proposal.repository.ts';
 import { InMemoryQueueAdapter } from '../adapters/queue/in-memory-queue.adapter.ts';
 
 const CHAT_TOKEN = 'chat-test-token';
 
 function appDeps(over: Partial<ChatAppDeps> = {}): ChatAppDeps {
   return {
-    classifier: new FakeIntentClassifier(),
+    interpreter: new FakeTurnInterpreter(),
+    retrieval: new FakeOperatorRetrieval(),
     sessions: new InMemoryChatSessionRepository(),
     plans: new InMemoryChatPlanRepository(),
     researchTasks: new InMemoryResearchTaskRepository(),
@@ -21,6 +24,8 @@ function appDeps(over: Partial<ChatAppDeps> = {}): ChatAppDeps {
     hypotheses: new InMemoryHypothesisProposalRepository(),
     events: new InMemoryAgentEventRepository(),
     queue: new InMemoryQueueAdapter(),
+    proposals: new InMemoryActionProposalRepository(),
+    proposalTtlMs: 600_000,
     minConfidence: 0.6,
     maxMessageChars: 4000,
     authToken: CHAT_TOKEN,
@@ -50,17 +55,17 @@ describe('POST /chat/messages', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects a whitespace-only message with 400 and never calls the classifier', async () => {
+  it('rejects a whitespace-only message with 400 and never calls the interpreter', async () => {
     let calls = 0;
     const spy = {
       adapter: 'fake' as const,
       model: 'fake',
-      classify: async () => { calls += 1; return { intent: 'help', confidence: 1 }; },
+      interpret: async () => { calls += 1; return { subject: 'unknown', constraints: {}, references: [], confidence: 1 }; },
     };
-    const app = createChatApp(appDeps({ classifier: spy }));
+    const app = createChatApp(appDeps({ interpreter: spy }));
     const res = await post(app, { message: '   ' });
     expect(res.status).toBe(400);
-    expect(calls).toBe(0); // schema gate rejects before handler/classifier runs
+    expect(calls).toBe(0); // schema gate rejects before handler/interpreter runs
   });
 
   it('rejects an oversize message with 400', async () => {
@@ -80,14 +85,17 @@ describe('POST /chat/messages', () => {
     expect(body.sessionId.length).toBeGreaterThan(0);
   });
 
-  it('returns 200 + task_created and echoes the provided sessionId', async () => {
+  it('returns 200 + assistant_message proposal and echoes the provided sessionId', async () => {
     const app = createChatApp(appDeps());
     const res = await post(app, { message: 'исследуй эту стратегию: лонг при росте OI', sessionId: 'sess-42' });
     expect(res.status).toBe(200);
-    const body = await res.json() as { kind: string; sessionId: string; plannedNextStep?: { taskType: string } };
-    expect(body.kind).toBe('task_created');
+    const body = await res.json() as {
+      kind: string; sessionId: string; pendingInteractionId?: string; actions?: { id: string }[];
+    };
+    expect(body.kind).toBe('assistant_message');
     expect(body.sessionId).toBe('sess-42');
-    expect(body.plannedNextStep?.taskType).toBe('research.run_cycle');
+    expect(body.pendingInteractionId).toBeTruthy();
+    expect(body.actions?.map((a) => a.id)).toEqual(['confirm', 'cancel']);
   });
 });
 

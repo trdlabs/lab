@@ -44,6 +44,26 @@ export interface Env {
   AGENT_ACTIVITY_TRACE_LIMIT: number;
   AGENT_EVENT_STREAM_SAFETY_TICK_MS: number;
   AGENT_EVENT_STREAM_HEARTBEAT_MS: number;
+  /** Feature flag: enable operator RAG retrieval (default: false). */
+  OPERATOR_RAG_ENABLED: boolean;
+  /** Embedding provider for operator strategy retrieval (default: 'openrouter'). */
+  OPERATOR_EMBEDDING_PROVIDER: 'openrouter';
+  /** Embedding model slug (default: 'baai/bge-m3'). */
+  OPERATOR_EMBEDDING_MODEL: string;
+  /** Embedding output dimensions — only 1024 supported; loadEnv throws on any other value. */
+  OPERATOR_EMBEDDING_DIMENSIONS: 1024;
+  /** Retrieval index schema version (default: 1). */
+  OPERATOR_RETRIEVAL_INDEX_VERSION: number;
+  /** Soft retrieval timeout in ms — return partial results (default: 5000). */
+  OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS: number;
+  /** Hard retrieval timeout in ms — abort entirely; must be >= soft (default: 10000). */
+  OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS: number;
+  /** Max candidates from lexical (BM25) stage (default: 50). */
+  OPERATOR_RETRIEVAL_LEXICAL_LIMIT: number;
+  /** Max candidates from vector stage (default: 50). */
+  OPERATOR_RETRIEVAL_VECTOR_LIMIT: number;
+  /** Max candidates after fusion/re-rank stage (default: 20). */
+  OPERATOR_RETRIEVAL_FUSED_LIMIT: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -123,5 +143,48 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     AGENT_ACTIVITY_TRACE_LIMIT: parsePositiveInt(source.AGENT_ACTIVITY_TRACE_LIMIT, 50),
     AGENT_EVENT_STREAM_SAFETY_TICK_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_SAFETY_TICK_MS, 5000),
     AGENT_EVENT_STREAM_HEARTBEAT_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_HEARTBEAT_MS, 15000),
+    ...loadRagEnv(source),
+  };
+}
+
+function loadRagEnv(source: NodeJS.ProcessEnv): Pick<
+  Env,
+  | 'OPERATOR_RAG_ENABLED'
+  | 'OPERATOR_EMBEDDING_PROVIDER'
+  | 'OPERATOR_EMBEDDING_MODEL'
+  | 'OPERATOR_EMBEDDING_DIMENSIONS'
+  | 'OPERATOR_RETRIEVAL_INDEX_VERSION'
+  | 'OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS'
+  | 'OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS'
+  | 'OPERATOR_RETRIEVAL_LEXICAL_LIMIT'
+  | 'OPERATOR_RETRIEVAL_VECTOR_LIMIT'
+  | 'OPERATOR_RETRIEVAL_FUSED_LIMIT'
+> {
+  const dims = parsePositiveInt(source.OPERATOR_EMBEDDING_DIMENSIONS, 1024);
+  if (dims !== 1024) {
+    throw new Error(
+      `OPERATOR_EMBEDDING_DIMENSIONS must be 1024 (got ${dims}). Only 1024-dimensional embeddings are supported.`,
+    );
+  }
+
+  const softMs = parsePositiveInt(source.OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS, 5000);
+  const hardMs = parsePositiveInt(source.OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS, 10000);
+  if (hardMs < softMs) {
+    throw new Error(
+      `OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS (${hardMs}) must be >= OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS (${softMs}).`,
+    );
+  }
+
+  return {
+    OPERATOR_RAG_ENABLED: source.OPERATOR_RAG_ENABLED === 'true',
+    OPERATOR_EMBEDDING_PROVIDER: 'openrouter',
+    OPERATOR_EMBEDDING_MODEL: source.OPERATOR_EMBEDDING_MODEL ?? 'baai/bge-m3',
+    OPERATOR_EMBEDDING_DIMENSIONS: 1024,
+    OPERATOR_RETRIEVAL_INDEX_VERSION: parsePositiveInt(source.OPERATOR_RETRIEVAL_INDEX_VERSION, 1),
+    OPERATOR_RETRIEVAL_SOFT_TIMEOUT_MS: softMs,
+    OPERATOR_RETRIEVAL_HARD_TIMEOUT_MS: hardMs,
+    OPERATOR_RETRIEVAL_LEXICAL_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_LEXICAL_LIMIT, 50),
+    OPERATOR_RETRIEVAL_VECTOR_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_VECTOR_LIMIT, 50),
+    OPERATOR_RETRIEVAL_FUSED_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_FUSED_LIMIT, 20),
   };
 }

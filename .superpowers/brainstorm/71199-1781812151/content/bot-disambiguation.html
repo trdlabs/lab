@@ -1,0 +1,48 @@
+<h2>Уточнение раздела 3. Как разрешать ссылку на бота</h2>
+<p class="subtitle">«Бот» — отдельная сущность. Сначала выбираем botId, затем читаем его runs и результаты.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Bot Entity Resolver</div>
+  <div class="mockup-body">
+    <div class="placeholder"><strong>Запрос:</strong> «Как торгует лонг-бот?»</div>
+    <p style="text-align:center">↓ извлечь ограничения</p>
+    <div class="placeholder"><strong>Bot query:</strong> name≈«лонг», direction=long, остальные признаки неизвестны</div>
+    <p style="text-align:center">↓ BotCatalogReadPort</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <div class="placeholder"><strong>0 кандидатов</strong><br>Спросить дополнительный признак</div>
+      <div class="placeholder"><strong>1 кандидат</strong><br>Ответить по его результатам</div>
+      <div class="placeholder"><strong>2+ кандидата</strong><br>Создать entity_disambiguation</div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Пример выбора</div>
+  <div class="mockup-body">
+    <div class="placeholder">Нашёл несколько long-ботов. Какой вы имеете в виду?</div>
+    <div class="options" style="margin-top:12px">
+      <div class="option"><div class="letter">1</div><div class="content"><h3>Long Rebound · BTCUSDT · 1m</h3><p>v3 · active · последний run сегодня · ID …7A2F</p></div></div>
+      <div class="option"><div class="letter">2</div><div class="content"><h3>Long Rebound · ETHUSDT · 5m</h3><p>v2 · stopped · последний run 14 июня · ID …19C0</p></div></div>
+      <div class="option"><div class="letter">3</div><div class="content"><h3>Long DCA · BTCUSDT · 1m</h3><p>v5 · active · последний run вчера · ID …B441</p></div></div>
+      <div class="option"><div class="letter">4</div><div class="content"><h3>Показать ещё</h3><p>Следующая группа наиболее близких кандидатов</p></div></div>
+      <div class="option"><div class="letter">5</div><div class="content"><h3>Нет в списке</h3><p>Уточнить имя, рынок, таймфрейм или часть ID</p></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Ранжирование кандидатов</h3>
+  <div class="placeholder"><strong>exact ID/name</strong> → alias/name prefix → strategy attributes → active/recent run → lastBotId из сессии как проверяемая подсказка</div>
+  <p class="subtitle">LLM извлекает ограничения из фразы. Список и порядок формирует детерминированный resolver; сессия никогда не считается доказательством существования бота.</p>
+</div>
+
+<div class="section">
+  <h3>Состояние диалога</h3>
+  <div class="placeholder"><code>pendingInteraction: { kind: 'entity_disambiguation', entityType: 'bot', query, candidateIds, cursor, expiresAt }</code></div>
+  <p class="subtitle">Ответ «2» выбирает snapshot-кандидата без нового LLM-вызова. «Нет в списке» переводит диалог в уточнение; новый запрос заменяет старый список.</p>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>Новый read-контракт</h4><ul><li>Каталог botId, displayName, aliases, strategyRef, market/timeframe, status.</li><li>После выбора — runs и summaries через BotResultsReadPort.</li><li>Человеческий label всегда содержит различающие признаки.</li></ul></div>
+  <div class="cons"><h4>Чего не делаем</h4><ul><li>Не показываем сотни ботов одним списком.</li><li>Не выбираем по одному слову при нескольких кандидатах.</li><li>Не запоминаем номер «2» вне конкретного candidate snapshot.</li></ul></div>
+</div>

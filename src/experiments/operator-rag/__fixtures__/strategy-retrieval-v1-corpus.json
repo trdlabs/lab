@@ -1,0 +1,132 @@
+[
+  {
+    "strategyProfileId": "strat-btc-oi-long-001",
+    "content": "BTC/USDT long open-interest momentum strategy on the 1-hour timeframe. Entry is triggered when cumulative open interest on perpetual futures rises above its 20-period rolling average, signalling that new leveraged long positions are entering the market. A secondary confirmation requires the price to close above the prior-bar high to avoid fading a sideways OI build-up. Stop loss is placed 1.5% below the entry candle low. Take-profit targets are set at 1:2 and 1:3 risk-reward ratios. The strategy captures trending moves driven by derivatives-market participants adding exposure. It performs best during trending macro regimes and avoids choppy low-OI sessions.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-oi-long-002",
+    "content": "BTC/USDT long open-interest momentum strategy with volume confirmation on the 1-hour timeframe. Like the base OI momentum approach, entry fires when open interest crosses above its 20-period average, but this variant adds a spot-volume filter: the entry bar must also show spot volume 30% above the 10-bar average, confirming that real buyers—not just derivative positioning—are participating. Stop loss is 1.5% below entry. The volume gate substantially reduces false signals during thin-liquidity periods and weekend sessions. The two-factor trigger (OI spike + volume surge) produces fewer but higher-conviction trades than the plain OI signal alone.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-eth-oi-long-003",
+    "content": "ETH/USDT long open-interest momentum strategy on the 1-hour timeframe. Monitors Ethereum perpetual-futures open interest; entry triggers when OI surpasses its 24-period exponential moving average by at least 1.5 standard deviations, indicating a meaningful accumulation of leveraged long exposure in ETH. Price must be above the VWAP of the current session to avoid counter-trend entries. Risk is capped at 1.8% of equity per trade with stop below the session low. The strategy exploits ETH's tendency to follow BTC OI-driven moves with a slight lag, often delivering cleaner breakouts when ETH OI confirms independently.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-rsi-long-004",
+    "content": "BTC/USDT RSI oversold reversal strategy on the 4-hour timeframe targeting long entries. Entry is taken when the 14-period RSI drops below 30 (oversold territory) and then closes back above the 30 threshold on the same or next bar, signalling exhaustion of selling pressure. A strict 2% stop loss is placed below the swing low that formed during the oversold episode. Take-profit is at the 50-period EMA or 4% above entry, whichever comes first. The 4-hour timeframe filters out intraday noise while still capturing intermediate-term mean-reversion bounces. The 2% hard stop makes this a well-defined risk event and distinguishes it from more lenient stop configurations.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "4h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-rsi-long-005",
+    "content": "BTC/USDT RSI oversold bounce strategy on the 1-hour timeframe with a tight stop loss. Entry occurs when the 14-period RSI crosses above 28 after being below 25, confirming a short-term oversold reversal. The tight stop loss is placed just 0.8% below the entry price to limit exposure on a scalp-like reversal trade. Profit target is 1.5% above entry. The 1-hour resolution means more frequent signals than the 4-hour variant, but the tight stop filters out many signals that fail to follow through immediately. Best used during Asia or early-Europe sessions when BTC liquidity supports clean bounces.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-eth-rsi-long-006",
+    "content": "ETH/USDT RSI oversold reversal strategy on the 4-hour timeframe. Entry triggers when the 14-period RSI on ETH/USDT 4h candles falls below 30 and recovers above it within two bars. A supporting condition requires ETH price to be within 3% of the 200-period simple moving average, ensuring the reversal occurs near a structurally meaningful level rather than in free-fall. Stop loss is placed 2.2% below the most recent swing low. Take-profit at 4.5% above entry. This is a pure mean-reversion play on Ethereum's 4-hour RSI cycle, closely mirroring the BTC 4h RSI variant but tuned to ETH's slightly higher volatility regime.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "timeframe": "4h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-eth-breakout-007",
+    "content": "ETH/USDT breakout above daily resistance strategy with take-profit targeting. Entry is triggered when the daily closing price breaches a resistance level identified as the highest close of the prior 20 sessions, confirming a genuine structural breakout rather than an intraday wick. Volume on the breakout day must exceed the 10-day average by at least 50%. Take-profit levels are placed at 5%, 10%, and 15% above the breakout level using a scaled exit approach. Stop loss is set 3% below the breakout candle close. The daily timeframe ensures the breakout represents a macro-level shift in ETH supply/demand rather than intraday noise.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "timeframe": "1d",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-eth-breakout-008",
+    "content": "ETH/USDT resistance breakout variant on the daily timeframe using a narrower lookback and ATR-based targets. Entry fires when ETH/USDT daily price closes above the highest high of the prior 10 sessions (tighter lookback than the 20-session variant). ATR(14) multiplied by 2 sets the take-profit distance; ATR multiplied by 1 sets the stop loss, making the risk-reward fixed at 1:2 regardless of volatility regime. The tighter lookback catches more frequent breakout opportunities at the cost of a modestly lower win rate. Best suited for trending ETH markets where shorter consolidation phases precede new legs higher.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "ETH/USDT",
+      "timeframe": "1d",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-breakout-009",
+    "content": "BTC/USDT breakout above key daily resistance strategy. Entry condition: BTC/USDT daily close exceeds the 20-session prior high, accompanied by RSI(14) above 50 to confirm bullish momentum. Stop loss is 2.5% below the breakout candle close. Take-profit at the 1.5× ATR(14) extension from the breakout level. The RSI above-50 filter prevents entering into exhausted breakouts where price briefly pokes above resistance before rolling over. Applicable to BTC in macro bull environments; deactivated if the 200-day SMA is in a downtrend at time of signal.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1d",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-rsi-short-010",
+    "content": "BTC/USDT RSI overbought short strategy on the 4-hour timeframe. Entry is triggered when the 14-period RSI rises above 70 (overbought) and then closes back below 70 on the same or next 4h bar, signalling exhaustion of upside momentum. The position is short (sell/go short). Stop loss is placed 2% above the swing high formed at the overbought peak. Take-profit target is the 50-period EMA or a 4% drop from entry, whichever is reached first. This strategy is the directional mirror of the 4h RSI long reversal but captures mean-reversion to the downside after overbought extremes.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "4h",
+      "direction": "short"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-oi-aggressive-011",
+    "content": "BTC/USDT long open-interest momentum strategy with an aggressive 5% stop loss, designed for high-risk, high-reward trending conditions. Entry logic is identical to the base OI momentum approach: open interest on BTC perpetuals crosses above its 20-period rolling average and price closes above the prior-bar high. However, the stop loss is set at a wide 5% below entry to tolerate deep pullbacks within a strong trending move. Take-profit targets are 10% and 20% above entry, reflecting the expectation of large trending moves. This aggressive risk configuration accepts frequent stop-outs in sideways markets in exchange for capturing the full extent of breakout legs during high-momentum regimes. High risk per trade; position size must be scaled down accordingly.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-oi-conservative-012",
+    "content": "BTC/USDT open-interest momentum entry strategy with a conservative 0.5% stop loss for low-risk, capital-preservation-focused operation. Entry fires on the same OI crossover signal as the base momentum strategy, but the stop loss is placed extremely tight at only 0.5% below entry, making this a precision scalp that exits immediately if the move fails to follow through. Take-profit is set at 1% above entry (1:2 risk-reward). The very tight stop drastically reduces per-trade loss but requires precise execution and favours liquid high-volume periods when spread and slippage are minimal. Suitable for conservative accounts or those treating this as a high-frequency micro-trend scalp with strict capital preservation rules.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "direction": "long"
+    }
+  },
+  {
+    "strategyProfileId": "strat-btc-liq-short-013",
+    "content": "BTC/USDT short strategy targeting liquidation cascades driven by high open interest. Entry condition: BTC/USDT 4-hour open interest is at a multi-week extreme (top 5% of the 90-day OI distribution) AND price begins to decline below the prior-bar low, suggesting that over-leveraged long positions are beginning to liquidate. The expectation is a self-reinforcing short squeeze / long liquidation cascade. Stop loss is placed 1.8% above the entry price. Take-profit targets are 5% and 10% below entry, capitalising on the accelerated price drop as cascading margin calls force liquidations. Direction is explicitly short. This strategy operates on the same OI data source as the momentum longs but exploits the downside of extreme OI positioning.",
+    "metadata": {
+      "market": "crypto",
+      "symbol": "BTC/USDT",
+      "timeframe": "4h",
+      "direction": "short"
+    }
+  }
+]

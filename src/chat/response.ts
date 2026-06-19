@@ -1,10 +1,55 @@
 import type { AgentTaskType, TaskStatus } from '../domain/types.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
+import type { OperatorEvidence } from '../domain/strategy-retrieval.ts';
 import { ALLOWED_INTENTS } from './intent.ts';
 
 export interface PlannedNextStep {
   taskType: AgentTaskType;
   after: AgentTaskType;
+}
+
+export interface ProposedActionView {
+  id: 'confirm' | 'cancel';
+  label: string;
+  style: 'primary' | 'secondary';
+}
+
+export interface EvidencePresentation {
+  kind: 'interpretation' | 'warning' | 'exact_duplicate' | 'similar';
+  text: string;
+  sourceId?: string;
+}
+
+/**
+ * Typed evidence cards for an assistant proposal message, built from the deterministic
+ * interpretation text plus the Operator retrieval result. Card order is stable:
+ *   1. interpretation (always)
+ *   2. exact_duplicate (only when an exact fingerprint hit was found)
+ *   3. similar          (one card per similar candidate)
+ *   4. warning          (one card per degradation/warning code)
+ * Cards carry only ids/labels/codes — never raw strategy text or embeddings.
+ */
+export function buildEvidenceCards(interpretation: string, evidence?: OperatorEvidence): EvidencePresentation[] {
+  const cards: EvidencePresentation[] = [{ kind: 'interpretation', text: interpretation }];
+  if (!evidence) return cards;
+
+  if (evidence.exactLookup === 'hit' && evidence.exactMatch) {
+    cards.push({
+      kind: 'exact_duplicate',
+      text: 'Похоже, такая стратегия уже есть (точное совпадение).',
+      sourceId: evidence.exactMatch.strategyProfileId,
+    });
+  }
+
+  for (const candidate of evidence.similarStrategies) {
+    cards.push({ kind: 'similar', text: 'similar', sourceId: candidate.strategyProfileId });
+  }
+
+  for (const code of evidence.warningCodes) {
+    cards.push({ kind: 'warning', text: code });
+  }
+
+  return cards;
 }
 
 export type ChatResponse =
@@ -15,7 +60,15 @@ export type ChatResponse =
   | { kind: 'capability_not_available'; sessionId: string; capability: string; message: string }
   | { kind: 'help'; sessionId: string; message: string; supportedIntents: string[] }
   | { kind: 'rejected'; sessionId: string; reason: string; issues?: ValidationIssue[] }
-  | { kind: 'error'; sessionId: string; message: string };
+  | { kind: 'error'; sessionId: string; message: string }
+  | {
+      kind: 'assistant_message';
+      sessionId: string;
+      message: string;
+      evidence: EvidencePresentation[];
+      actions: ProposedActionView[];
+      pendingInteractionId?: string;
+    };
 
 export function outOfScope(sessionId: string): Extract<ChatResponse, { kind: 'out_of_scope' }> {
   return {
@@ -56,4 +109,19 @@ export function rejected(sessionId: string, reason: string, issues?: ValidationI
 
 export function errorResponse(sessionId: string, message: string): Extract<ChatResponse, { kind: 'error' }> {
   return { kind: 'error', sessionId, message };
+}
+
+export function assistantMessage(
+  sessionId: string,
+  message: string,
+  opts: { evidence?: EvidencePresentation[]; actions?: ProposedActionView[]; pendingInteractionId?: string } = {},
+): Extract<ChatResponse, { kind: 'assistant_message' }> {
+  return {
+    kind: 'assistant_message',
+    sessionId,
+    message,
+    evidence: opts.evidence ?? [],
+    actions: opts.actions ?? [],
+    pendingInteractionId: opts.pendingInteractionId,
+  };
 }

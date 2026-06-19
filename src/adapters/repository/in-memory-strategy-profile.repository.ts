@@ -24,4 +24,11 @@ export class InMemoryStrategyProfileRepository implements StrategyProfileReposit
     }
     return null;
   }
+
+  async listAll(): Promise<StrategyProfile[]> {
+    return [...this.byId.values()].sort((a, b) => {
+      const t = a.createdAt.localeCompare(b.createdAt);
+      return t !== 0 ? t : a.id.localeCompare(b.id);
+    });
+  }
 }

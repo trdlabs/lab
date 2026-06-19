@@ -1,0 +1,47 @@
+<h2>Раздел 1. Архитектура и state machine</h2>
+<p class="subtitle">Подтверждается не intent, а конкретный неизменяемый Action Proposal.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Один пользовательский цикл</div>
+  <div class="mockup-body">
+    <div style="display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:12px;align-items:center">
+      <div class="placeholder"><strong>1. Understand</strong><br>Subject + requested goal<br><small>LLM, без side effects</small></div>
+      <div>→</div>
+      <div class="placeholder"><strong>2. Enrich</strong><br>DB + ports + similarity + RAG<br><small>только чтение</small></div>
+      <div>→</div>
+      <div class="placeholder"><strong>3. Propose</strong><br>План, факты, альтернативы<br><small>сохраняется в session</small></div>
+    </div>
+    <p style="text-align:center;font-size:24px">↓</p>
+    <div class="placeholder" style="max-width:620px;margin:auto"><strong>WAITING_CONFIRMATION</strong><br>Никакой task ещё не существует</div>
+    <p style="text-align:center;font-size:24px">↓</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div class="placeholder"><strong>Confirm</strong><br>Guard создаёт задачу</div>
+      <div class="placeholder"><strong>Alternative</strong><br>Новое proposal</div>
+      <div class="placeholder"><strong>Edit</strong><br>Уточнить subject/goal</div>
+      <div class="placeholder"><strong>Cancel/Expire</strong><br>Закрыть без действий</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Границы компонентов</h3>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+    <div class="placeholder"><strong>Turn Interpreter</strong><br>Определяет предмет, цель и ссылки из текущего сообщения + session context.</div>
+    <div class="placeholder"><strong>Evidence Enricher</strong><br>Собирает типизированные факты. Не генерирует выводы и ничего не пишет.</div>
+    <div class="placeholder"><strong>Proposal Policy</strong><br>Детерминированно выбирает допустимые действия и формирует Action Proposal.</div>
+    <div class="placeholder"><strong>Confirmation Guard</strong><br>Принимает только ответ на актуальный proposal и вызывает существующий task intake.</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Ключевой контракт</h3>
+  <div class="placeholder">
+    <code>ActionProposal { id, subjectSnapshot, evidenceRefs, action, payloadPreview, alternatives, expiresAt, status }</code>
+  </div>
+  <p class="subtitle">Payload вычисляется до вопроса. При подтверждении guard проверяет proposal ID, срок, статус и неизменность subject; затем использует сохранённый payload, а не заново интерпретирует «да» через LLM.</p>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>Гарантии</h4><ul><li>Любая новая стратегия сначала становится proposal.</li><li>Даже «проанализируй» не обходит confirmation.</li><li>Короткое «да» связано с одним proposal ID.</li></ul></div>
+  <div class="cons"><h4>Не считаем подтверждением</h4><ul><li>Низкоуверенный ответ.</li><li>Ответ после истечения proposal.</li><li>Новое описание стратегии вместо явного согласия.</li></ul></div>
+</div>

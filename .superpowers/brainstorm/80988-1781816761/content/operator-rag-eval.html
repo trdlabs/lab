@@ -1,0 +1,50 @@
+<h2>Operator RAG: reranker, eval и observability contract</h2>
+<p class="subtitle">Сначала измеримый TypeScript pipeline; Python eval frameworks и Phoenix не блокируют первый production slice.</p>
+
+<div class="section">
+  <h3>Reranker evolution</h3>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+    <div class="placeholder"><strong>Baseline</strong><br>RRF only<br><small>обязательная контрольная линия</small></div>
+    <div class="placeholder"><strong>Первый adapter</strong><br>MastraRerankerAdapter<br><small>semantic + vector + position scoring</small></div>
+    <div class="placeholder"><strong>Позже, если eval лучше</strong><br>CrossEncoderRerankerAdapter<br><small>hosted или local provider</small></div>
+  </div>
+  <p class="subtitle">Называем реализацию точно: Mastra rerank не выдаём за cross-encoder. Adapter включается feature flag и обязан выигрывать у RRF baseline.</p>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">Golden retrieval dataset</div>
+  <div class="mockup-body">
+    <div class="placeholder"><code>{ query, language, filters, expectedRelevantIds[], gradedRelevance, expectedExactId? }</code></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px">
+      <div class="placeholder"><strong>Recall@20</strong><br>не потеряли релевантное</div>
+      <div class="placeholder"><strong>MRR</strong><br>первый правильный выше</div>
+      <div class="placeholder"><strong>nDCG@5</strong><br>качество порядка top-5</div>
+      <div class="placeholder"><strong>p95 latency</strong><br>укладываемся в SLO</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Два eval-контура</h3>
+  <div class="split">
+    <div class="mockup"><div class="mockup-header">CI · каждый PR</div><div class="mockup-body"><ul><li>Vitest fixtures</li><li>Retrieval metrics без LLM judge</li><li>Exact duplicate invariant</li><li>Latency на controlled fixture</li><li>Regression threshold против baseline</li></ul></div></div>
+    <div class="mockup"><div class="mockup-header">Offline · scheduled/manual</div><div class="mockup-body"><ul><li>Mastra context precision/relevance</li><li>Faithfulness/answer relevance позже</li><li>LLM judge на размеченной выборке</li><li>Human calibration</li><li>Model/provider comparison</li></ul></div></div>
+  </div>
+  <p class="subtitle">Ragas/DeepEval не входят в v1: Python subsystem добавляется только если Mastra/Vitest не покрывают нужную метрику.</p>
+</div>
+
+<div class="section">
+  <h3>Observability contract сейчас, Phoenix позже</h3>
+  <div class="placeholder"><code>retrievalId · sessionId · subjectHash · source counts · top-K · selected source IDs · degraded reason · stage latency · model/provider · token usage</code></div>
+  <p class="subtitle">Сырые стратегии и retrieved chunks не пишутся в audit по умолчанию. Эти поля позже становятся span attributes Phoenix/OpenTelemetry без изменения доменной логики.</p>
+</div>
+
+<div class="pros-cons">
+  <div class="pros"><h4>Acceptance gates</h4><ul><li>Reranker улучшает nDCG@5 относительно RRF baseline.</li><li>Recall@20 не ухудшается.</li><li>p95 end-to-end ≤5s на целевом наборе.</li><li>Hard deadline 10s никогда не нарушается.</li></ul></div>
+  <div class="cons"><h4>Fail closed / fail soft</h4><ul><li>Semantic result никогда не становится exact duplicate.</li><li>Judge score не создаёт task.</li><li>Reranker failure возвращает RRF order.</li><li>Vector failure возвращает structured + lexical evidence.</li></ul></div>
+</div>
+
+<div class="section">
+  <h3>Первый Operator RAG slice</h3>
+  <div class="placeholder">Turn Interpreter → exact/structured enrichment → Strategy Profile FTS + pgvector → RRF baseline → optional Mastra reranker → evidence-first proposal · без Answer Synthesizer · без Artifact RAG · без Agentic loop</div>
+</div>
