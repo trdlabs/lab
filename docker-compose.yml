@@ -13,8 +13,6 @@
 x-lab-image: &lab-image
   build:
     context: .
-    additional_contexts:
-      trading_backtester: ${TRADING_BACKTESTER_PATH:-../trading-backtester}
   image: trading-lab:local
 
 services:

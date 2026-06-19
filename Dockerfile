@@ -10,12 +10,12 @@ FROM node:22-bookworm-slim
 RUN corepack enable
 WORKDIR /app
 
-# Install deps first for layer caching. The vendored SDK tarball referenced by
-# package.json (file:./vendor/...) must be present before install.
+# Install deps first for layer caching. The vendored @trading-platform/sdk tarball
+# referenced by package.json (file:./vendor/...) must be present before install;
+# @trading-backtester/sdk is fetched from its GitHub Release URL during install
+# (the legacy sibling `packages/client` COPY was dropped in the SDK cutover, #55).
 COPY package.json pnpm-lock.yaml ./
 COPY vendor ./vendor
-COPY --from=trading_backtester /packages/client/package.json /trading-backtester/packages/client/package.json
-COPY --from=trading_backtester /packages/client/dist /trading-backtester/packages/client/dist
 RUN pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
 
 # App source (src, migrations, drizzle.config.js, scripts, tsconfig.json, ...)
