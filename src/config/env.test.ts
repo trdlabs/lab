@@ -195,3 +195,20 @@ describe('RAG retrieval config', () => {
     ).toThrow(/timeout/i);
   });
 });
+
+describe('reranker env', () => {
+  const base = { DATABASE_URL: 'x', REDIS_URL: 'y' } as NodeJS.ProcessEnv;
+  it('defaults reranker off with §7 defaults', () => {
+    const env = loadEnv(base);
+    expect(env.OPERATOR_RERANKER).toBe('none');
+    expect(env.OPERATOR_RERANK_TIMEOUT_MS).toBe(1500);
+    expect(env.OPERATOR_RERANK_LIMIT).toBe(5);
+    expect(env.OPERATOR_RERANK_MIN_CANDIDATES).toBe(10);
+    expect(env.OPERATOR_RERANK_RRF_MARGIN).toBe(0.002);
+  });
+  it('parses mastra + overrides', () => {
+    const env = loadEnv({ ...base, OPERATOR_RERANKER: 'mastra', OPERATOR_RERANK_TIMEOUT_MS: '800' });
+    expect(env.OPERATOR_RERANKER).toBe('mastra');
+    expect(env.OPERATOR_RERANK_TIMEOUT_MS).toBe(800);
+  });
+});

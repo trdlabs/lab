@@ -64,6 +64,16 @@ export interface Env {
   OPERATOR_RETRIEVAL_VECTOR_LIMIT: number;
   /** Max candidates after fusion/re-rank stage (default: 20). */
   OPERATOR_RETRIEVAL_FUSED_LIMIT: number;
+  /** Reranker backend — 'mastra' enables LLM reranking; 'none' (default) keeps RRF order. */
+  OPERATOR_RERANKER: 'mastra' | 'none';
+  /** Max ms to wait for reranker before falling back to RRF order (default: 1500). */
+  OPERATOR_RERANK_TIMEOUT_MS: number;
+  /** Max candidates to return from reranker (default: 5). */
+  OPERATOR_RERANK_LIMIT: number;
+  /** Minimum candidate count to trigger volume-based reranking (default: 10). */
+  OPERATOR_RERANK_MIN_CANDIDATES: number;
+  /** RRF ambiguity margin — top-two gap <= this triggers reranking (default: 0.002). */
+  OPERATOR_RERANK_RRF_MARGIN: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -159,6 +169,11 @@ function loadRagEnv(source: NodeJS.ProcessEnv): Pick<
   | 'OPERATOR_RETRIEVAL_LEXICAL_LIMIT'
   | 'OPERATOR_RETRIEVAL_VECTOR_LIMIT'
   | 'OPERATOR_RETRIEVAL_FUSED_LIMIT'
+  | 'OPERATOR_RERANKER'
+  | 'OPERATOR_RERANK_TIMEOUT_MS'
+  | 'OPERATOR_RERANK_LIMIT'
+  | 'OPERATOR_RERANK_MIN_CANDIDATES'
+  | 'OPERATOR_RERANK_RRF_MARGIN'
 > {
   const dims = parsePositiveInt(source.OPERATOR_EMBEDDING_DIMENSIONS, 1024);
   if (dims !== 1024) {
@@ -186,5 +201,10 @@ function loadRagEnv(source: NodeJS.ProcessEnv): Pick<
     OPERATOR_RETRIEVAL_LEXICAL_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_LEXICAL_LIMIT, 50),
     OPERATOR_RETRIEVAL_VECTOR_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_VECTOR_LIMIT, 50),
     OPERATOR_RETRIEVAL_FUSED_LIMIT: parsePositiveInt(source.OPERATOR_RETRIEVAL_FUSED_LIMIT, 20),
+    OPERATOR_RERANKER: source.OPERATOR_RERANKER === 'mastra' ? 'mastra' : 'none',
+    OPERATOR_RERANK_TIMEOUT_MS: parsePositiveInt(source.OPERATOR_RERANK_TIMEOUT_MS, 1500),
+    OPERATOR_RERANK_LIMIT: parsePositiveInt(source.OPERATOR_RERANK_LIMIT, 5),
+    OPERATOR_RERANK_MIN_CANDIDATES: parsePositiveInt(source.OPERATOR_RERANK_MIN_CANDIDATES, 10),
+    OPERATOR_RERANK_RRF_MARGIN: parseFloatOr(source.OPERATOR_RERANK_RRF_MARGIN, 0.002),
   };
 }
