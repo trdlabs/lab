@@ -14,7 +14,7 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 |---|-------|-------|
 | 1 | Confirmation core | ✅ Shipped (branch `feat/conversational-operator`) |
 | 2 | Operator RAG baseline | ✅ Shipped |
-| 3 | Meaningful completion replies | ⏳ Next |
+| 3 | Meaningful completion replies | ✅ Shipped (lab #50 + office #11; PR2b backlog) |
 | — | Reranker follow-up | ⏳ Next (baseline eval now exists) |
 | 4 | Bot catalog + entity disambiguation | ⛔ Deferred — needs platform SDK + bot-identity DTO (see SDK initiative) |
 | 5 | Researcher / Artifact RAG | ⛔ Deferred — needs backtester SDK artifact API (see SDK initiative) |
@@ -69,11 +69,25 @@ independent corpus + live latency eval is future work.
 
 ## Next (prioritized)
 
-### 3. Meaningful completion replies  — HIGH (the "Done" problem)
-Replace the generic `Done` worker-completion in Office with a domain summary
-(profile/hypotheses/run links + key metrics). The current two slices do NOT solve
-this. Needs its own design + plan. Reference: design §11 (final completion should
-render a domain summary, not `Done`).
+### 3. Meaningful completion replies  — ✅ SHIPPED (the "Done" problem)
+Done end-to-end in the followed-terminal scope. **lab PR #50** (→ main `e7f1bb2`): read-API
+`GET /v1/tasks/:taskId/completion-summary` → structured `CompletionSummary`
+(`strategy.onboard` / `research.run_cycle` / `backtest.completed`) + observable graceful degradation
+(`warnings` codes + `console.warn`); side-effect-free read. **office PR #11** (→ main `e61ee56`):
+`getCompletionSummary` client + `renderCompletionSummary` markdown + async `ConversationFollower`
+completion replacing `Done.`, behind `OPERATOR_COMPLETION_SUMMARY` (default on) with graceful fallback.
+Spec: `docs/superpowers/specs/2026-06-19-meaningful-completion-replies-design.md`; plan:
+`docs/superpowers/plans/2026-06-19-meaningful-completion-replies-pr1-lab.md` (office PR2 plan lives in
+the trading-office repo).
+
+**PR2b (backlog) — downstream `backtest.completed` surfacing.** The run_cycle turn completes immediately
+("N backtests enqueued"); per-hypothesis backtest results arrive later as downstream tasks (same
+`correlationId`, different `taskId`) that the one-turn `ConversationFollower` does not watch. Surfacing
+them is a **cross-layer** feature, not a server-only follow-up — it needs (a) a per-conversation
+background follower keyed on `correlationId`, (b) a proactive-message protocol (the office chat is
+turn-based: `operatorTranscript` maps each reply to a user turn, so an unsolicited assistant message has
+no home today), and (c) web rendering for assistant-only / proactive messages. The lab endpoint already
+serves `backtest.completed`. Deserves its own brainstorm → design → plan.
 
 ### Reranker follow-up  — now unblocked
 A baseline eval exists, so the conditional `MastraRerankerAdapter` (the
