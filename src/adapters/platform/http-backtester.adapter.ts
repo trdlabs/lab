@@ -240,11 +240,10 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort {
       timeframe: opts.run.timeframe,
       period: opts.run.period,
       seed: opts.run.seed,
-      // Request the full advertised overlay catalog (not just preset.metrics): the lab's research
-      // comparison/evaluation requires the complete metric set (total_trades / profit_factor /
-      // top_trade_contribution_pct), mirroring the MCP adapter's RESEARCH_RUN_METRICS. The preset
-      // supplies the COMPLETE request (baseline/risk/exec); the consumer asks for the metrics it needs.
-      metrics: [...descriptor.metricCatalogs.overlay],
+      // The preset is a COMPLETE, self-sufficient scaffold: it advertises the full metric set the
+      // research comparison/evaluation needs (total_trades / profit_factor / top_trade_contribution_pct),
+      // so trust preset.metrics directly.
+      metrics: [...preset.metrics],
       ...(opts.correlationId !== undefined ? { correlationId: opts.correlationId } : {}),
       ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
       ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),
