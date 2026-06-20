@@ -47,7 +47,13 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
 
   // 2. Submit (transport / GatewayRunError propagate → worker retry; resumeToken makes the replay idempotent).
   const opts: SubmitOverlayRunOptions = {
-    baselineModuleRef: baselineRef,
+    // Per-integration overlay-run target: the backtester/HTTP path needs a COMPLETE request
+    // (risk/exec/metrics) that only a registry preset supplies; the platform/MCP path compares
+    // against a baseline ref. The mock accepts either (it ignores the target).
+    target:
+      services.researchIntegration === 'backtester'
+        ? { kind: 'registry_preset' }
+        : { kind: 'baseline_ref', moduleRef: baselineRef },
     run: platformRun,
     correlationId: task.correlationId,
     resumeToken,

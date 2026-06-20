@@ -211,6 +211,7 @@ export function composeRuntime() {
     events,
     platform: new MockPlatformGatewayAdapter(),
     researchPlatform: selectResearchPlatform(env.TRADING_PLATFORM_INTEGRATION),
+    researchIntegration: env.TRADING_PLATFORM_INTEGRATION,
     botResults: selectBotResults(process.env),
     tradeEvidence: new MockTradeEvidenceAdapter(),
     researcher: buildResearcher(mastraRuntime),

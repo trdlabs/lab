@@ -177,7 +177,7 @@ describe.skipIf(!enabled)('cross-repo E2E (lab → backtester → mock-platform)
     const pick = datasets.find((d) => isMockPlatformDatasetRef(d.datasetId)) ?? datasets[0]!;
 
     const handle = await a.submitOverlayRun(strategyBundle, {
-      baselineModuleRef: { id: 'baseline', version: 'v1' },
+      target: { kind: 'registry_preset' },
       run: {
         datasetId: pick.datasetId,
         symbols: pick.symbols,
@@ -193,7 +193,10 @@ describe.skipIf(!enabled)('cross-repo E2E (lab → backtester → mock-platform)
     const result = await a.getRunResult(handle.runId);
     expect(result.kind).toBe('summary');
     if (result.kind === 'summary') {
-      expect(result.summary.metrics.total_bars).toBeGreaterThan(0);
+      // Preset-driven overlay run → a real baseline-vs-variant comparison (the epic's payoff).
+      expect(result.summary.runKind).toBe('baseline-vs-variant');
+      expect(result.summary.comparison).toBeDefined();
+      expect(Object.keys(result.summary.metrics).length).toBeGreaterThan(0);
     }
   }, 120_000);
 
@@ -211,6 +214,7 @@ describe.skipIf(!enabled)('cross-repo E2E (lab → backtester → mock-platform)
 
     const s = makeServices({
       researchPlatform: a,
+      researchIntegration: 'backtester',
       builder: new IntegrationTestBuilder(),
       platformPoll: { maxPolls: 120, pollDelayMs: 500 },
     });

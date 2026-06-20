@@ -34,7 +34,15 @@ export interface PlatformRunConfig {
 }
 
 export interface SubmitOverlayRunOptions {
-  readonly baselineModuleRef: Ref;
+  /**
+   * What the run compares the submitted overlay bundle against. Per-integration support is
+   * deliberate (see the adapters): the backtester/HTTP path needs a COMPLETE request
+   * (risk/exec/metrics), which only a `registry_preset` supplies, so it rejects `baseline_ref`;
+   * the platform/MCP path supports `baseline_ref` only; the mock accepts both.
+   */
+  readonly target:
+    | { readonly kind: 'registry_preset'; readonly presetId?: string }
+    | { readonly kind: 'baseline_ref'; readonly moduleRef: Ref };
   readonly run: PlatformRunConfig;
   readonly correlationId?: string;
   readonly resumeToken?: string;

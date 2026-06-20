@@ -41,6 +41,8 @@ export interface AppServices {
   events: AgentEventRepository;
   platform: PlatformGatewayPort;
   researchPlatform: ResearchPlatformPort;
+  /** Which research-platform integration is wired — selects the overlay-run target in runPlatformBacktest. */
+  researchIntegration: 'mock' | 'mcp' | 'backtester';
   botResults: BotResultsReadPort;
   tradeEvidence: TradeEvidenceReadPort;
   researcher: ResearcherPort;

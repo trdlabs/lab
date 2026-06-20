@@ -34,6 +34,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     events: new InMemoryAgentEventRepository(),
     platform: new MockPlatformGatewayAdapter(),
     researchPlatform: new MockResearchPlatformAdapter(),
+    researchIntegration: 'mock',
     botResults: new MockBotResultsAdapter(),
     tradeEvidence: new MockTradeEvidenceAdapter(),
     researcher: new FakeResearcher(),

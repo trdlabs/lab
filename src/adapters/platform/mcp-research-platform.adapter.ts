@@ -50,9 +50,16 @@ export class McpResearchPlatformAdapter implements ResearchPlatformPort {
   }
 
   async submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
+    if (opts.target.kind === 'registry_preset') {
+      throw new GatewayRunError({
+        category: 'validation_error',
+        code: 'unsupported_target',
+        message: 'registry presets are only supported on the backtester integration',
+      });
+    }
     const request: ControlledRunRequest = {
       datasetRef: { datasetId: opts.run.datasetId },
-      module: { kind: 'submitted_overlay', bundle: toSubmittedBundle(bundle), baselineModuleRef: opts.baselineModuleRef },
+      module: { kind: 'submitted_overlay', bundle: toSubmittedBundle(bundle), baselineModuleRef: opts.target.moduleRef },
       symbols: opts.run.symbols,
       timeframe: opts.run.timeframe,
       period: opts.run.period,

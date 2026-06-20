@@ -4,7 +4,7 @@ import type { ResearchPlatformPort, RunStatusView, RunResultView, RunJobHandle, 
 import type { ModuleBundle } from '../domain/module-bundle.ts';
 
 const bundle = {} as ModuleBundle;
-const opts = { baselineModuleRef: { id: 'strategy:p1', version: '1.0.0' }, run: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-12-31' }, seed: 7 } } satisfies SubmitOverlayRunOptions;
+const opts = { target: { kind: 'baseline_ref' as const, moduleRef: { id: 'strategy:p1', version: '1.0.0' } }, run: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-12-31' }, seed: 7 } } satisfies SubmitOverlayRunOptions;
 const noSleep = async () => {};
 const handle: RunJobHandle = { jobId: 'j', runId: 'r', status: 'accepted', effectiveSeed: 7, requestFingerprint: 'f', idempotentReplay: false };
 

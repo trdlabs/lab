@@ -21,6 +21,8 @@ import type {
   ValidationReport as BtValidationReport,
   ComparisonSummary as BtComparisonSummary,
   MetricDelta as BtMetricDelta,
+  RegistryDescriptor,
+  OverlayRunPreset,
 } from '@trading-backtester/sdk/contracts';
 import { BacktesterConflictError, BacktesterError } from '@trading-backtester/sdk/client';
 import type {
@@ -47,6 +49,7 @@ export interface BacktesterClientLike {
   getRunResult(runId: string): Promise<BtRunResultSummary>;
   validateModule(req: unknown): Promise<BtValidationReport>;
   getCapabilities(): Promise<BtCapabilityDescriptor>;
+  discoverRegistry(): Promise<RegistryDescriptor>;
   listDatasets(): Promise<BtDatasetDescriptor[]>;
   cancelRun(runId: string): Promise<BtRunStatusView>;
 }
@@ -145,9 +148,31 @@ function toSdkValidationReport(r: BtValidationReport): ValidationReport {
 
 export class HttpBacktesterAdapter implements ResearchPlatformPort {
   private readonly client: BacktesterClientLike;
+  /** Memoized: the registry is immutable for the life of the adapter, so discover it at most once. */
+  private registryPromise?: Promise<RegistryDescriptor>;
 
   constructor(client: BacktesterClientLike) {
     this.client = client;
+  }
+
+  private registry(): Promise<RegistryDescriptor> {
+    return (this.registryPromise ??= this.client.discoverRegistry());
+  }
+
+  /**
+   * Resolve the overlay-run preset that supplies the COMPLETE request (baseline + risk + exec +
+   * metrics). With a presetId, look it up; without one, auto-select the sole preset, else demand a
+   * presetId. The backtester needs all of these — a bare baseline_ref cannot be submitted.
+   */
+  private async resolvePreset(presetId?: string): Promise<OverlayRunPreset> {
+    const presets = (await this.registry()).overlayRunPresets;
+    if (presetId) {
+      const p = presets.find((x) => x.id === presetId);
+      if (!p) throw new GatewayRunError({ category: 'validation_error', code: 'unknown_preset', message: `unknown overlay preset: ${presetId}` });
+      return p;
+    }
+    if (presets.length === 1) return presets[0]!;
+    throw new GatewayRunError({ category: 'validation_error', code: 'ambiguous_preset', message: `presetId required; available: ${presets.map((p) => p.id).join(', ')}` });
   }
 
   async discover(): Promise<ResearchCapabilityDescriptor> {
@@ -185,17 +210,31 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort {
   }
 
   async submitOverlayRun(bundle: ModuleBundle, opts: SubmitOverlayRunOptions): Promise<RunJobHandle> {
+    if (opts.target.kind === 'baseline_ref') {
+      // A bare baseline_ref carries no risk/exec/metrics — the backtester overlay engine would reject
+      // the incomplete request. The preset is the only complete source here.
+      throw new GatewayRunError({
+        category: 'validation_error',
+        code: 'unsupported_target',
+        message: 'the backtester integration requires a registry_preset target (baseline_ref is not supported)',
+      });
+    }
+    const preset = await this.resolvePreset(opts.target.presetId);
+    const btBundle = toBacktesterBundle(bundle);
     const req: BtRunSubmitRequest = {
       mode: 'research',
       engine: 'overlay',
-      moduleRef: opts.baselineModuleRef,
-      moduleBundle: toBacktesterBundle(bundle),
+      moduleRef: preset.baselineRef,
+      overlayRefs: [{ id: btBundle.manifest.id, version: btBundle.manifest.version }],
+      riskProfileRef: preset.riskProfileRef,
+      executionProfileRef: preset.executionProfileRef,
+      moduleBundle: btBundle,
       datasetRef: opts.run.datasetId,
       symbols: opts.run.symbols,
       timeframe: opts.run.timeframe,
       period: opts.run.period,
       seed: opts.run.seed,
-      metrics: [],
+      metrics: [...preset.metrics],
       ...(opts.correlationId !== undefined ? { correlationId: opts.correlationId } : {}),
       ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
       ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),

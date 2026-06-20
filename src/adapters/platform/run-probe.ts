@@ -30,7 +30,7 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export async function runBacktestProbe(deps: RunProbeDeps): Promise<RunProbeResult> {
   const { platform, events, probeId, integration, bundle, opts, poll } = deps;
-  await events.append(mkEvent(probeId, 'platform.run.started', { integration, bundleHash: bundle.bundleHash, baselineModuleRef: opts.baselineModuleRef }));
+  await events.append(mkEvent(probeId, 'platform.run.started', { integration, bundleHash: bundle.bundleHash, target: opts.target }));
 
   // Fail-closed contract gate (discover() asserts contract compatibility inside the adapter).
   try {

@@ -8,6 +8,7 @@ import type {
   RunSubmitRequest as BtRunSubmitRequest,
   ValidationReport as BtValidationReport,
   ModuleValidateRequest as BtModuleValidateRequest,
+  RegistryDescriptor,
 } from '@trading-backtester/sdk/contracts';
 import type { RunJobHandle, SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -75,6 +76,23 @@ class FakeClient implements BacktesterClientLike {
   async getCapabilities(): Promise<BtCapabilityDescriptor> {
     return { contractVersion: '017.2', artifactContractVersion: '022.1', supportedMetrics: ['pnl'], supportedModes: ['research'], maxConcurrency: 1 };
   }
+  async discoverRegistry(): Promise<RegistryDescriptor> {
+    return {
+      contractVersion: '017.2',
+      baselines: [{ id: 'base', version: 'v1' }],
+      overlays: [],
+      riskProfiles: [{ id: 'risk', version: 'v1' }],
+      execProfiles: [{ id: 'exec', version: 'v1' }],
+      metricCatalogs: { momentum: ['pnl'], overlay: ['pnl'] },
+      overlayRunPresets: [{
+        id: 'default-overlay',
+        baselineRef: { id: 'base', version: 'v1' },
+        riskProfileRef: { id: 'risk', version: 'v1' },
+        executionProfileRef: { id: 'exec', version: 'v1' },
+        metrics: ['pnl'],
+      }],
+    };
+  }
   async listDatasets(): Promise<BtDatasetDescriptor[]> {
     return [{ datasetRef: 'smoke', symbols: ['BTC'], timeframe: '1m', period: { from: 'a', to: 'b' }, rowCount: 12 }];
   }
@@ -91,7 +109,7 @@ const labBundle: ModuleBundle = {
 };
 
 const opts: SubmitOverlayRunOptions = {
-  baselineModuleRef: { id: 'base', version: 'v1' },
+  target: { kind: 'registry_preset' },
   run: { datasetId: 'smoke', symbols: ['BTC'], timeframe: '1m', period: { from: 'a', to: 'b' }, seed: 42 },
   correlationId: 'c1',
   resumeToken: 't1',
@@ -107,7 +125,26 @@ describe('HttpBacktesterAdapter', () => {
     expect(fake.submitted?.moduleBundle?.manifest.id).toBe('mod');
     expect(fake.submitted?.correlationId).toBe('c1');
     expect(fake.submitted?.resumeToken).toBe('t1');
-    expect(fake.submitted?.metrics).toEqual([]);
+    expect(fake.submitted?.metrics).toEqual(['pnl']);
+  });
+
+  it('rejects a baseline_ref target — the backtester integration requires a registry_preset', async () => {
+    const fake = new FakeClient();
+    await expect(
+      new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, { ...opts, target: { kind: 'baseline_ref', moduleRef: { id: 'x', version: 'v1' } } }),
+    ).rejects.toBeInstanceOf(GatewayRunError);
+    expect(fake.submitted).toBeUndefined();
+  });
+
+  it('a registry_preset submission carries overlayRefs + risk/exec profiles + non-empty preset metrics', async () => {
+    const fake = new FakeClient();
+    await new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, opts);
+    expect(fake.submitted?.moduleRef).toEqual({ id: 'base', version: 'v1' });
+    expect(fake.submitted?.overlayRefs).toEqual([{ id: 'mod', version: '1.0.0' }]);
+    expect(fake.submitted?.riskProfileRef).toEqual({ id: 'risk', version: 'v1' });
+    expect(fake.submitted?.executionProfileRef).toEqual({ id: 'exec', version: 'v1' });
+    expect(fake.submitted?.metrics).toEqual(['pnl']);
+    expect((fake.submitted?.metrics ?? []).length).toBeGreaterThan(0);
   });
 
   it('maps the timeline array → SDK timeline object', async () => {
