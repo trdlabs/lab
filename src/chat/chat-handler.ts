@@ -37,6 +37,74 @@ export interface ChatHandlerDeps {
   minConfidence: number;
 }
 
+export type ChatEvFn = (type: string, payload: Record<string, unknown>) => Promise<void>;
+
+export interface ConsumeConfirmationArgs {
+  proposalId: string;
+  decision: 'confirm' | 'cancel' | 'unresolved';
+  session: ChatSessionContext;
+}
+
+/**
+ * Resolves a pending action proposal deterministically — the single place the
+ * confirm/cancel/unresolved outcomes live. Called by the typed-"да" turn in
+ * handleChatMessage AND by the structured POST /chat/confirm endpoint, so the
+ * two entry points can never drift. The interpreter is never consulted here;
+ * a task is created exactly once, only on confirmed_now, via createAndEnqueueTask.
+ */
+export async function consumeConfirmation(
+  args: ConsumeConfirmationArgs,
+  deps: ChatHandlerDeps,
+  ev: ChatEvFn,
+  now: () => string,
+  userMessage?: string,
+): Promise<ChatResponse> {
+  const { proposalId, decision, session } = args;
+  const sid = session.sessionId;
+  const clearPending = (extra: Partial<ChatSessionContext> = {}): Promise<void> =>
+    deps.sessions.upsert({ ...session, ...extra, pendingInteraction: undefined, updatedAt: now() });
+
+  if (decision === 'cancel') {
+    await deps.proposals.cancelPending(proposalId, sid, now());
+    await clearPending();
+    await ev('chat.proposal.cancelled', { proposalId, sessionId: sid });
+    return assistantMessage(sid, 'Отменил. Если нужно — пришлите стратегию или запрос заново.', { actions: [] });
+  }
+
+  if (decision === 'unresolved') {
+    const evPayload: Record<string, unknown> = { proposalId, sessionId: sid };
+    if (userMessage !== undefined) {
+      evPayload.messageChars = userMessage.length;
+    }
+    await ev('chat.proposal.unresolved_reply', evPayload);
+    return assistantMessage(sid, 'Не понял ответ. Подтвердите запуск или отмените действие.', {
+      actions: PENDING_ACTIONS,
+      pendingInteractionId: proposalId,
+    });
+  }
+
+  const result = await deps.proposals.confirmPending(proposalId, sid, now());
+  switch (result.kind) {
+    case 'confirmed_now':
+      return executeConfirmedProposal(result.proposal, session, deps, ev, now);
+    case 'already_confirmed': {
+      const taskId = result.proposal.confirmedTaskId;
+      if (!taskId) return assistantMessage(sid, 'Заявка уже подтверждена. Если задача не появилась — проверьте статус задачи.', { actions: [] });
+      const task = await deps.researchTasks.findById(taskId);
+      return task
+        ? taskStatus(sid, taskId, task.status)
+        : taskCreated(sid, taskId, result.proposal.task.taskType, 'queued');
+    }
+    case 'expired':
+      await clearPending();
+      await ev('chat.proposal.expired', { proposalId, sessionId: sid });
+      return assistantMessage(sid, 'Срок подтверждения истёк. Пришлите запрос заново.', { actions: [] });
+    case 'not_found':
+      await clearPending();
+      return assistantMessage(sid, 'Не нашёл активного подтверждения. Пришлите запрос заново.', { actions: [] });
+  }
+}
+
 export interface HandleChatInput {
   message: string;
   session: ChatSessionContext;
@@ -56,52 +124,8 @@ export async function handleChatMessage(input: HandleChatInput, deps: ChatHandle
   // once, only on confirmed_now, through the same createAndEnqueueTask chokepoint.
   const pending = input.session.pendingInteraction;
   if (pending?.kind === 'action_confirmation') {
-    const proposalId = pending.proposalId;
-    const clearPending = (extra: Partial<ChatSessionContext> = {}): Promise<void> =>
-      deps.sessions.upsert({ ...input.session, ...extra, pendingInteraction: undefined, updatedAt: now() });
     const reply = resolveConfirmationReply(input.message);
-
-    if (reply === 'cancel') {
-      await deps.proposals.cancelPending(proposalId, sid, now());
-      await clearPending();
-      await ev('chat.proposal.cancelled', { chatRequestId, proposalId, sessionId: sid });
-      return assistantMessage(sid, 'Отменил. Если нужно — пришлите стратегию или запрос заново.', { actions: [] });
-    }
-
-    if (reply === 'unresolved') {
-      // Stay parked on the proposal: do not classify and do not mutate any state.
-      await ev('chat.proposal.unresolved_reply', { proposalId, sessionId: sid, messageChars: input.message.length });
-      return assistantMessage(sid, 'Не понял ответ. Подтвердите запуск или отмените действие.', {
-        actions: PENDING_ACTIONS,
-        pendingInteractionId: proposalId,
-      });
-    }
-
-    // confirm
-    const result = await deps.proposals.confirmPending(proposalId, sid, now());
-    switch (result.kind) {
-      case 'confirmed_now':
-        // clearPending + session upsert happen inside executeConfirmedProposal.
-        return executeConfirmedProposal(result.proposal, input.session, deps, ev, now);
-      case 'already_confirmed': {
-        // Replay: never enqueue again. Surface the already-created task's status.
-        const taskId = result.proposal.confirmedTaskId;
-        // Partial-write recovery: status flipped to 'confirmed' in the DB but attachTask
-        // never landed (e.g. a crash between enqueue and attach). Do NOT re-enqueue here.
-        if (!taskId) return assistantMessage(sid, 'Заявка уже подтверждена. Если задача не появилась — проверьте статус задачи.', { actions: [] });
-        const task = await deps.researchTasks.findById(taskId);
-        return task
-          ? taskStatus(sid, taskId, task.status)
-          : taskCreated(sid, taskId, result.proposal.task.taskType, 'queued');
-      }
-      case 'expired':
-        await clearPending();
-        await ev('chat.proposal.expired', { chatRequestId, proposalId, sessionId: sid });
-        return assistantMessage(sid, 'Срок подтверждения истёк. Пришлите запрос заново.', { actions: [] });
-      case 'not_found':
-        await clearPending();
-        return assistantMessage(sid, 'Не нашёл активного подтверждения. Пришлите запрос заново.', { actions: [] });
-    }
+    return consumeConfirmation({ proposalId: pending.proposalId, decision: reply, session: input.session }, deps, ev, now, input.message);
   }
 
   // ---- Turn interpretation (advisory; the guard's schema gate is the trust boundary) ----

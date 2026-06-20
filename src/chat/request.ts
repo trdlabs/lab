@@ -11,3 +11,11 @@ export const ChatMessageRequestSchema = z.object({
 });
 
 export type ChatMessageRequest = z.infer<typeof ChatMessageRequestSchema>;
+
+export const ChatConfirmRequestSchema = z.object({
+  pendingInteractionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  decision: z.enum(['confirm', 'cancel']),
+});
+
+export type ChatConfirmRequest = z.infer<typeof ChatConfirmRequestSchema>;

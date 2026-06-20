@@ -99,6 +99,71 @@ describe('POST /chat/messages', () => {
   });
 });
 
+describe('POST /chat/confirm', () => {
+  it('confirms a pending proposal -> task_created', async () => {
+    const deps = appDeps();
+    const app = createChatApp(deps);
+
+    // Arrange: drive one /messages turn that leaves a pending proposal.
+    const firstRes = await app.request('/messages', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'исследуй эту стратегию: лонг при росте OI', sessionId: 'sess-confirm-1' }),
+    });
+    const proposal = await firstRes.json() as { kind: string; sessionId: string; pendingInteractionId?: string };
+    expect(proposal.kind).toBe('assistant_message');
+    expect(proposal.pendingInteractionId).toBeTruthy();
+
+    // Act: structured confirm.
+    const res = await app.request('/confirm', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pendingInteractionId: proposal.pendingInteractionId,
+        sessionId: proposal.sessionId,
+        decision: 'confirm',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { kind: string; taskId?: string };
+    expect(body.kind).toBe('task_created');
+    expect(body.taskId).toBeTruthy();
+  });
+
+  it('with unset token -> 503', async () => {
+    const noAuth = createChatApp(appDeps({ authToken: undefined }));
+    const res = await noAuth.request('/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingInteractionId: 'p', sessionId: 's', decision: 'confirm' }),
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it('for an unknown proposal -> graceful assistant_message (not 500)', async () => {
+    const app = createChatApp(appDeps());
+    const res = await app.request('/confirm', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingInteractionId: 'nope', sessionId: 'ghost', decision: 'confirm' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { kind: string };
+    expect(body.kind).toBe('assistant_message');
+  });
+
+  it('with a bad decision -> 400 rejected', async () => {
+    const app = createChatApp(appDeps());
+    const res = await app.request('/confirm', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingInteractionId: 'p', sessionId: 's', decision: 'maybe' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('chat auth gate runs before body parsing', () => {
   it('401 (not 400) for a malformed JSON body when the token is set but auth is missing', async () => {
     const app = createChatApp(appDeps());
