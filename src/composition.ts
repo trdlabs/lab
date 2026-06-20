@@ -233,6 +233,7 @@ export function composeRuntime() {
     backtestCallbackUrl: buildBacktestCallbackUrl(env.TRADING_LAB_CALLBACK_PUBLIC_URL, env.TRADING_LAB_CALLBACK_TOKEN),
     baselineVersion: env.TRADING_PLATFORM_BASELINE_VERSION,
     defaultPlatformRun: { datasetId: 'default', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-18' }, seed: 42 },
+    researchDefaultSymbol: 'ESPORTSUSDT',
   };
 
   const router = new WorkflowRouter();

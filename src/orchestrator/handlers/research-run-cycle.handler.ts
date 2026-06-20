@@ -76,7 +76,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     effectiveMax,
   }));
 
-  const symbol = payload.symbol ?? RESEARCH_DEFAULT_SYMBOL;
+  const symbol = payload.symbol ?? services.researchDefaultSymbol ?? RESEARCH_DEFAULT_SYMBOL;
   const ts = payload.ts ?? new Date().toISOString();
   const marketContext = await services.platform.getMarketContext(symbol, ts);
   const marketRegime = await services.platform.getMarketRegime(symbol, ts);

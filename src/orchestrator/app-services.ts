@@ -65,4 +65,6 @@ export interface AppServices {
   backtestCallbackUrl?: string;
   baselineVersion: string;
   defaultPlatformRun: { datasetId: string; symbols: string[]; timeframe: string; period: { from: string; to: string }; seed: number };
+  /** Symbol the research cycle defaults to when the task payload omits one. Demo sets this to a fixture symbol; production falls back to RESEARCH_DEFAULT_SYMBOL. */
+  researchDefaultSymbol?: string;
 }
