@@ -3,7 +3,7 @@ import type { TradeEvidenceBundle, TradeEvidenceQuery, TradeEvidenceReadPort } f
 const BUNDLE: TradeEvidenceBundle = {
   tradeId: 'mock_trade_001',
   runId: 'mock_run_001',
-  symbol: 'BTCUSDT',
+  symbol: 'ESPORTSUSDT',
   side: 'long',
   enteredAtMs: 1_700_000_100_000,
   closedAtMs: 1_700_000_200_000,

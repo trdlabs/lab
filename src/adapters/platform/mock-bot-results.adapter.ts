@@ -14,10 +14,10 @@ const RUN: BotRunRecord = {
   runId: 'mock_run_001', mode: 'paper', status: 'finished',
   strategy: { name: 'mock-strategy', version: '1.0.0' },
   startedAtMs: 1_700_000_000_000, finishedAtMs: 1_700_000_600_000, lastSeenMs: 1_700_000_600_000,
-  symbols: ['BTCUSDT'],
+  symbols: ['ESPORTSUSDT'],
 };
 const TRADE: ClosedTrade = {
-  tradeId: 'mock_trade_001', runId: 'mock_run_001', symbol: 'BTCUSDT', side: 'long',
+  tradeId: 'mock_trade_001', runId: 'mock_run_001', symbol: 'ESPORTSUSDT', side: 'long',
   openedAtMs: 1_700_000_100_000, closedAtMs: 1_700_000_200_000,
   realizedPnl: '12.50', pnlPct: '1.25', isWin: true, closeReason: 'take_profit',
 };
@@ -31,7 +31,7 @@ const EVENT: OperationalEvent = {
   tsMs: 1_700_000_300_000, safeMessage: 'risk warning',
 };
 const DECISION: DecisionLogEntry = {
-  category: 'entry', runId: 'mock_run_001', botId: 'mock-bot', symbol: 'BTCUSDT',
+  category: 'entry', runId: 'mock_run_001', botId: 'mock-bot', symbol: 'ESPORTSUSDT',
   side: 'long', reason: 'breakout', tsMs: 1_700_000_250_000, safeMessage: 'entered long',
 };
 const EVENTS_PAGE: EventsPage = {

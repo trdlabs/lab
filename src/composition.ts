@@ -232,7 +232,7 @@ export function composeRuntime() {
     platformPoll: { maxPolls: env.PLATFORM_RUN_MAX_POLLS, pollDelayMs: env.PLATFORM_RUN_POLL_DELAY_MS },
     backtestCallbackUrl: buildBacktestCallbackUrl(env.TRADING_LAB_CALLBACK_PUBLIC_URL, env.TRADING_LAB_CALLBACK_TOKEN),
     baselineVersion: env.TRADING_PLATFORM_BASELINE_VERSION,
-    defaultPlatformRun: { datasetId: 'default', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-12-31' }, seed: 42 },
+    defaultPlatformRun: { datasetId: 'default', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-18' }, seed: 42 },
   };
 
   const router = new WorkflowRouter();

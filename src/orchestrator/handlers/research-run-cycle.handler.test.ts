@@ -204,20 +204,20 @@ describe('researchRunCycleHandler', () => {
 
   it('gathers live bot-results (status=finished, symbol-filtered) and passes them to the researcher', async () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis BR')], researchSummary: 's' });
-    const services = makeServices({ researcher: cap.port }); // default MockBotResultsAdapter -> finished BTCUSDT run
+    const services = makeServices({ researcher: cap.port }); // default MockBotResultsAdapter -> finished ESPORTSUSDT run
     await seedProfile(services);
-    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'ESPORTSUSDT' }), services);
 
     const input = cap.captured();
     expect(input?.botResults?.length).toBe(1);
-    expect(input?.botResults?.[0]?.run.symbols).toContain('BTCUSDT');
+    expect(input?.botResults?.[0]?.run.symbols).toContain('ESPORTSUSDT');
     expect(typeof input?.botResults?.[0]?.summary.pnlUsd).toBe('string');
     expect(Array.isArray(input?.botResults?.[0]?.trades)).toBe(true);
   });
 
   it('filters out runs whose symbols do not include the cycle symbol', async () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis BR2')], researchSummary: 's' });
-    const services = makeServices({ researcher: cap.port }); // mock run is BTCUSDT only
+    const services = makeServices({ researcher: cap.port }); // mock run is ESPORTSUSDT only
     await seedProfile(services);
     await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'ETHUSDT' }), services);
     expect(cap.captured()?.botResults).toEqual([]);

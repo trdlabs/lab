@@ -34,8 +34,8 @@ export class MockResearchPlatformAdapter implements ResearchPlatformPort {
       datasets: [
         {
           datasetId: 'mock-ds-1',
-          symbols: ['BTCUSDT'],
-          dateRange: { from: '2023-01-01', to: '2023-12-31' },
+          symbols: ['ESPORTSUSDT'],
+          dateRange: { from: '2026-06-12', to: '2026-06-18' },
           timeframe: '1h',
           coveredKinds: [{ kind: 'funding', state: 'present' }],
         },
