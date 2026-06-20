@@ -17,7 +17,7 @@ services:
       MOCK_OPS_PORT: "8839"
       MOCK_OPS_TOKEN: "${MOCK_OPS_TOKEN:-}"
       MOCK_OPS_TOKENS: "${MOCK_OPS_TOKENS:?set MOCK_OPS_TOKENS to sha256-hex of MOCK_OPS_TOKEN}"
-      MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-16-synthetic}"
+      MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-12-real-top5}"
       MOCK_REPLAY_MODE: "${MOCK_REPLAY_MODE:-loop}"
       MOCK_REPLAY_SPEED: "${MOCK_REPLAY_SPEED:-1}"
     volumes:

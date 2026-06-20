@@ -409,7 +409,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 | `TRADING_BACKTESTER_PATH` | `../trading-backtester` | Путь к склонированному trading-backtester |
 | `MOCK_OPS_TOKEN` | `demo-ops-token` | Bearer-токен для запросов к mock-platform |
 | `MOCK_OPS_TOKENS` | `6dd4bdc5…` | SHA256-хеш (hex) `MOCK_OPS_TOKEN` — генерировать: `echo -n "$TOKEN" \| sha256sum` |
-| `MOCK_SNAPSHOT_REF` | `fixtures/2026-06-16-synthetic` | Имя снапшота с тестовыми данными |
+| `MOCK_SNAPSHOT_REF` | `fixtures/2026-06-12-real-top5` | Имя снапшота с тестовыми данными |
 | `BACKTESTER_AUTH_TOKEN` | `demo-backtester-token` | Bearer-токен для backtester |
 | `TRADING_LAB_TASK_TOKEN` | `demo-task-token` | Bearer-токен для POST /tasks (e2e) |
 | `TRADING_LAB_READ_TOKEN` | `demo-read-token` | Bearer-токен для GET /v1/* (e2e + smoke) |
@@ -417,7 +417,8 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 #### Снапшот для mock-platform
 
 `MOCK_SNAPSHOT_REF` задаёт директорию с тестовыми данными внутри образа (по умолчанию
-`fixtures/2026-06-16-synthetic` — синтетический снапшот, бандлится в образ, никаких дополнительных
+`fixtures/2026-06-12-real-top5`). Демо по умолчанию использует реальный срез из 5 символов (ESPORTSUSDT, HUSDT, SIRENUSDT, BEATUSDT, COAIUSDT), 73 сделки.
+Также доступен `fixtures/2026-06-16-synthetic` — синтетический снапшот, бандлится в образ, никаких дополнительных
 действий не требует). Для работы с реальными данными (срезы с июня 2026 из postgres/parquet
 с VPS) монтируй директорию снапшота и задай `MOCK_SNAPSHOT_REF`:
 
