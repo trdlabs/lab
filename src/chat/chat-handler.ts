@@ -236,13 +236,16 @@ async function executeConfirmedProposal(
   // Snapshot once so plan.createdAt/updatedAt, attachTask, and session.updatedAt
   // all share the same logical timestamp for this single operation.
   const ts = now();
+  // One correlationId for the entire turn so the chained plan and its onboard task
+  // share the same ID — ConversationFollower in trading-office filters by this value.
+  const correlationId = randomUUID();
 
   const intake = await createAndEnqueueTask(
     {
       taskType: proposal.task.taskType,
       source: proposal.source,
       payload: proposal.task.payload,
-      correlationId: randomUUID(),
+      correlationId,
       dedupeKey: proposal.task.dedupeKey,
     },
     { repo: deps.researchTasks, queue: deps.queue },
@@ -255,7 +258,7 @@ async function executeConfirmedProposal(
     const planId = randomUUID();
     await deps.plans.create({
       id: planId, sessionId: sid, afterTaskId: intake.taskId, nextTaskType: chain.nextTaskType,
-      resolveProfileByFingerprint: chain.resolveProfileByFingerprint, correlationId: randomUUID(),
+      resolveProfileByFingerprint: chain.resolveProfileByFingerprint, correlationId,
       status: 'pending', createdAt: ts, updatedAt: ts,
     });
     pendingPlanId = planId;

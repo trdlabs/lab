@@ -415,4 +415,36 @@ describe('handleChatMessage — confirmation consumption (second turn)', () => {
     expect((await sessions.get('s1'))?.pendingInteraction).toBeUndefined();
     expect(classifySpy).not.toHaveBeenCalled();
   });
+
+  it('confirmed chained proposal: onboard task and ChatPlan share the same correlationId', async () => {
+    // Regression guard for Q2/Defect A: executeConfirmedProposal was minting two
+    // separate randomUUID() values — one for createAndEnqueueTask and another for
+    // deps.plans.create — so ConversationFollower in trading-office, which subscribes
+    // to the onboard task's correlationId, never matched the chain plan's
+    // research.run_cycle.completed event (different correlationId) and fell back to "Done."
+    const researchMsg = 'исследуй эту стратегию: лонг при росте OI и падении цены';
+    const { d, queue, sessions, plans } = deps();
+
+    // Turn 1: propose the onboard+research chain.
+    const r = await handleChatMessage({ message: researchMsg, session: session(), source: 'web' }, d);
+    expect(r.kind).toBe('assistant_message');
+    const savedSession = await sessions.get('s1');
+
+    // Turn 2: confirm — this is where executeConfirmedProposal runs.
+    const confirmed = await handleChatMessage({ message: 'да', session: savedSession!, source: 'web' }, d);
+    expect(confirmed.kind).toBe('task_created');
+    if (confirmed.kind !== 'task_created') return;
+
+    // Capture the correlationId from the enqueued task envelope.
+    expect(queue.queued).toHaveLength(1);
+    const enqueuedCorrelationId = queue.queued[0]!.correlationId;
+
+    // Capture the correlationId from the created ChatPlan.
+    const plan = await plans.findPendingByAfterTaskId(confirmed.taskId);
+    expect(plan).not.toBeNull();
+    const planCorrelationId = plan!.correlationId;
+
+    // THE INVARIANT: one conversation turn = one correlationId.
+    expect(planCorrelationId).toBe(enqueuedCorrelationId);
+  });
 });
