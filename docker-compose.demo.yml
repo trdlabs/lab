@@ -46,6 +46,14 @@ services:
       BACKTESTER_DATA_SOURCE: "mock"
       BACKTESTER_MOCK_PLATFORM_URL: "http://mock-platform:8839"
       BACKTESTER_MOCK_PLATFORM_TOKEN: "${MOCK_OPS_TOKEN:-}"
+      # DooD sandbox: deliver per-run bundle + harness through a shared named volume so the
+      # sandbox `docker run` (host daemon) sees the same content the backtester writes.
+      BACKTESTER_SANDBOX_OVERLAY_VOLUME: "btx-sandbox"
+      BACKTESTER_SANDBOX_OVERLAY_VOLUME_MOUNTPOINT: "/sandbox-shared"
+    volumes:
+      # DooD: the sandbox runner spawns sibling containers on the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - btx-sandbox:/sandbox-shared
     expose:
       - "8080"
     ports:
@@ -109,3 +117,10 @@ services:
     depends_on:
       mock-platform:
         condition: service_healthy
+
+volumes:
+  # Pin the real volume name: the backtester references `btx-sandbox` literally via `docker run
+  # --mount src=btx-sandbox` against the HOST daemon. Without `name:`, compose would create
+  # `<project>_btx-sandbox` and the sandbox would mount a different, empty volume.
+  btx-sandbox:
+    name: btx-sandbox
