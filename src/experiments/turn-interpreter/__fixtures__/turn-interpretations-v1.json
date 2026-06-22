@@ -1,0 +1,316 @@
+{
+  "version": "turn-interpretations-v1",
+  "cases": [
+    {
+      "id": "ru-strategy-research-oi-long",
+      "lang": "ru",
+      "message": "Протестируй стратегию: лонг при росте открытого интереса на BTCUSDT-PERP 1h",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "symbol": "BTCUSDT", "timeframe": "1h", "direction": "long" }
+      }
+    },
+    {
+      "id": "en-strategy-research-no-constraints",
+      "lang": "en",
+      "message": "Take a look at this mean-reversion idea and tell me what you think",
+      "expect": {
+        "subject": "strategy",
+        "goal": "analyze",
+        "hasStrategyText": true,
+        "absentConstraints": ["symbol", "timeframe", "direction"]
+      }
+    },
+    {
+      "id": "ru-strategy-research-momentum-4h",
+      "lang": "ru",
+      "message": "Сделай моментум-стратегию на 4h",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "timeframe": "4h" },
+        "absentConstraints": ["symbol", "direction"]
+      }
+    },
+    {
+      "id": "en-strategy-analyze-rsi-divergence",
+      "lang": "en",
+      "message": "Analyze this RSI divergence approach: go long when RSI diverges from price on the 15m chart",
+      "expect": {
+        "subject": "strategy",
+        "goal": "analyze",
+        "hasStrategyText": true,
+        "constraints": { "timeframe": "15m", "direction": "long" },
+        "absentConstraints": ["symbol", "market"]
+      }
+    },
+    {
+      "id": "ru-strategy-research-funding-short",
+      "lang": "ru",
+      "message": "Исследуй стратегию: шорт при аномально высоком funding rate на ETHUSDT-PERP на 1h и 4h",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "symbol": "ETHUSDT", "direction": "short" }
+      }
+    },
+    {
+      "id": "en-strategy-show-similar",
+      "lang": "en",
+      "message": "Show me strategies similar to this VWAP reversion setup",
+      "expect": {
+        "subject": "strategy",
+        "goal": "show_similar",
+        "hasStrategyText": true,
+        "absentConstraints": ["symbol", "timeframe", "direction"]
+      }
+    },
+    {
+      "id": "ru-strategy-analyze-breakout",
+      "lang": "ru",
+      "message": "Как ты оцениваешь идею: пробой уровня поддержки на росте объёма?",
+      "expect": {
+        "subject": "strategy",
+        "goal": "analyze",
+        "hasStrategyText": true,
+        "absentConstraints": ["symbol", "timeframe", "direction", "market"]
+      }
+    },
+    {
+      "id": "en-bot-show-results",
+      "lang": "en",
+      "message": "Show me the bot performance over the last week",
+      "expect": {
+        "subject": "bot",
+        "goal": "show_results"
+      }
+    },
+    {
+      "id": "ru-bot-show-results",
+      "lang": "ru",
+      "message": "Покажи статистику бота за последние 7 дней",
+      "expect": {
+        "subject": "bot",
+        "goal": "show_results"
+      }
+    },
+    {
+      "id": "en-bot-analyze",
+      "lang": "en",
+      "message": "Analyze the bot's recent trades and explain why it underperformed",
+      "expect": {
+        "subject": "bot",
+        "goal": "analyze"
+      }
+    },
+    {
+      "id": "ru-results-show-last-backtest",
+      "lang": "ru",
+      "message": "Покажи результаты последнего бэктеста",
+      "expect": {
+        "subject": "results",
+        "goal": "show_results",
+        "references": ["last_backtest"]
+      }
+    },
+    {
+      "id": "en-results-show-last-backtest",
+      "lang": "en",
+      "message": "Show me the results from the last backtest run",
+      "expect": {
+        "subject": "results",
+        "goal": "show_results",
+        "references": ["last_backtest"]
+      }
+    },
+    {
+      "id": "ru-results-show-similar",
+      "lang": "ru",
+      "message": "Покажи похожие результаты на то, что мы запускали раньше",
+      "expect": {
+        "subject": "results",
+        "goal": "show_similar"
+      }
+    },
+    {
+      "id": "en-results-analyze",
+      "lang": "en",
+      "message": "Analyze the backtest results and highlight the worst drawdown periods",
+      "expect": {
+        "subject": "results",
+        "goal": "analyze"
+      }
+    },
+    {
+      "id": "ru-task-show-status",
+      "lang": "ru",
+      "message": "Что сейчас происходит с задачей исследования?",
+      "expect": {
+        "subject": "task",
+        "goal": "show_results"
+      }
+    },
+    {
+      "id": "en-task-show-status",
+      "lang": "en",
+      "message": "What is the status of the current research task?",
+      "expect": {
+        "subject": "task",
+        "goal": "show_results"
+      }
+    },
+    {
+      "id": "ru-task-analyze",
+      "lang": "ru",
+      "message": "Почему задача так долго выполняется?",
+      "expect": {
+        "subject": "task",
+        "goal": "analyze"
+      }
+    },
+    {
+      "id": "en-hypothesis-research",
+      "lang": "en",
+      "message": "Research this hypothesis: rising open interest with declining price predicts a short squeeze",
+      "expect": {
+        "subject": "hypothesis",
+        "goal": "research",
+        "hasStrategyText": true,
+        "absentConstraints": ["symbol", "timeframe", "direction"]
+      }
+    },
+    {
+      "id": "ru-hypothesis-analyze",
+      "lang": "ru",
+      "message": "Проверь гипотезу: аномальный объём перед разворотом тренда на дневках",
+      "expect": {
+        "subject": "hypothesis",
+        "goal": "analyze",
+        "hasStrategyText": true,
+        "constraints": { "timeframe": "1d" },
+        "absentConstraints": ["symbol", "direction"]
+      }
+    },
+    {
+      "id": "en-hypothesis-show-similar",
+      "lang": "en",
+      "message": "Find hypotheses similar to funding rate divergence predicting reversals",
+      "expect": {
+        "subject": "hypothesis",
+        "goal": "show_similar"
+      }
+    },
+    {
+      "id": "ru-unknown-weather",
+      "lang": "ru",
+      "message": "Какая сегодня погода в Москве?",
+      "expect": {
+        "subject": "unknown"
+      }
+    },
+    {
+      "id": "en-unknown-joke",
+      "lang": "en",
+      "message": "Tell me a joke",
+      "expect": {
+        "subject": "unknown"
+      }
+    },
+    {
+      "id": "ru-unknown-news",
+      "lang": "ru",
+      "message": "Что нового в мире за сегодня?",
+      "expect": {
+        "subject": "unknown"
+      }
+    },
+    {
+      "id": "en-unknown-offtopic",
+      "lang": "en",
+      "message": "What's the weather today?",
+      "expect": {
+        "subject": "unknown"
+      }
+    },
+    {
+      "id": "ru-antifab-timeframe-only",
+      "lang": "ru",
+      "message": "Сделай стратегию на основе RSI на часовом графике",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "timeframe": "1h" },
+        "absentConstraints": ["symbol", "direction", "market"]
+      }
+    },
+    {
+      "id": "en-antifab-no-constraints",
+      "lang": "en",
+      "message": "Research a scalping strategy for me",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": false,
+        "absentConstraints": ["symbol", "timeframe", "direction", "market"]
+      }
+    },
+    {
+      "id": "ru-antifab-no-direction",
+      "lang": "ru",
+      "message": "Протестируй стратегию пересечения скользящих на SOLUSDT 4h",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "symbol": "SOLUSDT", "timeframe": "4h" },
+        "absentConstraints": ["direction", "market"]
+      }
+    },
+    {
+      "id": "en-edge-ambiguous-results-or-bot",
+      "lang": "en",
+      "message": "How did we do yesterday?",
+      "expect": {
+        "subject": "results",
+        "goal": "show_results"
+      }
+    },
+    {
+      "id": "ru-edge-ambiguous-strategy-or-hypothesis",
+      "lang": "ru",
+      "message": "Как думаешь, стоит ли торговать лонг при пробое 50-дневной средней?",
+      "expect": {
+        "subject": "strategy",
+        "goal": "analyze",
+        "hasStrategyText": true,
+        "constraints": { "direction": "long" },
+        "absentConstraints": ["symbol", "timeframe", "market"]
+      }
+    },
+    {
+      "id": "en-edge-strategy-both-directions",
+      "lang": "en",
+      "message": "Test a mean-reversion strategy on BTCUSDT 1h, trade both longs and shorts",
+      "expect": {
+        "subject": "strategy",
+        "goal": "research",
+        "hasStrategyText": true,
+        "constraints": { "symbol": "BTCUSDT", "timeframe": "1h", "direction": "both" }
+      }
+    },
+    {
+      "id": "ru-results-with-goal-none",
+      "lang": "ru",
+      "message": "Есть ли у нас какие-то сохранённые результаты?",
+      "expect": {
+        "subject": "results",
+        "goal": "show_results"
+      }
+    }
+  ]
+}
