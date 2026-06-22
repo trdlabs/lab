@@ -105,6 +105,7 @@ services:
       OFFICE_PLATFORM_ENABLED: "true"
       TRADING_PLATFORM_READ_URL: "http://mock-platform:8839"
       TRADING_PLATFORM_READ_TOKEN: "${MOCK_OPS_TOKEN:-}"
+      OPERATOR_DOWNSTREAM_BACKTESTS: "true"
     depends_on:
       mock-platform:
         condition: service_healthy

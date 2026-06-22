@@ -14,7 +14,8 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 |---|-------|-------|
 | 1 | Confirmation core | ✅ Shipped (branch `feat/conversational-operator`) |
 | 2 | Operator RAG baseline | ✅ Shipped |
-| 3 | Meaningful completion replies | ✅ Shipped (lab #50 + office #11; PR2b backlog) |
+| 3 | Meaningful completion replies | ✅ Shipped (lab #50 + office #11) |
+| — | PR2b — downstream backtest surfacing | ✅ Shipped + live-verified + demo-enabled (lab #67 + office #16; flag `OPERATOR_DOWNSTREAM_BACKTESTS`) |
 | — | Operator confirmation UI (office) | ✅ Shipped (lab #59 PR-L + office #12 PR-O1 + #13 PR-O2; live-verified 2026-06-21; all follow-ups shipped — office #14 + lab #65 + office #15) |
 | — | Reranker follow-up | ✅ Scaffold shipped (#52; default OFF, enable deferred to independent corpus) |
 | 4 | Bot catalog + entity disambiguation | ⛔ Deferred — needs platform SDK + bot-identity DTO (see SDK initiative) |
@@ -81,14 +82,25 @@ Spec: `docs/superpowers/specs/2026-06-19-meaningful-completion-replies-design.md
 `docs/superpowers/plans/2026-06-19-meaningful-completion-replies-pr1-lab.md` (office PR2 plan lives in
 the trading-office repo).
 
-**PR2b (backlog) — downstream `backtest.completed` surfacing.** The run_cycle turn completes immediately
-("N backtests enqueued"); per-hypothesis backtest results arrive later as downstream tasks (same
-`correlationId`, different `taskId`) that the one-turn `ConversationFollower` does not watch. Surfacing
-them is a **cross-layer** feature, not a server-only follow-up — it needs (a) a per-conversation
-background follower keyed on `correlationId`, (b) a proactive-message protocol (the office chat is
-turn-based: `operatorTranscript` maps each reply to a user turn, so an unsolicited assistant message has
-no home today), and (c) web rendering for assistant-only / proactive messages. The lab endpoint already
-serves `backtest.completed`. Deserves its own brainstorm → design → plan.
+**PR2b — downstream `backtest.completed` surfacing — ✅ SHIPPED + live-verified + enabled (demo).**
+The run_cycle turn completes immediately ("N backtests enqueued"); per-hypothesis backtest results arrive
+later as downstream tasks (same `correlationId`, different `taskId`) the one-turn `ConversationFollower`
+never watched. Now surfaced incrementally as **proactive assistant messages**. Three layers, cross-repo:
+(a) **lab** emits a hand-authored terminal event `backtest.result_ready` from `backtestCompletedHandler`
+(symmetric with `research.run_cycle.completed`) — **lab PR #67** (→ main `846965a`); (b) **office** adds a
+process-lifetime `DownstreamBacktestWatcher` (subscribes the shared `StreamBridge`, resolves correlationId
+via the bootstrap-poll, dedups by taskId, fetches `completion-summary` with bounded retry + generic
+fallback, idle+hard-cap teardown) + a new `operator_assistant_message` gateway event + an `assistant_turn`
+web transcript turn (Q4 reducer untouched) + a `ChatTurn` render with no user bubble — **office PR #16**
+(→ main `b138441`). Behind `OPERATOR_DOWNSTREAM_BACKTESTS` (default OFF; **enabled in the demo stack**).
+Spec: `docs/superpowers/specs/2026-06-22-pr2b-downstream-backtest-surfacing-design.md`; plans:
+`docs/superpowers/plans/2026-06-22-pr2b-lab-backtest-result-ready.md` (office plan in the trading-office repo).
+**Live-verified 2026-06-22** on the demo stack end-to-end (chat → confirm → run_cycle → a `backtest.completed`
+task → real `backtest.result_ready` → watcher → visible proactive assistant message in the browser, with
+graceful metric degradation). Note: the demo backtester sandbox cannot execute nested-Docker backtests on
+WSL2 (`spawn docker ENOENT`, no DinD), so the terminal backtest result was injected via the internal
+`/tasks` ingress to stand in for the engine — every line of the PR2b path ran live; only the backtest's
+numeric outcome was simulated. Real organic backtest completion is blocked by the demo DinD gap, not PR2b.
 
 ### Operator confirmation UI (office)  — ✅ SHIPPED (incl. all follow-ups)
 The two-turn proposal/confirm flow is now usable in the trading-office web UI. **lab PR #59 (PR-L)**
