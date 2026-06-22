@@ -22,21 +22,8 @@ export function bestEffortSubject(raw: unknown): string {
   return typeof v === 'string' ? v : 'unknown';
 }
 
-/** Inject a default `constraints: {}` if the value is a plain object missing it.
- *  The schema requires constraints to be present; providers that omit the key entirely
- *  would otherwise always fail validation even when their other fields are correct. */
-function coerceConstraints(raw: unknown): unknown {
-  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
-  const r = raw as Record<string, unknown>;
-  if (r['constraints'] === undefined) {
-    return { ...r, constraints: {} };
-  }
-  return raw;
-}
-
 export function scoreCase(raw: unknown, c: EvalCase, latencyMs: number): CaseResult {
-  const normalized = coerceConstraints(normalizeTurnOutput(raw));
-  const parsed = TurnInterpretationSchema.safeParse(normalized);
+  const parsed = TurnInterpretationSchema.safeParse(normalizeTurnOutput(raw));
   if (!parsed.success) {
     return { id: c.id, lang: c.lang, schemaValid: false, score: 0, latencyMs, fields: {}, fabricatedCount: 0, subject: bestEffortSubject(raw) };
   }

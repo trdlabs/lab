@@ -21,13 +21,13 @@ describe('scoreCase', () => {
   });
 
   it('scores strategyText by presence vs expectation', () => {
-    const raw = { subject: 'strategy', references: [], confidence: 0.5 };
+    const raw = { subject: 'strategy', constraints: {}, references: [], confidence: 0.5 };
     const r = scoreCase(raw, C({ subject: 'strategy', hasStrategyText: false }), 10);
     expect(r.fields.strategyText).toBe(1);
   });
 
   it('goal:none rewards an absent goal', () => {
-    const raw = { subject: 'unknown', references: [], confidence: 0.5 };
+    const raw = { subject: 'unknown', constraints: {}, references: [], confidence: 0.5 };
     const r = scoreCase(raw, C({ subject: 'unknown', goal: 'none' }), 10);
     expect(r.fields.goal).toBe(1);
   });
