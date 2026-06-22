@@ -9,7 +9,7 @@
         "subject": "strategy",
         "goal": "research",
         "hasStrategyText": true,
-        "constraints": { "symbol": "BTCUSDT", "timeframe": "1h", "direction": "long" }
+        "constraints": { "symbol": "BTCUSDT-PERP", "timeframe": "1h", "direction": "long" }
       }
     },
     {
@@ -55,7 +55,7 @@
         "subject": "strategy",
         "goal": "research",
         "hasStrategyText": true,
-        "constraints": { "symbol": "ETHUSDT", "direction": "short" }
+        "constraints": { "symbol": "ETHUSDT-PERP", "direction": "short" }
       }
     },
     {
@@ -110,21 +110,21 @@
     {
       "id": "ru-results-show-last-backtest",
       "lang": "ru",
-      "message": "Покажи результаты последнего бэктеста",
+      "message": "Покажи результаты бэктеста run-42",
       "expect": {
         "subject": "results",
         "goal": "show_results",
-        "references": ["last_backtest"]
+        "references": ["run-42"]
       }
     },
     {
       "id": "en-results-show-last-backtest",
       "lang": "en",
-      "message": "Show me the results from the last backtest run",
+      "message": "Show me the results of backtest run-42",
       "expect": {
         "subject": "results",
         "goal": "show_results",
-        "references": ["last_backtest"]
+        "references": ["run-42"]
       }
     },
     {
