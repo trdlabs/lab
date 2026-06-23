@@ -18,7 +18,7 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 | — | PR2b — downstream backtest surfacing | ✅ Shipped + live-verified + demo-enabled (lab #67 + office #16; flag `OPERATOR_DOWNSTREAM_BACKTESTS`) |
 | — | Operator confirmation UI (office) | ✅ Shipped (lab #59 PR-L + office #12 PR-O1 + #13 PR-O2; live-verified 2026-06-21; all follow-ups shipped — office #14 + lab #65 + office #15) |
 | — | Reranker follow-up | ✅ Scaffold shipped (#52; default OFF, enable deferred to independent corpus) |
-| — | TurnInterpreter model env + IntentClassifier cleanup | ✅ Shipped (#69 eval + #71 dataset/prompt fixes → `gemini-3.1-flash-lite` selected; `TURN_INTERPRETER_MODEL` decoupled; legacy IntentClassifier removed) |
+| — | TurnInterpreter model env + IntentClassifier cleanup | ✅ Shipped (#69 eval + #71 dataset/prompt fixes → `gemini-3.1-flash-lite` selected; **#72 → main `0cc4cf2`** decouples `TURN_INTERPRETER_MODEL` + deletes the legacy IntentClassifier — operator = one LLM call) |
 | 4 | Bot catalog + entity disambiguation | ⛔ Deferred — needs platform SDK + bot-identity DTO (see SDK initiative) |
 | 5 | Researcher / Artifact RAG | ⛔ Deferred — needs backtester SDK artifact API (see SDK initiative) |
 | — | Phoenix observability | 🔜 Backlog |
@@ -194,13 +194,23 @@ Bounded corrective retrieval (retrieve → coverage check → at most one query
 rewrite → retrieve → disclose gaps), then full agentic only if multi-hop eval
 cases demonstrably fail single-shot/bounded retrieval.
 
-### TurnInterpreter live-model eval  — ✅ SHIPPED + env decoupled
-Eval shipped (#69) + dataset/prompt fixes (#71) — `gemini-3.1-flash-lite` selected as
-the operator interpreter model. The env was decoupled: `TURN_INTERPRETER_MODEL` /
-`TURN_INTERPRETER_ADAPTER` / `TURN_INTERPRETER_MIN_CONFIDENCE` replace the legacy
-`INTENT_CLASSIFIER_*` names (docker default updated to `openrouter/google/gemini-3.1-flash-lite`).
-The legacy `IntentClassifier` component (superseded by the TurnInterpreter in Slice 2, not on
-any live path) has been removed.
+### TurnInterpreter live-model eval + IntentClassifier removal  — ✅ SHIPPED
+Eval shipped (#69) + dataset/prompt fixes (#71) — `gemini-3.1-flash-lite` selected as the
+operator interpreter model (cheapest tier **and** top weighted-accuracy; fabrication fixed via
+the #71 prompt hardening). The cleanup landed in **lab PR #72 (→ main `0cc4cf2`)**:
+- **The legacy `IntentClassifier` component is fully deleted** — agents, judge, mastra + fake
+  adapters, port, chat `intent`/schema/normalize, the whole intent-classifier eval harness +
+  dataset + script + `intent:eval`. It was superseded by the `TurnInterpreter` in Slice 2 and
+  sat on no live path; a full `find_usages` sweep confirmed the two were parallel mirror copies
+  with no shared code. The operator now makes **exactly one LLM call per chat turn**.
+- **Env decoupled:** `TURN_INTERPRETER_MODEL` / `TURN_INTERPRETER_ADAPTER` /
+  `TURN_INTERPRETER_MIN_CONFIDENCE` replace the borrowed `INTENT_CLASSIFIER_*` names across
+  `env.ts`, `compose-mastra.ts`, `composition.ts`, the eval factories, docker-compose,
+  `.env*.example`, and README (docker default `openrouter/google/gemini-3.1-flash-lite`).
+
+Operator behavior is unchanged except the model. Spec:
+`docs/superpowers/specs/2026-06-22-turn-interpreter-model-env-design.md`; plan:
+`docs/superpowers/plans/2026-06-22-turn-interpreter-model-env.md`.
 
 ### Model cascade for hypotheses (cheap-first, escalate-on-failure)  — backlog
 Extend the existing research retry loop (`enqueueResearchRetry`, capped `MAX_CYCLE_DEPTH`) into a model
