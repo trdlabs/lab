@@ -13,7 +13,8 @@ import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
 import type { ActionProposal } from '../domain/action-proposal.ts';
 import { createAndEnqueueTask } from '../orchestrator/task-intake.ts';
-import { parseTurn, planChatAction, type PlanDecision, type PlatformRunConfig } from './guard.ts';
+import { parseTurn, planChatAction, type PlanDecision } from './guard.ts';
+import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
 import { buildActionProposal } from './action-proposal.ts';
 import { resolveConfirmationReply } from './confirmation-resolver.ts';
 import {
