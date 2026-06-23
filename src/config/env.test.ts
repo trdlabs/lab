@@ -212,3 +212,46 @@ describe('reranker env', () => {
     expect(env.OPERATOR_RERANK_TIMEOUT_MS).toBe(800);
   });
 });
+
+describe('loadEnv — agent adapter family default', () => {
+  const ADAPTERS = [
+    'STRATEGY_ANALYST_ADAPTER',
+    'RESEARCHER_ADAPTER',
+    'CRITIC_ADAPTER',
+    'BUILDER_ADAPTER',
+    'TURN_INTERPRETER_ADAPTER',
+  ] as const;
+
+  it('defaults every agent adapter to fake when nothing is set', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    for (const k of ADAPTERS) expect(env[k]).toBe('fake');
+  });
+
+  it('LAB_AGENTS_ADAPTER=mastra flips all five to mastra', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'mastra' } as NodeJS.ProcessEnv);
+    for (const k of ADAPTERS) expect(env[k]).toBe('mastra');
+  });
+
+  it('a per-agent value overrides the mastra family default', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'mastra', BUILDER_ADAPTER: 'fake' } as NodeJS.ProcessEnv);
+    expect(env.BUILDER_ADAPTER).toBe('fake');
+    expect(env.STRATEGY_ANALYST_ADAPTER).toBe('mastra');
+    expect(env.RESEARCHER_ADAPTER).toBe('mastra');
+    expect(env.CRITIC_ADAPTER).toBe('mastra');
+    expect(env.TURN_INTERPRETER_ADAPTER).toBe('mastra');
+  });
+
+  it('a per-agent mastra still works when the family default is fake', () => {
+    const env = loadEnv({ STRATEGY_ANALYST_ADAPTER: 'mastra' } as NodeJS.ProcessEnv);
+    expect(env.STRATEGY_ANALYST_ADAPTER).toBe('mastra');
+    expect(env.RESEARCHER_ADAPTER).toBe('fake');
+    expect(env.CRITIC_ADAPTER).toBe('fake');
+    expect(env.BUILDER_ADAPTER).toBe('fake');
+    expect(env.TURN_INTERPRETER_ADAPTER).toBe('fake');
+  });
+
+  it('an invalid LAB_AGENTS_ADAPTER falls back to fake', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'bogus' } as NodeJS.ProcessEnv);
+    for (const k of ADAPTERS) expect(env[k]).toBe('fake');
+  });
+});

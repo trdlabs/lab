@@ -99,6 +99,10 @@ function parseFloatOr(value: string | undefined, fallback: number): number {
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+  const agentsDefault: 'fake' | 'mastra' = source.LAB_AGENTS_ADAPTER === 'mastra' ? 'mastra' : 'fake';
+  const resolveAdapter = (v: string | undefined): 'fake' | 'mastra' =>
+    v === 'mastra' ? 'mastra' : v === 'fake' ? 'fake' : agentsDefault;
+
   return {
     DATABASE_URL: source.DATABASE_URL,
     REDIS_URL: source.REDIS_URL,
@@ -123,16 +127,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PLATFORM_RUN_MAX_POLLS: parsePositiveInt(source.PLATFORM_RUN_MAX_POLLS, 30),
     PLATFORM_RUN_POLL_DELAY_MS: parsePositiveInt(source.PLATFORM_RUN_POLL_DELAY_MS, 2000),
     TRADING_PLATFORM_BASELINE_VERSION: source.TRADING_PLATFORM_BASELINE_VERSION ?? 'v1',
-    STRATEGY_ANALYST_ADAPTER: source.STRATEGY_ANALYST_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    STRATEGY_ANALYST_ADAPTER: resolveAdapter(source.STRATEGY_ANALYST_ADAPTER),
     STRATEGY_ANALYST_MODEL: source.STRATEGY_ANALYST_MODEL ?? 'anthropic/claude-sonnet-4-6',
     ANTHROPIC_API_KEY: source.ANTHROPIC_API_KEY,
     RUN_LLM_TESTS: source.RUN_LLM_TESTS === 'true',
-    RESEARCHER_ADAPTER: source.RESEARCHER_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    RESEARCHER_ADAPTER: resolveAdapter(source.RESEARCHER_ADAPTER),
     RESEARCHER_MODEL: source.RESEARCHER_MODEL ?? 'anthropic/claude-sonnet-4-6',
-    CRITIC_ADAPTER: source.CRITIC_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    CRITIC_ADAPTER: resolveAdapter(source.CRITIC_ADAPTER),
     CRITIC_MODEL: source.CRITIC_MODEL ?? 'anthropic/claude-sonnet-4-6',
     MAX_HYPOTHESES_PER_CYCLE: parsePositiveInt(source.MAX_HYPOTHESES_PER_CYCLE, 5),
-    BUILDER_ADAPTER: source.BUILDER_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    BUILDER_ADAPTER: resolveAdapter(source.BUILDER_ADAPTER),
     BUILDER_MODEL: source.BUILDER_MODEL ?? 'anthropic/claude-sonnet-4-6',
     evaluatorThresholds: {
       minTrades: parsePositiveInt(source.EVAL_MIN_TRADES, DEFAULT_EVALUATOR_THRESHOLDS.minTrades),
@@ -145,7 +149,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     MODEL_PROVIDER: parseModelProvider(source.MODEL_PROVIDER),
     OPENAI_API_KEY: source.OPENAI_API_KEY,
     OPENROUTER_API_KEY: source.OPENROUTER_API_KEY,
-    TURN_INTERPRETER_ADAPTER: source.TURN_INTERPRETER_ADAPTER === 'mastra' ? 'mastra' : 'fake',
+    TURN_INTERPRETER_ADAPTER: resolveAdapter(source.TURN_INTERPRETER_ADAPTER),
     TURN_INTERPRETER_MODEL: source.TURN_INTERPRETER_MODEL ?? 'openrouter/google/gemini-3.1-flash-lite',
     TURN_INTERPRETER_MIN_CONFIDENCE: parseFloatOr(source.TURN_INTERPRETER_MIN_CONFIDENCE, 0.6),
     CHAT_MAX_MESSAGE_CHARS: parsePositiveInt(source.CHAT_MAX_MESSAGE_CHARS, 4000),
