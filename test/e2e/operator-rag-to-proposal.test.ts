@@ -42,6 +42,7 @@ function buildApp(retrieval: FakeOperatorRetrieval, interpreter: FakeTurnInterpr
     proposals: services.actionProposals,
     proposalTtlMs: 600_000,
     minConfidence: 0.6,
+    defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
     maxMessageChars: 4000,
     authToken: 'rag-e2e-token',
   });

@@ -257,6 +257,7 @@ export function composeRuntime() {
     proposals: services.actionProposals,
     proposalTtlMs: CHAT_PROPOSAL_TTL_MS,
     minConfidence: env.TURN_INTERPRETER_MIN_CONFIDENCE,
+    defaultPlatformRun: services.defaultPlatformRun,
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
     authToken: env.TRADING_LAB_CHAT_TOKEN,
   };

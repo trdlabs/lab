@@ -13,7 +13,7 @@ import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
 import type { ActionProposal } from '../domain/action-proposal.ts';
 import { createAndEnqueueTask } from '../orchestrator/task-intake.ts';
-import { parseTurn, planChatAction, type PlanDecision } from './guard.ts';
+import { parseTurn, planChatAction, type PlanDecision, type PlatformRunConfig } from './guard.ts';
 import { buildActionProposal } from './action-proposal.ts';
 import { resolveConfirmationReply } from './confirmation-resolver.ts';
 import {
@@ -35,6 +35,7 @@ export interface ChatHandlerDeps {
   /** Confirmation window for a proposed action — policy, not deployment tuning. */
   proposalTtlMs: number;
   minConfidence: number;
+  defaultPlatformRun: PlatformRunConfig;
 }
 
 export type ChatEvFn = (type: string, payload: Record<string, unknown>) => Promise<void>;
@@ -159,6 +160,7 @@ export async function handleChatMessage(input: HandleChatInput, deps: ChatHandle
     session: input.session,
     minConfidence: deps.minConfidence,
     deps: { researchTasks: deps.researchTasks, strategyProfiles: deps.strategyProfiles, hypotheses: deps.hypotheses },
+    defaultPlatformRun: deps.defaultPlatformRun,
   });
 
   if (decision.kind === 'respond') {

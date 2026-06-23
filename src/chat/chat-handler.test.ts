@@ -33,6 +33,7 @@ function deps(over: Partial<ChatHandlerDeps> = {}) {
     hypotheses: new InMemoryHypothesisProposalRepository(),
     events, queue, minConfidence: 0.6,
     proposals, proposalTtlMs: 600_000,
+    defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
     ...over,
   };
   return { d: base, researchTasks, queue, events, plans, sessions, proposals };

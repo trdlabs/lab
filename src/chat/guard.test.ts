@@ -27,9 +27,11 @@ function mkDeps() {
   };
 }
 
+const defaultPlatformRun = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
+
 function args(over: Partial<PlanArgs> = {}, deps = mkDeps()): { plan: PlanArgs; deps: ReturnType<typeof mkDeps> } {
   return {
-    plan: { message: 'm', session: session(), minConfidence: 0.6, deps, ...over },
+    plan: { message: 'm', session: session(), minConfidence: 0.6, deps, defaultPlatformRun, ...over },
     deps,
   };
 }
@@ -191,7 +193,21 @@ describe('planChatAction', () => {
     if (d.kind === 'propose_task') {
       expect(d.action).toBe('hypothesis.build');
       expect(d.taskType).toBe('hypothesis.build');
-      expect(d.payload).toEqual({ hypothesisId: 'h1', cycleDepth: 0 });
+      expect(d.payload).toEqual({ hypothesisId: 'h1', cycleDepth: 0, platformRun: defaultPlatformRun });
+    }
+  });
+
+  it('hypothesis subject includes defaultPlatformRun in payload', async () => {
+    const defaultPlatformRun = { datasetId: 'D:1h', symbols: ['D'], timeframe: '1h', period: { from: 'a', to: 'b' }, seed: 7 };
+    const { plan, deps } = args({ session: session({ lastStrategyProfileId: 'p1' }), defaultPlatformRun });
+    await deps.hypotheses.create(validatedHyp('h1', 'p1'));
+    await deps.strategyProfiles.create(profile('p1'));
+    const d = await planChatAction(turn({ subject: 'hypothesis', confidence: 0.9 }), plan);
+    expect(d.kind).toBe('propose_task');
+    if (d.kind === 'propose_task') {
+      expect(d.taskType).toBe('hypothesis.build');
+      expect(d.payload.hypothesisId).toBe('h1');
+      expect(d.payload.platformRun).toEqual(defaultPlatformRun);
     }
   });
 

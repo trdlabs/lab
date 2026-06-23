@@ -6,6 +6,9 @@ import { validateWithSchema } from '../validation/validator.ts';
 import { sourceFingerprint } from '../domain/fingerprint.ts';
 import { StrategyAnalystInputSchema, type SourceKind } from '../domain/strategy-source.ts';
 import { HypothesisBuildPayloadSchema } from '../orchestrator/handlers/hypothesis-build.handler.ts';
+import { z } from 'zod';
+
+export type PlatformRunConfig = NonNullable<z.infer<typeof HypothesisBuildPayloadSchema>['platformRun']>;
 import { TurnInterpretationSchema, type InterpretedTurn } from './turn-interpretation.ts';
 import { normalizeTurnOutput } from './normalize-turn-output.ts';
 import {
@@ -51,6 +54,7 @@ export interface PlanArgs {
   session: ChatSessionContext;
   minConfidence: number;
   deps: RefResolverDeps;
+  defaultPlatformRun: PlatformRunConfig;
 }
 
 function buildOnboardDecision(sid: string, userGoal: string, text: string, withResearch: boolean): PlanDecision {
@@ -122,7 +126,7 @@ export async function planChatAction(turn: InterpretedTurn, args: PlanArgs): Pro
     case 'hypothesis': {
       const hyp = await resolveBuildableHypothesis(session, deps);
       if (!hyp) return { kind: 'respond', response: needsClarification(sid, 'Какую гипотезу проверить? Сначала проведите исследование стратегии.', ['hypothesisId']) };
-      const payload = { hypothesisId: hyp.id };
+      const payload = { hypothesisId: hyp.id, platformRun: args.defaultPlatformRun };
       const v = validateWithSchema(HypothesisBuildPayloadSchema, payload);
       if (v.status === 'invalid') return { kind: 'respond', response: needsClarification(sid, 'Не удалось подготовить проверку гипотезы.', v.issues.map((i) => i.path)) };
       return { kind: 'propose_task', action: 'hypothesis.build', taskType: 'hypothesis.build', payload: v.data, userGoal: 'hypothesis.build' };
