@@ -1,7 +1,8 @@
 import type { AgentTaskType, TaskStatus } from '../domain/types.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
 import type { OperatorEvidence } from '../domain/strategy-retrieval.ts';
-import { ALLOWED_INTENTS } from './intent.ts';
+/** Human-readable labels for the subjects the turn interpreter handles. */
+const SUPPORTED_SUBJECTS = ['strategy.onboard', 'research.run_cycle', 'hypothesis.build', 'task.status', 'help', 'out_of_scope'] as const;
 
 export interface PlannedNextStep {
   taskType: AgentTaskType;
@@ -81,7 +82,7 @@ export function help(sessionId: string): Extract<ChatResponse, { kind: 'help' }>
   return {
     kind: 'help', sessionId,
     message: 'Я понимаю запросы Trading Lab: пришлите стратегию для онбординга/исследования, спросите статус задачи или последнюю гипотезу.',
-    supportedIntents: [...ALLOWED_INTENTS],
+    supportedIntents: [...SUPPORTED_SUBJECTS],
   };
 }
 

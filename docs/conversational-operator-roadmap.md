@@ -18,6 +18,7 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 | — | PR2b — downstream backtest surfacing | ✅ Shipped + live-verified + demo-enabled (lab #67 + office #16; flag `OPERATOR_DOWNSTREAM_BACKTESTS`) |
 | — | Operator confirmation UI (office) | ✅ Shipped (lab #59 PR-L + office #12 PR-O1 + #13 PR-O2; live-verified 2026-06-21; all follow-ups shipped — office #14 + lab #65 + office #15) |
 | — | Reranker follow-up | ✅ Scaffold shipped (#52; default OFF, enable deferred to independent corpus) |
+| — | TurnInterpreter model env + IntentClassifier cleanup | ✅ Shipped (#69 eval + #71 dataset/prompt fixes → `gemini-3.1-flash-lite` selected; `TURN_INTERPRETER_MODEL` decoupled; legacy IntentClassifier removed) |
 | 4 | Bot catalog + entity disambiguation | ⛔ Deferred — needs platform SDK + bot-identity DTO (see SDK initiative) |
 | 5 | Researcher / Artifact RAG | ⛔ Deferred — needs backtester SDK artifact API (see SDK initiative) |
 | — | Phoenix observability | 🔜 Backlog |
@@ -193,10 +194,13 @@ Bounded corrective retrieval (retrieve → coverage check → at most one query
 rewrite → retrieve → disclose gaps), then full agentic only if multi-hop eval
 cases demonstrably fail single-shot/bounded retrieval.
 
-### TurnInterpreter live-model eval
-Measure real-model interpretation quality (subject/goal/constraint extraction)
-with a labelled set, mirroring the intent-classifier eval harness. The current
-mastra adapter has a correct prompt but its live quality is unmeasured.
+### TurnInterpreter live-model eval  — ✅ SHIPPED + env decoupled
+Eval shipped (#69) + dataset/prompt fixes (#71) — `gemini-3.1-flash-lite` selected as
+the operator interpreter model. The env was decoupled: `TURN_INTERPRETER_MODEL` /
+`TURN_INTERPRETER_ADAPTER` / `TURN_INTERPRETER_MIN_CONFIDENCE` replace the legacy
+`INTENT_CLASSIFIER_*` names (docker default updated to `openrouter/google/gemini-3.1-flash-lite`).
+The legacy `IntentClassifier` component (superseded by the TurnInterpreter in Slice 2, not on
+any live path) has been removed.
 
 ### Model cascade for hypotheses (cheap-first, escalate-on-failure)  — backlog
 Extend the existing research retry loop (`enqueueResearchRetry`, capped `MAX_CYCLE_DEPTH`) into a model

@@ -5,7 +5,6 @@ import { createStrategyAnalystAgent, STRATEGY_ANALYST_AGENT_ID } from './strateg
 import { createResearcherAgent, RESEARCHER_AGENT_ID } from './researcher.agent.ts';
 import { createCriticAgent, CRITIC_AGENT_ID } from './critic.agent.ts';
 import { createBuilderAgent, BUILDER_AGENT_ID } from './builder.agent.ts';
-import { createIntentClassifierAgent, INTENT_CLASSIFIER_AGENT_ID } from './intent-classifier.agent.ts';
 import { createTurnInterpreterAgent, TURN_INTERPRETER_AGENT_ID } from './turn-interpreter.agent.ts';
 
 const model = createAnthropic({ apiKey: 'dummy' })('claude-sonnet-4-6');
@@ -17,10 +16,9 @@ describe('mastra agent factories', () => {
       [createResearcherAgent(model), RESEARCHER_AGENT_ID, 'Researcher'],
       [createCriticAgent(model), CRITIC_AGENT_ID, 'Critic'],
       [createBuilderAgent(model), BUILDER_AGENT_ID, 'Builder'],
-      [createIntentClassifierAgent(model), INTENT_CLASSIFIER_AGENT_ID, 'Intent Classifier'],
       [createTurnInterpreterAgent(model), TURN_INTERPRETER_AGENT_ID, 'Turn Interpreter'],
     ] as const;
-    expect(cases).toHaveLength(6);
+    expect(cases).toHaveLength(5);
     for (const [agent, id, name] of cases) {
       expect(agent.id).toBe(id);
       expect(agent.name).toBe(name);

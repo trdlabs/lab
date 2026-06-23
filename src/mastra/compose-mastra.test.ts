@@ -8,7 +8,7 @@ const base: MastraCompositionEnv = {
   STRATEGY_ANALYST_ADAPTER: 'fake', STRATEGY_ANALYST_MODEL: 'anthropic/claude-sonnet-4-6',
   RESEARCHER_ADAPTER: 'fake', RESEARCHER_MODEL: 'anthropic/claude-sonnet-4-6',
   CRITIC_ADAPTER: 'fake', CRITIC_MODEL: 'anthropic/claude-sonnet-4-6', ENABLE_CRITIC_AGENT: false,
-  INTENT_CLASSIFIER_ADAPTER: 'fake', INTENT_CLASSIFIER_MODEL: 'anthropic/claude-haiku-4-5-20251001',
+  TURN_INTERPRETER_ADAPTER: 'fake', TURN_INTERPRETER_MODEL: 'openrouter/google/gemini-3.1-flash-lite',
   BUILDER_ADAPTER: 'fake', BUILDER_MODEL: 'anthropic/claude-sonnet-4-6',
 };
 
@@ -20,7 +20,21 @@ describe('composeMastra', () => {
     expect(rt.agents.researcher).toBeUndefined();
     expect(rt.agents.critic).toBeUndefined();
     expect(rt.agents.builder).toBeUndefined();
-    expect(rt.agents.intentClassifier).toBeUndefined();
+    expect(rt.agents.turnInterpreter).toBeUndefined();
+    expect('intentClassifier' in rt.agents).toBe(false); // the dormant agent is gone
+  });
+
+  it('builds the turn interpreter from TURN_INTERPRETER_MODEL when adapter=mastra', () => {
+    const env = { ...base, TURN_INTERPRETER_ADAPTER: 'mastra' as const,
+      TURN_INTERPRETER_MODEL: 'anthropic/claude-haiku-4-5-20251001' } as const;
+    const rt = composeMastra(env);
+    expect(rt.agents.turnInterpreter?.label).toContain('claude-haiku');
+    expect('intentClassifier' in rt.agents).toBe(false); // the dormant agent is gone
+  });
+
+  it('skips the turn interpreter when TURN_INTERPRETER_ADAPTER is fake', () => {
+    const env = { ...base, TURN_INTERPRETER_ADAPTER: 'fake' as const };
+    expect(composeMastra(env).agents.turnInterpreter).toBeUndefined();
   });
 
   it('registers a mastra-mode role with its label and leaves fake roles undefined', () => {

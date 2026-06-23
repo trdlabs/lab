@@ -6,7 +6,7 @@ import { normalizeTurnOutput } from '../../chat/normalize-turn-output.ts';
 import { TurnInterpretationSchema } from '../../chat/turn-interpretation.ts';
 import { loadEnv } from '../../config/env.ts';
 import { resolveLanguageModel } from '../llm/model-provider.ts';
-import { createIntentClassifierAgent } from '../../mastra/agents/intent-classifier.agent.ts';
+import { createTurnInterpreterAgent } from '../../mastra/agents/turn-interpreter.agent.ts';
 
 type GenArgs = { prompt: string; options: { structuredOutput?: { schema?: unknown; errorStrategy?: string } } };
 
@@ -30,7 +30,7 @@ describe('MastraTurnInterpreter (construction)', () => {
       'anthropic/claude-haiku-4-5-20251001',
     );
     const { agent } = mockAgent({ object: { subject: 'unknown', constraints: {}, references: [], confidence: 0.5 } });
-    // Inline agent construction mirrors how MastraIntentClassifier works.
+    // Inline agent construction mirrors how MastraTurnInterpreter works.
     const interp = new MastraTurnInterpreter(agent, label);
     expect(interp.adapter).toBe('mastra');
     expect(interp.model).toBe('anthropic/claude-haiku-4-5-20251001');
@@ -105,9 +105,8 @@ const live = env.RUN_LLM_TESTS && env.ANTHROPIC_API_KEY ? describe : describe.sk
 
 live('MastraTurnInterpreter (live LLM)', () => {
   it('interprets a strategy message', async () => {
-    const { model, label } = resolveLanguageModel(env, env.INTENT_CLASSIFIER_MODEL);
-    // Reuse the intent-classifier agent factory until a dedicated turn-interpreter agent exists.
-    const agent = createIntentClassifierAgent(model);
+    const { model, label } = resolveLanguageModel(env, env.TURN_INTERPRETER_MODEL);
+    const agent = createTurnInterpreterAgent(model);
     const interp = new MastraTurnInterpreter(agent, label);
     const raw = await interp.interpret('Лонг на 1m. Вход при росте OI.');
     const normalized = normalizeTurnOutput(raw);

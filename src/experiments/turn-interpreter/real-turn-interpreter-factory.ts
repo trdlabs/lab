@@ -31,8 +31,8 @@ export function buildRealInterpreterFor(baseEnv: ModelProviderEnv): (modelId: st
   return (modelId: string) => {
     const env: MastraCompositionEnv = {
       ...baseEnv,
-      INTENT_CLASSIFIER_ADAPTER: 'mastra',
-      INTENT_CLASSIFIER_MODEL: modelId,
+      TURN_INTERPRETER_ADAPTER: 'mastra',
+      TURN_INTERPRETER_MODEL: modelId,
       STRATEGY_ANALYST_ADAPTER: 'fake',
       STRATEGY_ANALYST_MODEL: 'fake',
       RESEARCHER_ADAPTER: 'fake',
@@ -45,7 +45,7 @@ export function buildRealInterpreterFor(baseEnv: ModelProviderEnv): (modelId: st
     };
     const runtime = composeMastra(env);
     const entry = runtime.agents.turnInterpreter;
-    if (!entry) throw new Error('turn-interpreter agent was not composed (check INTENT_CLASSIFIER_ADAPTER)');
+    if (!entry) throw new Error('turn-interpreter agent was not composed (check TURN_INTERPRETER_ADAPTER)');
     return new MastraTurnInterpreter(entry.agent, entry.label);
   };
 }

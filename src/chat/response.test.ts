@@ -3,7 +3,6 @@ import {
   outOfScope, help, capabilityNotAvailable, needsClarification,
   taskCreated, taskStatus, rejected, errorResponse,
 } from './response.ts';
-import { ALLOWED_INTENTS } from './intent.ts';
 
 describe('ChatResponse builders', () => {
   it('out_of_scope carries the sessionId and a static message', () => {
@@ -16,7 +15,7 @@ describe('ChatResponse builders', () => {
   it('help lists the supported intents', () => {
     const r = help('s1');
     expect(r.kind).toBe('help');
-    expect(r.supportedIntents).toEqual([...ALLOWED_INTENTS]);
+    expect(r.supportedIntents).toEqual(['strategy.onboard', 'research.run_cycle', 'hypothesis.build', 'task.status', 'help', 'out_of_scope']);
   });
 
   it('capability_not_available names the capability', () => {

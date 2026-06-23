@@ -85,10 +85,10 @@ async function main(): Promise<number> {
   const timestamp = compactTimestamp(now);
   const outDir = `.artifacts/experiments/turn-interpreter/${args.datasetId}/${timestamp}`;
 
-  // Env recommendation: incumbent = INTENT_CLASSIFIER_MODEL (shared env, same as intent classifier)
+  // Env recommendation: incumbent = TURN_INTERPRETER_MODEL (the active turn interpreter model)
   const ranked = rankAggregates(result.aggregates, result.manifest.judgeEnabled);
   const rec: EnvRecommendation = recommendEnv(ranked, {
-    incumbentModelId: process.env.INTENT_CLASSIFIER_MODEL ?? '',
+    incumbentModelId: process.env.TURN_INTERPRETER_MODEL ?? '',
     threshold: args.threshold,
   });
 

@@ -94,7 +94,7 @@ function buildCritic(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): Critic
 function buildTurnInterpreter(rt: MastraRuntime): TurnInterpreterPort {
   const e = rt.agents.turnInterpreter;
   if (e) return new MastraTurnInterpreter(e.agent, e.label);
-  console.warn('[composition] INTENT_CLASSIFIER_ADAPTER is not "mastra"; using FakeTurnInterpreter (rule-based)');
+  console.warn('[composition] TURN_INTERPRETER_ADAPTER is not "mastra"; using FakeTurnInterpreter (rule-based)');
   return new FakeTurnInterpreter();
 }
 
@@ -138,7 +138,7 @@ export function buildOperatorRag(
   // the future enable-slice (gated on an independent eval corpus).
   let reranker: RerankerPort | undefined;
   if (env.OPERATOR_RERANKER === 'mastra') {
-    const scorer = createRerankerScorer(resolveLanguageModel(env, env.INTENT_CLASSIFIER_MODEL).model);
+    const scorer = createRerankerScorer(resolveLanguageModel(env, env.TURN_INTERPRETER_MODEL).model);
     reranker = new MastraRerankerAdapter(scorer);
   }
   const rerankConfig: RerankConfig = {
@@ -256,7 +256,7 @@ export function composeRuntime() {
     queue,
     proposals: services.actionProposals,
     proposalTtlMs: CHAT_PROPOSAL_TTL_MS,
-    minConfidence: env.INTENT_CLASSIFIER_MIN_CONFIDENCE,
+    minConfidence: env.TURN_INTERPRETER_MIN_CONFIDENCE,
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
     authToken: env.TRADING_LAB_CHAT_TOKEN,
   };

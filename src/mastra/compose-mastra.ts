@@ -6,7 +6,6 @@ import { createStrategyAnalystAgent, STRATEGY_ANALYST_AGENT_ID } from './agents/
 import { createResearcherAgent, RESEARCHER_AGENT_ID } from './agents/researcher.agent.ts';
 import { createCriticAgent, CRITIC_AGENT_ID } from './agents/critic.agent.ts';
 import { createBuilderAgent, BUILDER_AGENT_ID } from './agents/builder.agent.ts';
-import { createIntentClassifierAgent, INTENT_CLASSIFIER_AGENT_ID } from './agents/intent-classifier.agent.ts';
 import { createTurnInterpreterAgent, TURN_INTERPRETER_AGENT_ID } from './agents/turn-interpreter.agent.ts';
 
 export interface MastraCompositionEnv extends ModelProviderEnv {
@@ -17,8 +16,8 @@ export interface MastraCompositionEnv extends ModelProviderEnv {
   CRITIC_ADAPTER: 'fake' | 'mastra';
   CRITIC_MODEL: string;
   ENABLE_CRITIC_AGENT: boolean;
-  INTENT_CLASSIFIER_ADAPTER: 'fake' | 'mastra';
-  INTENT_CLASSIFIER_MODEL: string;
+  TURN_INTERPRETER_ADAPTER: 'fake' | 'mastra';
+  TURN_INTERPRETER_MODEL: string;
   BUILDER_ADAPTER: 'fake' | 'mastra';
   BUILDER_MODEL: string;
 }
@@ -35,7 +34,6 @@ export interface MastraRuntime {
     researcher?: MastraAgentEntry;
     critic?: MastraAgentEntry;
     builder?: MastraAgentEntry;
-    intentClassifier?: MastraAgentEntry;
     turnInterpreter?: MastraAgentEntry;
   };
 }
@@ -54,9 +52,7 @@ export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
   if (env.RESEARCHER_ADAPTER === 'mastra') build(RESEARCHER_AGENT_ID, env.RESEARCHER_MODEL, createResearcherAgent);
   if (env.ENABLE_CRITIC_AGENT && env.CRITIC_ADAPTER === 'mastra') build(CRITIC_AGENT_ID, env.CRITIC_MODEL, createCriticAgent);
   if (env.BUILDER_ADAPTER === 'mastra') build(BUILDER_AGENT_ID, env.BUILDER_MODEL, createBuilderAgent);
-  if (env.INTENT_CLASSIFIER_ADAPTER === 'mastra') build(INTENT_CLASSIFIER_AGENT_ID, env.INTENT_CLASSIFIER_MODEL, createIntentClassifierAgent);
-  // The chat turn interpreter shares the intent-classifier role/model selection.
-  if (env.INTENT_CLASSIFIER_ADAPTER === 'mastra') build(TURN_INTERPRETER_AGENT_ID, env.INTENT_CLASSIFIER_MODEL, createTurnInterpreterAgent);
+  if (env.TURN_INTERPRETER_ADAPTER === 'mastra') build(TURN_INTERPRETER_AGENT_ID, env.TURN_INTERPRETER_MODEL, createTurnInterpreterAgent);
 
   const mastra = new Mastra({ agents: registry });
 
@@ -72,7 +68,6 @@ export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
       researcher: entry(RESEARCHER_AGENT_ID),
       critic: entry(CRITIC_AGENT_ID),
       builder: entry(BUILDER_AGENT_ID),
-      intentClassifier: entry(INTENT_CLASSIFIER_AGENT_ID),
       turnInterpreter: entry(TURN_INTERPRETER_AGENT_ID),
     },
   };

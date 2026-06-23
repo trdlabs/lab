@@ -18,8 +18,8 @@ export function buildRealResearcherFor(baseEnv: ModelProviderEnv): (modelId: str
       CRITIC_ADAPTER: 'fake',
       CRITIC_MODEL: 'fake',
       ENABLE_CRITIC_AGENT: false,
-      INTENT_CLASSIFIER_ADAPTER: 'fake',
-      INTENT_CLASSIFIER_MODEL: 'fake',
+      TURN_INTERPRETER_ADAPTER: 'fake',
+      TURN_INTERPRETER_MODEL: 'fake',
       BUILDER_ADAPTER: 'fake',
       BUILDER_MODEL: 'fake',
     };

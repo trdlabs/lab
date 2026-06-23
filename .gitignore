@@ -25,3 +25,7 @@ docs/eval-outputs/
 
 # dev orchestration env (generated from .env.dev.example)
 .env.dev
+
+# Vim swap files
+*.swp
+.env.swp
