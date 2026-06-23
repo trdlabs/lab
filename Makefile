@@ -1,9 +1,9 @@
 # Thin wrappers around the documented docker compose commands.
 .PHONY: demo local vps dev down smoke e2e cross-repo-e2e config
 
-# demo pulls the lab/mock-platform/backtester images from GHCR (no in-container
-# SDK fetch — the build happened on CI), then `up` builds only office from source.
-# --ignore-buildable skips the office services during pull.
+# demo pulls every first-party image (lab / mock-platform / backtester / office)
+# from GHCR — built on CI, nothing compiled locally — then `up`. --ignore-buildable
+# is a safety net should any service be switched back to a source build.
 demo: .env.demo
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo pull --ignore-buildable
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up

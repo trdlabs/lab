@@ -8,8 +8,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml \
 #     --env-file .env.demo up
 #
-# The mock-platform / backtester / lab images are pulled from GHCR (built by each
-# repo's "Publish image" workflow); only office-{web,server} build from source.
+# All first-party images (lab / mock-platform / backtester / office-{web,server})
+# are pulled from GHCR, built by each repo's "Publish image" workflow — the demo
+# compiles nothing from source.
 services:
 
   # ── mock-platform (Ops Read + snapshot replay) ─────────────────────────────
@@ -109,13 +110,18 @@ services:
       backtester:
         condition: service_healthy
 
-  # ── office: expose on loopback + enable mock-platform read surface ──────────
+  # ── office: pull from GHCR (the web bundle bakes the loopback gateway URL at
+  #    build time, so the demo's default localhost origin is already correct) ──
   office-web:
+    build: !reset null
+    image: ghcr.io/alexnikolskiy/trading-office-web:${OFFICE_WEB_IMAGE_TAG:-latest}
     ports:
       - "127.0.0.1:${OFFICE_WEB_PORT:-8080}:80"
     restart: "no"
 
   office-server:
+    build: !reset null
+    image: ghcr.io/alexnikolskiy/trading-office-server:${OFFICE_SERVER_IMAGE_TAG:-latest}
     ports:
       - "127.0.0.1:${OFFICE_SERVER_PORT:-8787}:8787"
     restart: "no"
