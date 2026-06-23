@@ -513,7 +513,7 @@ pnpm worker     # потребитель очереди → WorkflowRouter → h
 Чат — классификация намерения и планирование задачи:
 ```bash
 curl -s http://localhost:3000/chat/messages \
-  -H "authorization: Bearer dev-chat-token" \
+  -H "authorization: Bearer demo-chat-token" \
   -H "content-type: application/json" \
   -d '{"message":"проанализируй мою стратегию и предложи улучшения","channel":"web"}'
 ```
@@ -521,7 +521,7 @@ curl -s http://localhost:3000/chat/messages \
 Постановка задачи напрямую (оператор/cron):
 ```bash
 curl -s http://localhost:3000/tasks \
-  -H "authorization: Bearer dev-task-token" \
+  -H "authorization: Bearer demo-task-token" \
   -H "content-type: application/json" \
   -d '{"taskType":"strategy.onboard","source":"operator","correlationId":"demo-1","payload":{ /* исходник стратегии */ }}'
 ```
