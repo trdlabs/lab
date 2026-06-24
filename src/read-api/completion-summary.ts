@@ -102,12 +102,16 @@ async function buildBacktestCompleted(deps: CompletionSummaryDeps, task: Researc
   const run: BacktestRun | null = p.backtestRunId ? await safe('backtest_read_failed', () => deps.backtests.getById(p.backtestRunId!)) : null;
   const hyp = p.hypothesisId ? await safe('hypothesis_read_failed', () => deps.hypotheses.getById(p.hypothesisId!)) : null;
   const profile = p.strategyProfileId ? await safe('profile_read_failed', () => deps.strategyProfiles.findById(p.strategyProfileId!)) : null;
+  const tokenStop = (await safe('events_read_failed', () =>
+    deps.agentEvents.list({ taskId: task.id, type: 'research.token_budget_exhausted', limit: 1 }))) ?? [];
+  const tokenBudgetExhausted = tokenStop.length > 0;
+  const finalReasons = tokenBudgetExhausted ? [...reasons, 'token_budget_exhausted'] : reasons;
   return {
     kind: 'backtest.completed', taskId: task.id, status: task.status,
     profile: profile ? toProfileRef(profile) : null,
     hypothesis: hyp ? toHypothesisRef(hyp) : null,
-    decision, metrics: toKeyMetrics(run?.metrics ?? null), reasons,
-    willRetry: (decision === 'FAIL' || decision === 'MODIFY') && cycleDepth < MAX_CYCLE_DEPTH,
+    decision, metrics: toKeyMetrics(run?.metrics ?? null), reasons: finalReasons,
+    willRetry: (decision === 'FAIL' || decision === 'MODIFY') && cycleDepth < MAX_CYCLE_DEPTH && !tokenBudgetExhausted,
     links: { taskId: task.id, profileId: p.strategyProfileId, hypothesisId: p.hypothesisId, backtestRunId: p.backtestRunId },
     warnings,
   };

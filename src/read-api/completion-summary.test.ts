@@ -232,6 +232,37 @@ describe('buildCompletionSummary — strategy.onboard', () => {
   });
 });
 
+describe('buildCompletionSummary — token budget exhausted', () => {
+  it('marks willRetry false and surfaces the reason when the token budget was exhausted', async () => {
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => completedTask({
+        payload: { decision: 'FAIL', cycleDepth: 0, strategyProfileId: 'p1', reasons: ['profit factor low'] },
+      }) },
+      agentEvents: { list: async ({ type }: { type?: string }) =>
+        type === 'research.token_budget_exhausted'
+          ? [{ payload: { cumulativeTokens: 5000, budgetTokens: 1000 } }]
+          : [] },
+    });
+    const summary = await buildCompletionSummary(deps, 't1');
+    expect(summary?.kind).toBe('backtest.completed');
+    expect((summary as unknown as { willRetry: boolean }).willRetry).toBe(false);
+    expect((summary as unknown as { reasons: string[] }).reasons).toContain('token_budget_exhausted');
+  });
+
+  it('leaves willRetry and reasons unchanged when no token budget event exists', async () => {
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => completedTask({
+        payload: { decision: 'FAIL', cycleDepth: 0, reasons: ['profit factor low'] },
+      }) },
+      agentEvents: { list: async () => [] },
+    });
+    const summary = await buildCompletionSummary(deps, 't1');
+    expect(summary?.kind).toBe('backtest.completed');
+    expect((summary as unknown as { willRetry: boolean }).willRetry).toBe(true); // FAIL && depth 0 < 2
+    expect((summary as unknown as { reasons: string[] }).reasons).not.toContain('token_budget_exhausted');
+  });
+});
+
 describe('buildCompletionSummary — null contract', () => {
   it('returns null for an unknown task', async () => {
     expect(await buildCompletionSummary(fakeDeps(), 'missing')).toBeNull();
