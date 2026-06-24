@@ -77,6 +77,12 @@ services:
     restart: "no"
     networks: [trading]
 
+  # ── phoenix UI (loopback only; open http://localhost:6006) ──
+  phoenix:
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+    restart: "no"
+
   # ── lab services: pull the lab image from GHCR (!reset drops the base anchor's
   #    `build:` so the demo never compiles lab from source) + wire mock+backtester ──
   ingress:

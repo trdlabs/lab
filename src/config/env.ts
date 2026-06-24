@@ -44,6 +44,12 @@ export interface Env {
   AGENT_ACTIVITY_TRACE_LIMIT: number;
   AGENT_EVENT_STREAM_SAFETY_TICK_MS: number;
   AGENT_EVENT_STREAM_HEARTBEAT_MS: number;
+  /** Feature flag: export Mastra agent traces to a self-hosted Phoenix (default: false). */
+  PHOENIX_ENABLED: boolean;
+  /** Phoenix OTLP HTTP collector endpoint (default: http://localhost:6006/v1/traces; docker: http://phoenix:6006/v1/traces). */
+  PHOENIX_COLLECTOR_ENDPOINT: string;
+  /** Phoenix project name / OTel serviceName (default: trading-lab). */
+  PHOENIX_PROJECT_NAME: string;
   /** Feature flag: enable operator RAG retrieval (default: false). */
   OPERATOR_RAG_ENABLED: boolean;
   /** Embedding provider for operator strategy retrieval (default: 'openrouter'). */
@@ -153,6 +159,9 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     AGENT_ACTIVITY_TRACE_LIMIT: parsePositiveInt(source.AGENT_ACTIVITY_TRACE_LIMIT, 50),
     AGENT_EVENT_STREAM_SAFETY_TICK_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_SAFETY_TICK_MS, 5000),
     AGENT_EVENT_STREAM_HEARTBEAT_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_HEARTBEAT_MS, 15000),
+    PHOENIX_ENABLED: source.PHOENIX_ENABLED === 'true',
+    PHOENIX_COLLECTOR_ENDPOINT: source.PHOENIX_COLLECTOR_ENDPOINT ?? 'http://localhost:6006/v1/traces',
+    PHOENIX_PROJECT_NAME: source.PHOENIX_PROJECT_NAME ?? 'trading-lab',
     ...loadRagEnv(source),
   };
 }

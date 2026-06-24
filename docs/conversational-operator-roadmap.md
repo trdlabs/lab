@@ -21,7 +21,7 @@ stay behind the deterministic guard. Research-only — no live trading / executi
 | — | TurnInterpreter model env + IntentClassifier cleanup | ✅ Shipped (#69 eval + #71 dataset/prompt fixes → `gemini-3.1-flash-lite` selected; **#72 → main `0cc4cf2`** decouples `TURN_INTERPRETER_MODEL` + deletes the legacy IntentClassifier — operator = one LLM call) |
 | 4 | Bot catalog + entity disambiguation | ⛔ Deferred — SDK split shipped (0.5.0 ops-read), but still needs a stable **bot-identity DTO** surface; confirm against 0.5.0 before starting |
 | 5 | Researcher / Artifact RAG | ⛔ Deferred — SDK split shipped, but still needs the **backtester artifact API** surface; confirm before starting |
-| — | Phoenix observability | 🔜 Backlog |
+| — | Phoenix observability | ✅ Tracing slice shipped (Mastra-native `@mastra/arize` → self-hosted Phoenix, all overlays; custom attrs / datasets / metrics = follow-ups) |
 | — | Answer Synthesizer (optional) | 🔜 Backlog |
 | — | Agentic RAG (bounded corrective) | 🕓 Later (only if eval justifies) |
 | — | SDK boundaries + distribution (cross-cutting) | ✅ Shipped (platform Stage 4 PR #11 + lab mcp-retirement **#75 → main `75b4d37`**); lab on `@trading-platform/sdk` 0.5.0 (ops-read only), MCP + `/builder`/`/agent` retired; demo = GHCR-pull self-contained; only platform-side research-gateway (031) retirement remains |
@@ -180,10 +180,19 @@ chunks (with profileId/taskId/type/timestamp metadata) for explanatory answers
 references / pagination DTO) is fixed — the index keys off that contract. See *SDK
 boundaries + distribution* below.
 
-### Phoenix observability
-The audit events already emit Phoenix/OpenTelemetry-compatible attributes; wire the
-Phoenix TS SDK for tracing/datasets/experiments. Observability only — not a
-canonical store. Reference: research §9.
+### Phoenix observability — ✅ TRACING SLICE SHIPPED
+Mastra-native AI tracing exported to a **self-hosted Phoenix** via the official `@mastra/arize`
+`ArizeExporter`, wired at the single `composeMastra()` seam (`src/mastra/compose-mastra.ts`) behind
+`PHOENIX_ENABLED` (default OFF). The `phoenix` docker service runs on all three overlays
+(demo/local/vps); on vps the `6006` UI is loopback-only behind the office reverse-proxy with auth.
+Observability only — not a canonical store; the strict no-raw-text invariant continues to bind the
+persisted `agent_event` log. Spec:
+`docs/superpowers/specs/2026-06-24-phoenix-observability-tracing-design.md`; plan:
+`docs/superpowers/plans/2026-06-24-phoenix-observability-tracing.md`.
+
+**Follow-ups (separate slices):** custom RAG-pipeline span attributes (research §9), Phoenix
+datasets/experiments, measuring + publishing latency p95 / cost per run / success rate, and
+surfacing Phoenix traces in the trading-office dashboard via the Phoenix API.
 
 ### Answer Synthesizer (optional)
 A second, conditional LLM call only for complex read-only answers that combine

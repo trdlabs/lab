@@ -8,6 +8,12 @@ services:
     restart: unless-stopped
   worker:
     restart: unless-stopped
+
+  phoenix:
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+    restart: unless-stopped
+
   office-web:
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${OFFICE_WEB_PORT:-8080}:80"

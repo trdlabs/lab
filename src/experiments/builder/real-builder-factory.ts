@@ -23,6 +23,9 @@ export function buildRealBuilderFor(baseEnv: ModelProviderEnv): (modelId: string
       TURN_INTERPRETER_MODEL: 'fake',
       BUILDER_ADAPTER: 'mastra',
       BUILDER_MODEL: modelId,
+      PHOENIX_ENABLED: false,
+      PHOENIX_COLLECTOR_ENDPOINT: 'http://localhost:6006/v1/traces',
+      PHOENIX_PROJECT_NAME: 'trading-lab',
     };
     const runtime = composeMastra(env);
     const entry = runtime.agents.builder;

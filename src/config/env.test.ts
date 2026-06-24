@@ -213,6 +213,31 @@ describe('reranker env', () => {
   });
 });
 
+describe('Phoenix observability env', () => {
+  it('defaults Phoenix off with localhost collector + trading-lab project', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.PHOENIX_ENABLED).toBe(false);
+    expect(env.PHOENIX_COLLECTOR_ENDPOINT).toBe('http://localhost:6006/v1/traces');
+    expect(env.PHOENIX_PROJECT_NAME).toBe('trading-lab');
+  });
+
+  it('reads Phoenix overrides from source', () => {
+    const env = loadEnv({
+      PHOENIX_ENABLED: 'true',
+      PHOENIX_COLLECTOR_ENDPOINT: 'http://phoenix:6006/v1/traces',
+      PHOENIX_PROJECT_NAME: 'trading-lab-vps',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.PHOENIX_ENABLED).toBe(true);
+    expect(env.PHOENIX_COLLECTOR_ENDPOINT).toBe('http://phoenix:6006/v1/traces');
+    expect(env.PHOENIX_PROJECT_NAME).toBe('trading-lab-vps');
+  });
+
+  it('treats any non-"true" PHOENIX_ENABLED as false', () => {
+    expect(loadEnv({ PHOENIX_ENABLED: '1' } as unknown as NodeJS.ProcessEnv).PHOENIX_ENABLED).toBe(false);
+    expect(loadEnv({ PHOENIX_ENABLED: 'yes' } as unknown as NodeJS.ProcessEnv).PHOENIX_ENABLED).toBe(false);
+  });
+});
+
 describe('loadEnv — agent adapter family default', () => {
   const ADAPTERS = [
     'STRATEGY_ANALYST_ADAPTER',

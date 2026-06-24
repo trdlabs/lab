@@ -18,6 +18,11 @@ services:
   worker:
     restart: "no"
 
+  phoenix:
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+    restart: "no"
+
   # OPTIONAL filesystem validation of the private runtime checkout.
   # NOT part of the default command. Enable explicitly: --profile private-path-check
   # Fails immediately if ${PRIVATE_RUNTIME_PATH} is absent (create_host_path:false) or empty.

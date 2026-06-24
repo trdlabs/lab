@@ -22,6 +22,9 @@ export function buildRealResearcherFor(baseEnv: ModelProviderEnv): (modelId: str
       TURN_INTERPRETER_MODEL: 'fake',
       BUILDER_ADAPTER: 'fake',
       BUILDER_MODEL: 'fake',
+      PHOENIX_ENABLED: false,
+      PHOENIX_COLLECTOR_ENDPOINT: 'http://localhost:6006/v1/traces',
+      PHOENIX_PROJECT_NAME: 'trading-lab',
     };
     const runtime = composeMastra(env);
     const entry = runtime.agents.researcher;

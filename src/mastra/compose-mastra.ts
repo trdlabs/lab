@@ -1,5 +1,7 @@
 import { Mastra } from '@mastra/core';
 import type { Agent } from '@mastra/core/agent';
+import { ArizeExporter } from '@mastra/arize';
+import { Observability } from '@mastra/observability';
 import { resolveLanguageModel } from '../adapters/llm/model-provider.ts';
 import type { ModelProviderEnv, ProviderModel } from '../adapters/llm/model-provider.ts';
 import { createStrategyAnalystAgent, STRATEGY_ANALYST_AGENT_ID } from './agents/strategy-analyst.agent.ts';
@@ -20,6 +22,9 @@ export interface MastraCompositionEnv extends ModelProviderEnv {
   TURN_INTERPRETER_MODEL: string;
   BUILDER_ADAPTER: 'fake' | 'mastra';
   BUILDER_MODEL: string;
+  PHOENIX_ENABLED: boolean;
+  PHOENIX_COLLECTOR_ENDPOINT: string;
+  PHOENIX_PROJECT_NAME: string;
 }
 
 export interface MastraAgentEntry {
@@ -38,6 +43,41 @@ export interface MastraRuntime {
   };
 }
 
+/**
+ * Build the Phoenix/Arize observability config for the Mastra runtime.
+ * Returns undefined when the flag is off so the `observability` key is omitted
+ * entirely (zero overhead, no exporter constructed). Self-hosted Phoenix needs
+ * no apiKey — only the OTLP collector endpoint.
+ */
+export function phoenixArizeConfig(
+  env: MastraCompositionEnv,
+): { serviceName: string; exporters: ArizeExporter[] } | undefined {
+  if (!env.PHOENIX_ENABLED) return undefined;
+  return {
+    serviceName: env.PHOENIX_PROJECT_NAME,
+    exporters: [
+      new ArizeExporter({
+        endpoint: env.PHOENIX_COLLECTOR_ENDPOINT,
+        // Routes spans into a named Phoenix project (Phoenix groups by projectName,
+        // not the OTel serviceName); without it traces fall into the "default" project.
+        projectName: env.PHOENIX_PROJECT_NAME,
+      }),
+    ],
+  };
+}
+
+/**
+ * Build the Mastra-compatible Observability instance for the Phoenix/Arize path.
+ * Returns `undefined` when the flag is off — lets callers spread conditionally so
+ * no `observability` key is set on the Mastra constructor (zero overhead, no exporter
+ * allocated). When enabled, returns a real `Observability` instance whose
+ * `getDefaultInstance` method satisfies `@mastra/core@1.41`'s internal type-guard.
+ */
+export function phoenixObservability(env: MastraCompositionEnv): Observability | undefined {
+  const arize = phoenixArizeConfig(env);
+  return arize ? new Observability({ configs: { arize } }) : undefined;
+}
+
 export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
   const registry: Record<string, Agent> = {};
   const labels: Record<string, string> = {};
@@ -54,7 +94,11 @@ export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
   if (env.BUILDER_ADAPTER === 'mastra') build(BUILDER_AGENT_ID, env.BUILDER_MODEL, createBuilderAgent);
   if (env.TURN_INTERPRETER_ADAPTER === 'mastra') build(TURN_INTERPRETER_AGENT_ID, env.TURN_INTERPRETER_MODEL, createTurnInterpreterAgent);
 
-  const mastra = new Mastra({ agents: registry });
+  const observability = phoenixObservability(env);
+  const mastra = new Mastra({
+    agents: registry,
+    ...(observability ? { observability } : {}),
+  });
 
   // getAgent returns the same object registered above (identity holds in @mastra/core@1.41);
   // used here so adapters hold a Mastra-runtime-owned reference, not the pre-registration agent.

@@ -3,7 +3,8 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-// @mastra/core VALUE imports and `new Agent(` / `new Mastra(` may appear ONLY under src/mastra/**.
+// @mastra/core, @mastra/arize, and @mastra/observability VALUE imports and
+// `new Agent(` / `new Mastra(` may appear ONLY under src/mastra/**.
 // Everywhere else may import the Agent TYPE only: `import type { Agent } from '@mastra/core/agent'`.
 // The offline provider probe deliberately constructs an Agent to prove model assignability.
 const ALLOWED_DIR = 'src/mastra/';
@@ -23,7 +24,7 @@ function mastraValueViolations(file: string): string[] {
   const src = readFileSync(file, 'utf8');
   const v: string[] = [];
   for (const line of src.split('\n')) {
-    if (/\bfrom\s+'@mastra\/core(?:\/[^']*)?'/.test(line) && !/^\s*import\s+type\b/.test(line)) {
+    if (/\bfrom\s+'@mastra\/(?:core(?:\/[^']*)?|arize|observability)'/.test(line) && !/^\s*import\s+type\b/.test(line)) {
       v.push(`value import: ${line.trim()}`);
     }
   }
@@ -41,8 +42,8 @@ describe('Mastra import boundary', () => {
 
   for (const file of files) {
     if (file.startsWith(ALLOWED_DIR) || ALLOWED_FILES.has(file)) continue;
-    it(`${file}: @mastra/core value usage stays in src/mastra/**`, () => {
-      expect(mastraValueViolations(file), `${file} uses @mastra/core values outside src/mastra/`).toEqual([]);
+    it(`${file}: @mastra/* value usage stays in src/mastra/**`, () => {
+      expect(mastraValueViolations(file), `${file} uses @mastra/* values outside src/mastra/`).toEqual([]);
     });
   }
 });

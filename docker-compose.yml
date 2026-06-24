@@ -40,6 +40,18 @@ services:
       retries: 20
     networks: [trading]
 
+  phoenix:
+    image: arizephoenix/phoenix:17.11.0
+    environment:
+      # Persist traces under a mounted dir so they survive restarts (esp. on vps).
+      PHOENIX_WORKING_DIR: /mnt/phoenix
+    volumes:
+      - phoenix_data:/mnt/phoenix
+    expose:
+      - "6006"
+    restart: "no"
+    networks: [trading]
+
   ingress:
     <<: *lab-image
     # Workaround: current source uses TS parameter properties unsupported by
@@ -74,6 +86,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Phoenix observability (Mastra agent tracing). Off by default; the demo/local/vps
+      # env files flip PHOENIX_ENABLED=true. Endpoint targets the compose `phoenix` service.
+      PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-trading-lab}
       # Operator RAG (evidence-first retrieval). Disabled by default; flip
       # OPERATOR_RAG_ENABLED=true (+ OPENROUTER_API_KEY) to activate hybrid retrieval.
       OPERATOR_RAG_ENABLED: ${OPERATOR_RAG_ENABLED:-false}
@@ -145,6 +162,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-trading-lab}
       # Operator RAG (evidence-first retrieval). Disabled by default; flip
       # OPERATOR_RAG_ENABLED=true (+ OPENROUTER_API_KEY) to activate hybrid retrieval.
       OPERATOR_RAG_ENABLED: ${OPERATOR_RAG_ENABLED:-false}
@@ -215,6 +235,7 @@ services:
 
 volumes:
   lab_pg:
+  phoenix_data:
 
 networks:
   trading:
