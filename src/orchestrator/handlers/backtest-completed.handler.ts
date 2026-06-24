@@ -5,6 +5,7 @@ import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
+import { withinTokenBudget } from '../token-budget.ts';
 
 export const BacktestCompletedPayloadSchema = z.object({
   backtestRunId: z.string().min(1),
@@ -57,6 +58,9 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   }
   const { backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth } = parsed.data;
 
+  const cumulativeTokens = await services.tokenUsage.get(task.correlationId);
+  const withinBudget = withinTokenBudget(cumulativeTokens, services.researchTaskTokenBudget);
+
   switch (decision) {
     case 'PAPER_CANDIDATE': {
       await services.events.append(event(task.id, 'hypothesis.paper_candidate', {
@@ -75,13 +79,17 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     case 'FAIL': {
       await services.events.append(event(task.id, 'hypothesis.failed', {
         backtestRunId, hypothesisId, reasons, cycleDepth,
-        willRetry: cycleDepth < MAX_CYCLE_DEPTH,
+        willRetry: cycleDepth < MAX_CYCLE_DEPTH && withinBudget,
       }));
-      if (cycleDepth < MAX_CYCLE_DEPTH) {
+      if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
           { hypothesisId, decision, reasons }, cycleDepth + 1);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
-          strategyProfileId, cycleDepth: cycleDepth + 1, trigger: 'FAIL',
+          strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
+        }));
+      } else if (!withinBudget) {
+        await services.events.append(event(task.id, 'research.token_budget_exhausted', {
+          strategyProfileId, cumulativeTokens, budgetTokens: services.researchTaskTokenBudget,
         }));
       } else {
         await services.events.append(event(task.id, 'research.retry_budget_exhausted', {
@@ -94,13 +102,17 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     case 'MODIFY': {
       await services.events.append(event(task.id, 'hypothesis.modify_required', {
         backtestRunId, hypothesisId, reasons, cycleDepth,
-        willRetry: cycleDepth < MAX_CYCLE_DEPTH,
+        willRetry: cycleDepth < MAX_CYCLE_DEPTH && withinBudget,
       }));
-      if (cycleDepth < MAX_CYCLE_DEPTH) {
+      if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
           { hypothesisId, decision, reasons }, cycleDepth + 1);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
-          strategyProfileId, cycleDepth: cycleDepth + 1, trigger: 'MODIFY',
+          strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
+        }));
+      } else if (!withinBudget) {
+        await services.events.append(event(task.id, 'research.token_budget_exhausted', {
+          strategyProfileId, cumulativeTokens, budgetTokens: services.researchTaskTokenBudget,
         }));
       } else {
         await services.events.append(event(task.id, 'research.retry_budget_exhausted', {

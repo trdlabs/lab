@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { backtestCompletedHandler, MAX_CYCLE_DEPTH } from './backtest-completed.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
+import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 
 function task(payload: Record<string, unknown>): ResearchTask {
@@ -17,6 +18,10 @@ function task(payload: Record<string, unknown>): ResearchTask {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function makeBacktestCompletedTask(opts: { decision: string; cycleDepth: number }): ResearchTask {
+  return task({ ...BASE_PAYLOAD, decision: opts.decision, cycleDepth: opts.cycleDepth });
 }
 
 const BASE_PAYLOAD = {
@@ -147,6 +152,41 @@ describe('backtestCompletedHandler', () => {
     await expect(
       backtestCompletedHandler(task({ decision: 'UNKNOWN_DECISION' }), s),
     ).rejects.toThrow('invalid backtest.completed payload');
+  });
+
+  describe('token budget gate', () => {
+    it('FAIL over the token budget does NOT retry and emits research.token_budget_exhausted', async () => {
+      const tokenUsage = new InMemoryTokenUsageRepository();
+      const t = makeBacktestCompletedTask({ decision: 'FAIL', cycleDepth: 0 });
+      await tokenUsage.add(t.correlationId, 5000);
+      const s = makeServices({ tokenUsage, researchTaskTokenBudget: 1000 });
+      await backtestCompletedHandler(t, s);
+      const types = (await s.events.listByTask(t.id)).map((e) => e.type);
+      expect(types).toContain('research.token_budget_exhausted');
+      expect(types).not.toContain('research.retry_enqueued');
+    });
+
+    it('FAIL under the token budget retries as before', async () => {
+      const tokenUsage = new InMemoryTokenUsageRepository();
+      const t = makeBacktestCompletedTask({ decision: 'FAIL', cycleDepth: 0 });
+      await tokenUsage.add(t.correlationId, 100);
+      const s = makeServices({ tokenUsage, researchTaskTokenBudget: 1000 });
+      await backtestCompletedHandler(t, s);
+      const types = (await s.events.listByTask(t.id)).map((e) => e.type);
+      expect(types).toContain('research.retry_enqueued');
+      expect(types).not.toContain('research.token_budget_exhausted');
+    });
+
+    it('budget 0 (unlimited) never token-gates', async () => {
+      const tokenUsage = new InMemoryTokenUsageRepository();
+      const t = makeBacktestCompletedTask({ decision: 'MODIFY', cycleDepth: 0 });
+      await tokenUsage.add(t.correlationId, 9_999_999);
+      const s = makeServices({ tokenUsage, researchTaskTokenBudget: 0 });
+      await backtestCompletedHandler(t, s);
+      const types = (await s.events.listByTask(t.id)).map((e) => e.type);
+      expect(types).toContain('research.retry_enqueued');
+      expect(types).not.toContain('research.token_budget_exhausted');
+    });
   });
 
   describe('backtest.result_ready terminal event', () => {
