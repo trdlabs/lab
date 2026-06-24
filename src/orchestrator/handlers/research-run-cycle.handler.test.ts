@@ -265,7 +265,7 @@ describe('researchRunCycleHandler', () => {
     const reportingResearcher: ResearcherPort = {
       adapter: 'fake', model: 'test',
       async propose(_input: ResearcherInput, opts?: AgentCallOpts) {
-        await opts?.onUsage?.(777);
+        await opts?.onUsage?.({ modelId: 'test', inputTokens: 700, outputTokens: 77, totalTokens: 777 });
         return { researchSummary: 's', hypotheses: [] };
       },
     };

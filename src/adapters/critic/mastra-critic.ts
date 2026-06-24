@@ -27,7 +27,12 @@ export class MastraCritic implements CriticPort {
     const result = await this.agent.generate(buildPrompt(input), {
       structuredOutput: { schema: CriticOutputSchema },
     });
-    await opts?.onUsage?.(result.usage?.totalTokens ?? 0);
+    await opts?.onUsage?.({
+      modelId: this.model,
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+      totalTokens: result.usage?.totalTokens ?? 0,
+    });
     return CriticOutputSchema.parse(result.object);
   }
 }

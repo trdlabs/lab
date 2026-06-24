@@ -39,23 +39,23 @@ const validObject = {
   notes: null,
 };
 
-function fakeAgent(totalTokens: number): Agent {
-  return { generate: async () => ({ object: validObject, usage: { totalTokens } }) } as unknown as Agent;
+function fakeAgent(inputTokens: number, outputTokens: number, totalTokens: number): Agent {
+  return { generate: async () => ({ object: validObject, usage: { inputTokens, outputTokens, totalTokens } }) } as unknown as Agent;
 }
 
 describe('MastraBuilder onUsage', () => {
-  it('reports result.usage.totalTokens when present', async () => {
-    let recorded = -1;
-    const adapter = new MastraBuilder(fakeAgent(123), 'm');
-    await adapter.build(validInput, { onUsage: (t) => { recorded = t; } });
-    expect(recorded).toBe(123);
+  it('reports result.usage as AgentCallUsage object when present', async () => {
+    let recorded: { modelId: string; inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
+    const adapter = new MastraBuilder(fakeAgent(100, 23, 123), 'test-builder');
+    await adapter.build(validInput, { onUsage: (u) => { recorded = u; } });
+    expect(recorded).toEqual({ modelId: 'test-builder', inputTokens: 100, outputTokens: 23, totalTokens: 123 });
   });
 
-  it('coerces missing usage to 0', async () => {
-    let recorded = -1;
+  it('coerces missing usage to 0 for all fields', async () => {
+    let recorded: { modelId: string; inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
     const agent = { generate: async () => ({ object: validObject }) } as unknown as Agent;
-    const adapter = new MastraBuilder(agent, 'm');
-    await adapter.build(validInput, { onUsage: (t) => { recorded = t; } });
-    expect(recorded).toBe(0);
+    const adapter = new MastraBuilder(agent, 'test-builder');
+    await adapter.build(validInput, { onUsage: (u) => { recorded = u; } });
+    expect(recorded).toEqual({ modelId: 'test-builder', inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 });

@@ -85,7 +85,12 @@ export class MastraBuilder implements BuilderPort {
     const result = await this.agent.generate(buildPromptFor(input), {
       structuredOutput: { schema: LlmBuilderOutputSchema },
     });
-    await opts?.onUsage?.(result.usage?.totalTokens ?? 0);
+    await opts?.onUsage?.({
+      modelId: this.model,
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+      totalTokens: result.usage?.totalTokens ?? 0,
+    });
     const raw = LlmBuilderOutputSchema.parse(result.object);
     return llmOutputToDomain(raw);
   }
