@@ -19,8 +19,9 @@ metrics are *consumed* from traces in a later step; this slice delivers the trac
 
 1. **Depth:** tracing only. Custom RAG span attributes (research §9), Phoenix
    datasets/experiments, and metric measurement are explicitly out of scope (separate slices).
-2. **Deployment:** self-hosted Phoenix as a docker service in the demo/local stack. No
-   Phoenix Cloud, no API key, no external account.
+2. **Deployment:** self-hosted Phoenix as a docker service across all three overlays
+   (demo / local / vps). No Phoenix Cloud, no external account. On vps it is reached through
+   the existing office reverse-proxy with auth (see § Docker → vps exposure rule).
 3. **Instrumentation:** Mastra-native AI tracing via the official `@mastra/arize`
    exporter — a framework primitive (research §6), not a hand-rolled OpenTelemetry NodeSDK.
 
@@ -117,11 +118,13 @@ never raw strategy text, retrieved bodies, embeddings, or secrets"* — governs 
 **persisted `agent_event` audit log** (canonical, potentially exported) and any custom
 span attributes a future slice adds.
 
-Phoenix is a **separate, local-only, opt-in debug surface** (default OFF, self-hosted, data
-never leaves the machine). Mastra's native AI tracing captures LLM IO (prompts/completions)
-by default — that is the point of LLM observability (debugging, latency, cost). Capturing it
-into a local Phoenix is acceptable and **does not** weaken the invariant, which continues to
-bind the canonical audit log. Approved by user 2026-06-24.
+Phoenix is a **separate, self-hosted, opt-in debug surface** (default OFF). Trace data stays
+on the host running the stack (the local machine, or the vps host) and is never sent to any
+third party; on vps the UI is reachable only through the authenticated office reverse-proxy.
+Mastra's native AI tracing captures LLM IO (prompts/completions) by default — that is the
+point of LLM observability (debugging, latency, cost). Capturing it into a self-hosted
+Phoenix is acceptable and **does not** weaken the invariant, which continues to bind the
+canonical audit log. Approved by user 2026-06-24.
 
 Not in scope here (possible later hardening): IO redaction/sampling, attribute scrubbing.
 
