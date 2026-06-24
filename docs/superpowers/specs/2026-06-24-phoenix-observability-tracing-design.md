@@ -78,13 +78,22 @@ field) and read **only** when `PHOENIX_ENABLED` is true.
 
 ### Docker
 
-Add a `phoenix` service (`arizephoenix/phoenix` image) to the demo/local docker-compose
-overlay:
-- expose UI + OTLP HTTP collector on `6006`;
+Add a `phoenix` service (`arizephoenix/phoenix` image) to the docker-compose stack, enabled
+across **all three overlays — demo, local, and vps**:
+- UI + OTLP HTTP collector on `6006`;
 - ingress + worker get `PHOENIX_ENABLED=true` and `PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:6006/v1/traces`.
 
-The vps overlay does **not** enable Phoenix by default (debug surface, not production
-observability infra in this slice). The demo stack stays "one-command".
+Phoenix is wanted on vps too: the latency p95 / cost per run / success rate metrics
+(README 🟡 items) are only meaningful on a real running deployment — the demo can't even
+execute real backtests on WSL2 — so production is exactly where the trace stream earns its
+keep.
+
+**vps exposure rule (security):** the Phoenix UI captures prompts/completions and must
+**not** be published to the internet. On vps the `6006` port is kept internal — reachable
+only on the compose network (no host port-publish to `0.0.0.0`), or bound to loopback /
+placed behind the existing reverse-proxy with auth. Trace data stays on the vps host. The
+demo/local overlays may publish `6006` to the host for convenience. `PHOENIX_ENABLED`
+remains a flag so any overlay can turn it off.
 
 ### New dependency
 
@@ -135,6 +144,7 @@ Not in scope here (possible later hardening): IO redaction/sampling, attribute s
    the Phoenix UI (verified live on the demo stack).
 2. `PHOENIX_ENABLED=false` (default) → no exporter, no OTel processor, no behavior change;
    full test suite green.
-3. Demo docker stack brings up Phoenix with one command and ingress/worker export to it.
+3. All three docker overlays (demo / local / vps) bring up Phoenix and ingress/worker
+   export to it; on vps the `6006` port is not published to the public internet.
 4. Roadmap "Phoenix observability" row moves Backlog → Shipped (tracing slice) with the
    custom-attributes / datasets / metrics work explicitly noted as follow-ups.
