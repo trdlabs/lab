@@ -13,7 +13,7 @@ export class DrizzleTokenUsageRepository implements TokenUsageRepository {
   async add(correlationId: string, tokens: number): Promise<void> {
     await this.db
       .insert(researchTokenUsage)
-      .values({ correlationId, cumulativeTokens: tokens, updatedAt: new Date() })
+      .values({ correlationId, cumulativeTokens: tokens, cumulativeCostUsd: 0, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: researchTokenUsage.correlationId,
         set: {
@@ -35,7 +35,7 @@ export class DrizzleTokenUsageRepository implements TokenUsageRepository {
   async addCost(correlationId: string, costUsd: number): Promise<void> {
     await this.db
       .insert(researchTokenUsage)
-      .values({ correlationId, cumulativeCostUsd: costUsd, updatedAt: new Date() })
+      .values({ correlationId, cumulativeCostUsd: costUsd, cumulativeTokens: 0, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: researchTokenUsage.correlationId,
         set: {
