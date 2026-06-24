@@ -9,6 +9,7 @@ import type { StrategyProfileRepository } from '../ports/strategy-profile.reposi
 import type { HypothesisReadPort } from '../ports/hypothesis-read.port.ts';
 import type { BacktestReadPort } from '../ports/backtest-read.port.ts';
 import type { AgentEventReadPort } from '../ports/agent-event-read.port.ts';
+import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
 
 // Display-hint only — mirrors backtest-completed.handler.ts:22 (MAX_CYCLE_DEPTH = 2). Kept local so the
 // read layer does not import an orchestrator handler (avoids upward layer coupling + load-time deps).
@@ -28,7 +29,7 @@ export interface BacktestCompletedCompletionSummary {
   kind: 'backtest.completed'; taskId: string; status: string; profile: ProfileRef | null;
   hypothesis: HypothesisRef | null; decision: EvaluationDecisionLabel;
   metrics: KeyMetrics; reasons: readonly string[]; willRetry: boolean; links: SummaryLinks;
-  warnings: readonly string[];
+  warnings: readonly string[]; costUsd: number;
 }
 
 export interface RunCycleCompletionSummary {
@@ -52,6 +53,7 @@ export interface CompletionSummaryDeps {
   hypotheses: Pick<HypothesisReadPort, 'list' | 'getById'>;
   backtests: Pick<BacktestReadPort, 'getById'>;
   agentEvents: Pick<AgentEventReadPort, 'list'>;
+  tokenUsage: Pick<TokenUsageRepository, 'getCost'>;
 }
 
 const THESIS_MAX = 240;
@@ -106,6 +108,7 @@ async function buildBacktestCompleted(deps: CompletionSummaryDeps, task: Researc
     deps.agentEvents.list({ taskId: task.id, type: 'research.token_budget_exhausted', limit: 1 }))) ?? [];
   const tokenBudgetExhausted = tokenStop.length > 0;
   const finalReasons = tokenBudgetExhausted ? [...reasons, 'token_budget_exhausted'] : reasons;
+  const costUsd = (await safe('cost_read_failed', () => deps.tokenUsage.getCost(task.correlationId))) ?? 0;
   return {
     kind: 'backtest.completed', taskId: task.id, status: task.status,
     profile: profile ? toProfileRef(profile) : null,
@@ -113,7 +116,7 @@ async function buildBacktestCompleted(deps: CompletionSummaryDeps, task: Researc
     decision, metrics: toKeyMetrics(run?.metrics ?? null), reasons: finalReasons,
     willRetry: (decision === 'FAIL' || decision === 'MODIFY') && cycleDepth < MAX_CYCLE_DEPTH && !tokenBudgetExhausted,
     links: { taskId: task.id, profileId: p.strategyProfileId, hypothesisId: p.hypothesisId, backtestRunId: p.backtestRunId },
-    warnings,
+    warnings, costUsd,
   };
 }
 

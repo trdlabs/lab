@@ -189,6 +189,19 @@ describe('backtestCompletedHandler', () => {
     });
   });
 
+  describe('research.run_cost event', () => {
+    it('emits research.run_cost with the chain cost at completion', async () => {
+      const tokenUsage = new InMemoryTokenUsageRepository();
+      const task = makeBacktestCompletedTask({ decision: 'PASS', cycleDepth: 0 });
+      await tokenUsage.add(task.correlationId, 1500);
+      await tokenUsage.addCost(task.correlationId, 0.025);
+      const services = makeServices({ tokenUsage });
+      await backtestCompletedHandler(task, services);
+      const ev = (await services.events.listByTask(task.id)).find((e) => e.type === 'research.run_cost');
+      expect(ev?.payload).toMatchObject({ correlationId: task.correlationId, costUsd: 0.025, totalTokens: 1500 });
+    });
+  });
+
   describe('backtest.result_ready terminal event', () => {
     it('emits backtest.result_ready as the final event for a PASS decision', async () => {
       const queue = new InMemoryQueueAdapter();

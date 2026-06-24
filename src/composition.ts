@@ -286,6 +286,7 @@ export function composeRuntime() {
     token: env.TRADING_LAB_READ_TOKEN ?? '',
     researchTasks: services.researchTasks,
     strategyProfiles,
+    tokenUsage: services.tokenUsage,
   };
 
   return { env, db, pool, queue, router, services, chat, read, mastraRuntime };
