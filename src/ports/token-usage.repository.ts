@@ -7,4 +7,8 @@ export interface TokenUsageRepository {
   add(correlationId: string, tokens: number): Promise<void>;
   /** Cumulative tokens for the chain; 0 when no usage has been recorded yet. */
   get(correlationId: string): Promise<number>;
+  /** Add USD cost to the chain's cumulative total (creates the row on first call). */
+  addCost(correlationId: string, costUsd: number): Promise<void>;
+  /** Cumulative USD cost for the chain; 0 when none recorded yet. */
+  getCost(correlationId: string): Promise<number>;
 }

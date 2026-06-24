@@ -13,6 +13,7 @@ import type { TradeEvidenceReadPort } from '../../ports/trade-evidence-read.port
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
+import type { ModelPricingPort } from '../../ports/model-pricing.port.ts';
 
 function profile(): StrategyProfile {
   return {
@@ -265,7 +266,7 @@ describe('researchRunCycleHandler', () => {
     const reportingResearcher: ResearcherPort = {
       adapter: 'fake', model: 'test',
       async propose(_input: ResearcherInput, opts?: AgentCallOpts) {
-        await opts?.onUsage?.(777);
+        await opts?.onUsage?.({ modelId: 'test', inputTokens: 700, outputTokens: 77, totalTokens: 777 });
         return { researchSummary: 's', hypotheses: [] };
       },
     };
@@ -325,5 +326,26 @@ describe('researchRunCycleHandler', () => {
     await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
 
     expect(cap.captured()?.tradeEvidence?.map((b) => b.tradeId)).toEqual(['t-loss-1', 't-loss-2']);
+  });
+
+  it('accrues $ cost from priced researcher usage', async () => {
+    const tokenUsage = new InMemoryTokenUsageRepository();
+    const modelPricing: ModelPricingPort = {
+      async priceFor(id) { return id === 'm-test' ? { inputUsdPerToken: 0.00001, outputUsdPerToken: 0.00003 } : null; },
+    };
+    const researcher: ResearcherPort = {
+      adapter: 'fake', model: 'test',
+      async propose(_i, opts) {
+        await opts?.onUsage?.({ modelId: 'm-test', inputTokens: 1000, outputTokens: 500, totalTokens: 1500 });
+        return { researchSummary: 's', hypotheses: [] };
+      },
+    };
+    const services = makeServices({ tokenUsage, modelPricing, researcher });
+    const t = task({ strategyProfileId: 'p1' });
+    await seedProfile(services);
+    await researchRunCycleHandler(t, services);
+    // 1000*0.00001 + 500*0.00003 = 0.01 + 0.015 = 0.025
+    expect(await tokenUsage.getCost(t.correlationId)).toBeCloseTo(0.025, 10);
+    expect(await tokenUsage.get(t.correlationId)).toBe(1500); // tokens still recorded
   });
 });

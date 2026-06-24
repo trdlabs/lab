@@ -9,6 +9,7 @@ function fakeDeps(over: Partial<Record<string, unknown>> = {}): CompletionSummar
     hypotheses: { list: async () => [], getById: async () => null },
     backtests: { list: async () => [], getById: async () => null },
     agentEvents: { list: async () => [] },
+    tokenUsage: { getCost: async () => 0 },
   };
   return { ...base, ...over } as unknown as CompletionSummaryDeps;
 }
@@ -260,6 +261,20 @@ describe('buildCompletionSummary — token budget exhausted', () => {
     expect(summary?.kind).toBe('backtest.completed');
     expect((summary as unknown as { willRetry: boolean }).willRetry).toBe(true); // FAIL && depth 0 < 2
     expect((summary as unknown as { reasons: string[] }).reasons).not.toContain('token_budget_exhausted');
+  });
+});
+
+describe('buildCompletionSummary — costUsd', () => {
+  it('surfaces costUsd from tokenUsage.getCost', async () => {
+    const task = { id: 't1', taskType: 'backtest.completed', status: 'completed', correlationId: 'c1',
+      source: 'operator', payload: { decision: 'PASS', cycleDepth: 0, strategyProfileId: 'p1', reasons: [] },
+      createdAt: '2026-06-24T00:00:00.000Z', updatedAt: '2026-06-24T00:00:00.000Z' };
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => task },
+      tokenUsage: { getCost: async () => 0.042 },
+    });
+    const summary = await buildCompletionSummary(deps, 't1');
+    expect((summary as { costUsd: number }).costUsd).toBe(0.042);
   });
 });
 

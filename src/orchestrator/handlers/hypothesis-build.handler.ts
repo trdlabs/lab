@@ -69,7 +69,20 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   try {
     out = await services.builder.build(
       { hypothesis, profile, sdkDoc: BUILDER_SDK_DOC },
-      { onUsage: (t) => services.tokenUsage.add(task.correlationId, t) },
+      {
+        onUsage: async (u) => {
+          await services.tokenUsage.add(task.correlationId, u.totalTokens);
+          const price = await services.modelPricing.priceFor(u.modelId);
+          if (price) {
+            await services.tokenUsage.addCost(
+              task.correlationId,
+              u.inputTokens * price.inputUsdPerToken + u.outputTokens * price.outputUsdPerToken,
+            );
+          } else {
+            await services.events.append(event(task.id, 'research.cost_unpriced', { modelId: u.modelId }));
+          }
+        },
+      },
     );
   } catch (err) {
     const issues: ValidationIssue[] = [{ code: 'builder_failed', severity: 'error', path: 'builder', message: errMsg(err) }];

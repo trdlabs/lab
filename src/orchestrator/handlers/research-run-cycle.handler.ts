@@ -119,7 +119,20 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   try {
     output = await services.researcher.propose({
       profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax,
-    }, { onUsage: (t) => services.tokenUsage.add(task.correlationId, t) });
+    }, {
+      onUsage: async (u) => {
+        await services.tokenUsage.add(task.correlationId, u.totalTokens);
+        const price = await services.modelPricing.priceFor(u.modelId);
+        if (price) {
+          await services.tokenUsage.addCost(
+            task.correlationId,
+            u.inputTokens * price.inputUsdPerToken + u.outputTokens * price.outputUsdPerToken,
+          );
+        } else {
+          await services.events.append(event(task.id, 'research.cost_unpriced', { modelId: u.modelId }));
+        }
+      },
+    });
   } catch (err) {
     await services.events.append(event(task.id, 'researcher.failed', { error: errMsg(err) }));
     throw err;
@@ -196,7 +209,20 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
         try {
           const review = await services.critic.review(
             { proposal: draft, profile },
-            { onUsage: (t) => services.tokenUsage.add(task.correlationId, t) },
+            {
+              onUsage: async (u) => {
+                await services.tokenUsage.add(task.correlationId, u.totalTokens);
+                const price = await services.modelPricing.priceFor(u.modelId);
+                if (price) {
+                  await services.tokenUsage.addCost(
+                    task.correlationId,
+                    u.inputTokens * price.inputUsdPerToken + u.outputTokens * price.outputUsdPerToken,
+                  );
+                } else {
+                  await services.events.append(event(task.id, 'research.cost_unpriced', { modelId: u.modelId }));
+                }
+              },
+            },
           );
           await services.hypothesisReviews.create({
             id: randomUUID(),

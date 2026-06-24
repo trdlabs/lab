@@ -19,6 +19,7 @@ describe('read-app e2e (in-memory wiring)', () => {
       token: 'e2e',
       researchTasks: { findById: async () => null },
       strategyProfiles: { findById: async () => null },
+      tokenUsage: { getCost: async () => 0 },
     });
     const auth = { authorization: 'Bearer e2e' };
     for (const path of ['/v1/hypotheses', '/v1/backtests', '/v1/agent-events']) {

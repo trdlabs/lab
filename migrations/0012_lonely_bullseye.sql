@@ -1,0 +1,1 @@
+ALTER TABLE "research_token_usage" ADD COLUMN "cumulative_cost_usd" double precision DEFAULT 0 NOT NULL;

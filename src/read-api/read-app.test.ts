@@ -25,6 +25,7 @@ function deps(over: Partial<ReadApiDeps> = {}): ReadApiDeps {
     token: TOKEN,
     researchTasks: { findById: async () => null },
     strategyProfiles: { findById: async () => null },
+    tokenUsage: { getCost: async () => 0 },
     ...over,
   };
 }

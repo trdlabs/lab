@@ -136,7 +136,12 @@ export class MastraResearcher implements ResearcherPort {
     const result = await this.agent.generate(buildPrompt(input), {
       structuredOutput: { schema: LlmResearcherOutputSchema },
     });
-    await opts?.onUsage?.(result.usage?.totalTokens ?? 0);
+    await opts?.onUsage?.({
+      modelId: this.model,
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+      totalTokens: result.usage?.totalTokens ?? 0,
+    });
     const llm = LlmResearcherOutputSchema.parse(result.object);
     return llmOutputToDomain(llm);
   }

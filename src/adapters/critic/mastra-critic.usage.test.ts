@@ -24,23 +24,23 @@ const validObject = {
   summary: 'Looks good',
 };
 
-function fakeAgent(totalTokens: number): Agent {
-  return { generate: async () => ({ object: validObject, usage: { totalTokens } }) } as unknown as Agent;
+function fakeAgent(inputTokens: number, outputTokens: number, totalTokens: number): Agent {
+  return { generate: async () => ({ object: validObject, usage: { inputTokens, outputTokens, totalTokens } }) } as unknown as Agent;
 }
 
 describe('MastraCritic onUsage', () => {
-  it('reports result.usage.totalTokens when present', async () => {
-    let recorded = -1;
-    const adapter = new MastraCritic(fakeAgent(789), 'm');
-    await adapter.review(validInput, { onUsage: (t) => { recorded = t; } });
-    expect(recorded).toBe(789);
+  it('reports result.usage as AgentCallUsage object when present', async () => {
+    let recorded: { modelId: string; inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
+    const adapter = new MastraCritic(fakeAgent(100, 23, 123), 'test-critic');
+    await adapter.review(validInput, { onUsage: (u) => { recorded = u; } });
+    expect(recorded).toEqual({ modelId: 'test-critic', inputTokens: 100, outputTokens: 23, totalTokens: 123 });
   });
 
-  it('coerces missing usage to 0', async () => {
-    let recorded = -1;
+  it('coerces missing usage to 0 for all fields', async () => {
+    let recorded: { modelId: string; inputTokens: number; outputTokens: number; totalTokens: number } | null = null;
     const agent = { generate: async () => ({ object: validObject }) } as unknown as Agent;
-    const adapter = new MastraCritic(agent, 'm');
-    await adapter.review(validInput, { onUsage: (t) => { recorded = t; } });
-    expect(recorded).toBe(0);
+    const adapter = new MastraCritic(agent, 'test-critic');
+    await adapter.review(validInput, { onUsage: (u) => { recorded = u; } });
+    expect(recorded).toEqual({ modelId: 'test-critic', inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 });

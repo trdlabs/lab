@@ -131,6 +131,12 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     }
   }
 
+  await services.events.append(event(task.id, 'research.run_cost', {
+    correlationId: task.correlationId,
+    costUsd: await services.tokenUsage.getCost(task.correlationId),
+    totalTokens: await services.tokenUsage.get(task.correlationId),
+  }));
+
   await services.events.append(event(task.id, 'backtest.result_ready', {
     decision,
     profileId: strategyProfileId,

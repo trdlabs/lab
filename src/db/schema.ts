@@ -43,6 +43,7 @@ export const researchTask = pgTable('research_task', {
 export const researchTokenUsage = pgTable('research_token_usage', {
   correlationId: text('correlation_id').primaryKey(),
   cumulativeTokens: integer('cumulative_tokens').notNull().default(0),
+  cumulativeCostUsd: doublePrecision('cumulative_cost_usd').notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

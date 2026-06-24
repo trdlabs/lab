@@ -1,4 +1,12 @@
-/** Optional per-call hooks. onUsage reports the LLM token usage of this call (0 when unknown). */
+/** Token usage of one agent LLM call. inputTokens/outputTokens split enables $ pricing. */
+export interface AgentCallUsage {
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+/** Optional per-call hooks. onUsage reports the call's token usage (counts are 0 when unknown). */
 export interface AgentCallOpts {
-  onUsage?: (totalTokens: number) => void | Promise<void>;
+  onUsage?: (usage: AgentCallUsage) => void | Promise<void>;
 }

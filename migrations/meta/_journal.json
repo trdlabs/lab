@@ -85,6 +85,13 @@
       "when": 1782302208224,
       "tag": "0011_third_blazing_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782325171262,
+      "tag": "0012_lonely_bullseye",
+      "breakpoints": true
     }
   ]
 }
