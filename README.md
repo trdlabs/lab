@@ -585,8 +585,7 @@ tool-вызова. Текущее состояние:
 `@mastra/arize` (OTel/OpenInference). Включается флагом `PHOENIX_ENABLED=true`; в docker-стеке
 Phoenix поднимается сервисом `phoenix` (UI на `:6006`).
 
-Поверх этого подключается **[Phoenix](https://phoenix.arize.com)** (OTel-совместимый трейсинг).
-Через единый seam композиции Mastra (`src/mastra/`) трейсы будут покрывать: запуск workflow,
+Через единый seam композиции Mastra (`src/mastra/`) трейсы покрывают: запуск workflow,
 вызов агента, вход/выход LLM, использование токенов, имя модели, оценку стоимости, tool-вызовы,
 отказы валидации, сабмиты бэктестов и решения Evaluator. Observability — для отладки и
 cost-control; **канонические бизнес-данные остаются в Postgres**, а не в трейсах.

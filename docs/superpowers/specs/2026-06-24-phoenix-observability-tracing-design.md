@@ -95,7 +95,7 @@ reverse proxy that already fronts trading-office** (`docs/docker-vps.md`: `BIND_
 + "Put a reverse proxy in front that serves the web UI and routes `/api/office/*` + the
 WebSocket upgrade"). Phoenix is routed through that proxy on its own subdomain/path (e.g.
 `https://phoenix.example.com`) **with auth** (HTTP basic-auth or the same OAuth as office).
-The compose `phoenix` service binds `6006` to `${BIND_ADDR}` (loopback when proxied) — no
+The compose `phoenix` service binds `6006` to `127.0.0.1` (loopback always — never `${BIND_ADDR}`) — no
 direct `0.0.0.0` publish on vps. Trace data stays on the vps host. The demo/local overlays
 may publish `6006` to the host for convenience. `PHOENIX_ENABLED` remains a flag so any
 overlay can turn it off.
