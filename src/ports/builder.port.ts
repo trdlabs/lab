@@ -4,10 +4,8 @@ import { ModuleManifestSchema } from '../domain/module-bundle.ts';
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 
-/** Optional per-call hooks. onUsage reports the LLM token usage of this call (0 when unknown). */
-export interface AgentCallOpts {
-  onUsage?: (totalTokens: number) => void | Promise<void>;
-}
+import type { AgentCallOpts } from './agent-call-opts.ts';
+export type { AgentCallOpts };
 
 export interface BuilderInput {
   hypothesis: HypothesisProposal;

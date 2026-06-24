@@ -1,9 +1,7 @@
 import type { CriticInput, CriticOutput } from '../domain/critic.ts';
 
-/** Optional per-call hooks. onUsage reports the LLM token usage of this call (0 when unknown). */
-export interface AgentCallOpts {
-  onUsage?: (totalTokens: number) => void | Promise<void>;
-}
+import type { AgentCallOpts } from './agent-call-opts.ts';
+export type { AgentCallOpts };
 
 export interface CriticPort {
   readonly adapter: 'fake' | 'mastra';

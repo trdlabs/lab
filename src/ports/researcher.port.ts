@@ -4,10 +4,8 @@ import type { MarketContext, MarketRegime } from './platform-gateway.port.ts';
 import type { BotRunResultDetail } from './bot-results-read.port.ts';
 import type { TradeEvidenceBundle } from './trade-evidence-read.port.ts';
 
-/** Optional per-call hooks. onUsage reports the LLM token usage of this call (0 when unknown). */
-export interface AgentCallOpts {
-  onUsage?: (totalTokens: number) => void | Promise<void>;
-}
+import type { AgentCallOpts } from './agent-call-opts.ts';
+export type { AgentCallOpts };
 
 export interface ResearcherInput {
   profile: StrategyProfile;
