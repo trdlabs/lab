@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Agent } from '@mastra/core/agent';
-import type { BuilderInput, BuilderOutput, BuilderPort } from '../../ports/builder.port.ts';
+import type { BuilderInput, BuilderOutput, BuilderPort, AgentCallOpts } from '../../ports/builder.port.ts';
 import { BuilderOutputSchema } from '../../ports/builder.port.ts';
 import { SDK_CONTRACT_VERSION } from '../../domain/module-bundle.ts';
 import { DIRECTIONS } from '../../domain/strategy-profile.ts';
@@ -38,30 +38,30 @@ function llmOutputToDomain(raw: LlmBuilderOutput): BuilderOutput {
 }
 
 export function buildPromptFor(input: BuilderInput): string {
-  const { hypothesis, profile, sdkDoc } = input;
+  const { hypothesis, profile, sdkDoc } = input ?? {};
   return [
     '=== TASK ===',
     'Build a hypothesis overlay module for the following validated hypothesis.',
     '',
     '=== HYPOTHESIS ===',
-    `Thesis: ${hypothesis.thesis}`,
-    `Target behavior: ${hypothesis.targetBehavior}`,
-    `Applies to: ${hypothesis.ruleAction.appliesTo}`,
-    `Rules from hypothesis: ${JSON.stringify(hypothesis.ruleAction.rules, null, 2)}`,
-    `Required features (allowed capabilities for manifest): ${hypothesis.requiredFeatures.join(', ')}`,
-    `Expected effect: ${hypothesis.expectedEffect.metric} should ${hypothesis.expectedEffect.direction}`,
+    `Thesis: ${hypothesis?.thesis}`,
+    `Target behavior: ${hypothesis?.targetBehavior}`,
+    `Applies to: ${hypothesis?.ruleAction?.appliesTo}`,
+    `Rules from hypothesis: ${JSON.stringify(hypothesis?.ruleAction?.rules, null, 2)}`,
+    `Required features (allowed capabilities for manifest): ${hypothesis?.requiredFeatures?.join(', ')}`,
+    `Expected effect: ${hypothesis?.expectedEffect?.metric} should ${hypothesis?.expectedEffect?.direction}`,
     '',
     '=== STRATEGY PROFILE ===',
-    `Strategy direction: ${profile.direction}`,
-    `Market features: ${profile.requiredMarketFeatures.join(', ')}`,
+    `Strategy direction: ${profile?.direction}`,
+    `Market features: ${profile?.requiredMarketFeatures?.join(', ')}`,
     '',
     '=== REQUIREMENTS ===',
-    `- manifest.moduleId: "overlay-${hypothesis.id}"`,
+    `- manifest.moduleId: "overlay-${hypothesis?.id}"`,
     '- manifest.moduleKind: "hypothesis_overlay"',
-    `- manifest.appliesTo: "${hypothesis.ruleAction.appliesTo}"`,
+    `- manifest.appliesTo: "${hypothesis?.ruleAction?.appliesTo}"`,
     '- manifest.entry: "index.ts"',
     '- manifest.exports: ["overlay"]',
-    `- manifest.capabilities: only features from requiredFeatures (${hypothesis.requiredFeatures.join(', ')})`,
+    `- manifest.capabilities: only features from requiredFeatures (${hypothesis?.requiredFeatures?.join(', ')})`,
     `- manifest.sdkContractVersion: "${SDK_CONTRACT_VERSION}"`,
     '- files: array of {name, content} objects. MUST include {name:"index.ts", content:"..."} with the overlay export',
     '- No imports, no process.env, no eval, no fetch — pure data/logic only',
@@ -81,10 +81,11 @@ export class MastraBuilder implements BuilderPort {
     this.model = label;
   }
 
-  async build(input: BuilderInput): Promise<BuilderOutput> {
+  async build(input: BuilderInput, opts?: AgentCallOpts): Promise<BuilderOutput> {
     const result = await this.agent.generate(buildPromptFor(input), {
       structuredOutput: { schema: LlmBuilderOutputSchema },
     });
+    await opts?.onUsage?.(result.usage?.totalTokens ?? 0);
     const raw = LlmBuilderOutputSchema.parse(result.object);
     return llmOutputToDomain(raw);
   }
