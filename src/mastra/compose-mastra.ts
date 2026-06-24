@@ -55,7 +55,14 @@ export function phoenixArizeConfig(
   if (!env.PHOENIX_ENABLED) return undefined;
   return {
     serviceName: env.PHOENIX_PROJECT_NAME,
-    exporters: [new ArizeExporter({ endpoint: env.PHOENIX_COLLECTOR_ENDPOINT })],
+    exporters: [
+      new ArizeExporter({
+        endpoint: env.PHOENIX_COLLECTOR_ENDPOINT,
+        // Routes spans into a named Phoenix project (Phoenix groups by projectName,
+        // not the OTel serviceName); without it traces fall into the "default" project.
+        projectName: env.PHOENIX_PROJECT_NAME,
+      }),
+    ],
   };
 }
 
