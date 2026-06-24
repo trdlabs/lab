@@ -50,6 +50,8 @@ export interface Env {
   PHOENIX_COLLECTOR_ENDPOINT: string;
   /** Phoenix project name / OTel serviceName (default: trading-lab). */
   PHOENIX_PROJECT_NAME: string;
+  /** Cumulative token budget per research chain (correlationId). Default 200000; 0 = unlimited. */
+  RESEARCH_TASK_TOKEN_BUDGET: number;
   /** Feature flag: enable operator RAG retrieval (default: false). */
   OPERATOR_RAG_ENABLED: boolean;
   /** Embedding provider for operator strategy retrieval (default: 'openrouter'). */
@@ -96,6 +98,12 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (value === undefined || value === '') return fallback;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
 }
 
 function parseFloatOr(value: string | undefined, fallback: number): number {
@@ -162,6 +170,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PHOENIX_ENABLED: source.PHOENIX_ENABLED === 'true',
     PHOENIX_COLLECTOR_ENDPOINT: source.PHOENIX_COLLECTOR_ENDPOINT ?? 'http://localhost:6006/v1/traces',
     PHOENIX_PROJECT_NAME: source.PHOENIX_PROJECT_NAME ?? 'trading-lab',
+    RESEARCH_TASK_TOKEN_BUDGET: parseNonNegativeInt(source.RESEARCH_TASK_TOKEN_BUDGET, 200000),
     ...loadRagEnv(source),
   };
 }

@@ -280,3 +280,17 @@ describe('loadEnv — agent adapter family default', () => {
     for (const k of ADAPTERS) expect(env[k]).toBe('fake');
   });
 });
+
+describe('research task token budget env', () => {
+  it('defaults RESEARCH_TASK_TOKEN_BUDGET to 200000', () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).RESEARCH_TASK_TOKEN_BUDGET).toBe(200000);
+  });
+  it('reads an override and allows 0 (unlimited)', () => {
+    expect(loadEnv({ RESEARCH_TASK_TOKEN_BUDGET: '50000' } as unknown as NodeJS.ProcessEnv).RESEARCH_TASK_TOKEN_BUDGET).toBe(50000);
+    expect(loadEnv({ RESEARCH_TASK_TOKEN_BUDGET: '0' } as unknown as NodeJS.ProcessEnv).RESEARCH_TASK_TOKEN_BUDGET).toBe(0);
+  });
+  it('falls back to default on an invalid value', () => {
+    expect(loadEnv({ RESEARCH_TASK_TOKEN_BUDGET: 'abc' } as unknown as NodeJS.ProcessEnv).RESEARCH_TASK_TOKEN_BUDGET).toBe(200000);
+    expect(loadEnv({ RESEARCH_TASK_TOKEN_BUDGET: '-3' } as unknown as NodeJS.ProcessEnv).RESEARCH_TASK_TOKEN_BUDGET).toBe(200000);
+  });
+});
