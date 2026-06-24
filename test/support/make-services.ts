@@ -23,6 +23,7 @@ import { InMemoryActionProposalRepository } from '../../src/adapters/repository/
 import { InMemoryQueueAdapter } from '../../src/adapters/queue/in-memory-queue.adapter.ts';
 import { NoopStrategyRetrievalIndexer } from '../../src/operator/noop-strategy-retrieval-indexer.ts';
 import { InMemoryTokenUsageRepository } from '../../src/adapters/repository/in-memory-token-usage.repository.ts';
+import { NullModelPricing } from '../../src/adapters/pricing/null-model-pricing.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -45,6 +46,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
     maxHypothesesPerCycle: 5,
     tokenUsage: new InMemoryTokenUsageRepository(),
+    modelPricing: new NullModelPricing(),
     researchTaskTokenBudget: 0, // unlimited by default in tests; budget-gate tests override
     builder: new FakeBuilder(),
     builds: new InMemoryHypothesisBuildRepository(),

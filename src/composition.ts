@@ -4,6 +4,7 @@ import { DrizzleResearchTaskRepository } from './adapters/repository/drizzle-res
 import { DrizzleStrategyProfileRepository } from './adapters/repository/drizzle-strategy-profile.repository.ts';
 import { DrizzleAgentEventRepository } from './adapters/repository/drizzle-agent-event.repository.ts';
 import { DrizzleTokenUsageRepository } from './adapters/repository/drizzle-token-usage.repository.ts';
+import { OpenRouterModelPricing } from './adapters/pricing/openrouter-model-pricing.ts';
 import { LocalFileArtifactStore } from './adapters/artifact/local-file-artifact-store.adapter.ts';
 import { FakeStrategyAnalyst } from './adapters/analyst/fake-strategy-analyst.ts';
 import { MastraStrategyAnalyst } from './adapters/analyst/mastra-strategy-analyst.ts';
@@ -222,6 +223,7 @@ export function composeRuntime() {
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
     maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
     tokenUsage: new DrizzleTokenUsageRepository(db),
+    modelPricing: new OpenRouterModelPricing(),
     researchTaskTokenBudget: env.RESEARCH_TASK_TOKEN_BUDGET,
     builder: buildBuilder(mastraRuntime),
     builds: new DrizzleHypothesisBuildRepository(db),
