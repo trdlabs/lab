@@ -231,6 +231,34 @@ describe('buildCompletionSummary — strategy.onboard', () => {
     expect(s.profile).toBeNull();
     expect(s.links.profileId).toBeUndefined();
   });
+
+  it('surfaces the critique verdict triple from the strategy_critic.completed event', async () => {
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => onboardTask() },
+      agentEvents: { list: async () => [
+        { id: 'e1', taskId: 'ob1', type: 'strategy_critic.completed', payload: { mode: 'two_stage', severity: 'high', badIdeaOrBadTiming: 'bad_timing', mainVulnerability: 'no invalidation', critiqueRef: 'art-1' }, createdAt: '2026-06-26T00:00:00.000Z' },
+        { id: 'e2', taskId: 'ob1', type: 'strategy_analyst.completed', payload: { profileId: 'p9', direction: 'short' }, createdAt: '2026-06-26T00:00:01.000Z' },
+      ] },
+      strategyProfiles: { findById: async (id: string) => id === 'p9' ? { id: 'p9', coreIdea: 'fade pumps', direction: 'short' } : null },
+    });
+    const s = await buildCompletionSummary(deps, 'ob1');
+    if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
+    expect(s.critique).toEqual({ severity: 'high', badIdeaOrBadTiming: 'bad_timing', mainVulnerability: 'no invalidation' });
+    expect(s.profile?.id).toBe('p9');
+  });
+
+  it('omits critique when no strategy_critic.completed event exists (graceful degradation)', async () => {
+    const deps = fakeDeps({
+      researchTasks: { findById: async () => onboardTask() },
+      agentEvents: { list: async () => [
+        { id: 'e1', taskId: 'ob1', type: 'strategy_analyst.completed', payload: { profileId: 'p9', direction: 'long' }, createdAt: '2026-06-26T00:00:00.000Z' },
+      ] },
+      strategyProfiles: { findById: async () => ({ id: 'p9', coreIdea: 'breakout', direction: 'long' }) },
+    });
+    const s = await buildCompletionSummary(deps, 'ob1');
+    if (s?.kind !== 'strategy.onboard') throw new Error('wrong kind');
+    expect(s.critique).toBeUndefined();
+  });
 });
 
 describe('buildCompletionSummary — token budget exhausted', () => {

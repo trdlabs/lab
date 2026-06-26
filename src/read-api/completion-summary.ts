@@ -43,6 +43,7 @@ export interface OnboardCompletionSummary {
   kind: 'strategy.onboard'; taskId: string; status: string;
   profile: ProfileRef | null; nextStep?: { taskType: string }; links: SummaryLinks;
   warnings: readonly string[];
+  critique?: { severity: 'low' | 'medium' | 'high'; badIdeaOrBadTiming: 'bad_idea' | 'bad_timing' | 'neither'; mainVulnerability: string };
 }
 
 export type CompletionSummary = BacktestCompletedCompletionSummary | RunCycleCompletionSummary | OnboardCompletionSummary;
@@ -166,12 +167,18 @@ async function buildOnboard(deps: CompletionSummaryDeps, task: ResearchTask): Pr
     if (pid) { profileId = pid; break; }
   }
   const profile = profileId ? await safe('profile_read_failed', () => deps.strategyProfiles.findById(profileId!)) : null;
+  const critiqueEvent = events.find((e) => e.type === 'strategy_critic.completed');
+  const cp = critiqueEvent?.payload as { severity?: unknown; badIdeaOrBadTiming?: unknown; mainVulnerability?: unknown } | undefined;
+  const critique = cp && typeof cp.severity === 'string' && typeof cp.badIdeaOrBadTiming === 'string' && typeof cp.mainVulnerability === 'string'
+    ? { severity: cp.severity as 'low' | 'medium' | 'high', badIdeaOrBadTiming: cp.badIdeaOrBadTiming as 'bad_idea' | 'bad_timing' | 'neither', mainVulnerability: cp.mainVulnerability }
+    : undefined;
   return {
     kind: 'strategy.onboard', taskId: task.id, status: task.status,
     profile: profile ? toProfileRef(profile) : null,
     nextStep: { taskType: 'research.run_cycle' },
     links: { taskId: task.id, profileId },
     warnings,
+    ...(critique ? { critique } : {}),
   };
 }
 
