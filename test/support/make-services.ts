@@ -41,6 +41,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     tradeEvidence: new MockTradeEvidenceAdapter(),
     researcher: new FakeResearcher(),
     critic: null, // base happy-path does not invoke Critic; tests opt in via overrides
+    strategyCritic: null, // base happy-path skips the pre-flight critic; tests opt in via overrides
     hypotheses,
     hypothesisReviews: new InMemoryHypothesisReviewRepository(),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),

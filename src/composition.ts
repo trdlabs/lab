@@ -26,6 +26,10 @@ import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
 import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
 import { FakeCritic } from './adapters/critic/fake-critic.ts';
 import { MastraCritic } from './adapters/critic/mastra-critic.ts';
+import type { StrategyCriticPort } from './ports/strategy-critic.port.ts';
+import { FakeStrategyCritic } from './adapters/strategy-critic/fake-strategy-critic.ts';
+import { SingleStageStrategyCritic } from './adapters/strategy-critic/single-stage-strategy-critic.ts';
+import { TwoStageStrategyCritic } from './adapters/strategy-critic/two-stage-strategy-critic.ts';
 import { DrizzleHypothesisProposalRepository } from './adapters/repository/drizzle-hypothesis-proposal.repository.ts';
 import { DrizzleHypothesisReviewRepository } from './adapters/repository/drizzle-hypothesis-review.repository.ts';
 import { InMemoryLexicalSimilarHypothesisSearch } from './adapters/similarity/in-memory-lexical-similar-hypothesis-search.ts';
@@ -91,6 +95,24 @@ function buildCritic(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): Critic
   if (e) return new MastraCritic(e.agent, e.label);
   console.warn('[composition] ENABLE_CRITIC_AGENT=true but CRITIC_ADAPTER is not "mastra"; using FakeCritic');
   return new FakeCritic();
+}
+
+export function buildStrategyCritic(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): StrategyCriticPort | null {
+  if (!env.STRATEGY_PREFLIGHT_CRITIQUE) return null;
+  if (env.STRATEGY_CRITIC_ADAPTER === 'mastra') {
+    if (env.STRATEGY_CRITIC_MODE === 'two_stage') {
+      const critic = rt.agents.strategyCritic;
+      const refiner = rt.agents.strategyRefiner;
+      if (critic && refiner) return new TwoStageStrategyCritic(critic.agent, refiner.agent, critic.label, refiner.label);
+      console.warn('[composition] STRATEGY_CRITIC_ADAPTER=mastra (two_stage) but agents missing; using FakeStrategyCritic');
+      return new FakeStrategyCritic('two_stage');
+    }
+    const combined = rt.agents.strategyCriticCombined;
+    if (combined) return new SingleStageStrategyCritic(combined.agent, combined.label);
+    console.warn('[composition] STRATEGY_CRITIC_ADAPTER=mastra (single) but agent missing; using FakeStrategyCritic');
+    return new FakeStrategyCritic('single');
+  }
+  return new FakeStrategyCritic(env.STRATEGY_CRITIC_MODE);
 }
 
 function buildTurnInterpreter(rt: MastraRuntime): TurnInterpreterPort {
@@ -218,6 +240,7 @@ export function composeRuntime() {
     tradeEvidence: new MockTradeEvidenceAdapter(),
     researcher: buildResearcher(mastraRuntime),
     critic: buildCritic(env, mastraRuntime),
+    strategyCritic: buildStrategyCritic(env, mastraRuntime),
     hypotheses,
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),

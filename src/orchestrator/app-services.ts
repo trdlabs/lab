@@ -9,6 +9,7 @@ import type { BotResultsReadPort } from '../ports/bot-results-read.port.ts';
 import type { TradeEvidenceReadPort } from '../ports/trade-evidence-read.port.ts';
 import type { ResearcherPort } from '../ports/researcher.port.ts';
 import type { CriticPort } from '../ports/critic.port.ts';
+import type { StrategyCriticPort } from '../ports/strategy-critic.port.ts';
 import type { HypothesisProposalRepository } from '../ports/hypothesis-proposal.repository.ts';
 import type { HypothesisReviewRepository } from '../ports/hypothesis-review.repository.ts';
 import type { SimilarHypothesisSearchPort } from '../ports/similar-hypothesis-search.port.ts';
@@ -49,6 +50,8 @@ export interface AppServices {
   tradeEvidence: TradeEvidenceReadPort;
   researcher: ResearcherPort;
   critic: CriticPort | null;          // null when ENABLE_CRITIC_AGENT=false
+  /** Pre-flight strategy critic; null when STRATEGY_PREFLIGHT_CRITIQUE=false. */
+  strategyCritic: StrategyCriticPort | null;
   hypotheses: HypothesisProposalRepository;
   hypothesisReviews: HypothesisReviewRepository;
   similarHypotheses: SimilarHypothesisSearchPort;
