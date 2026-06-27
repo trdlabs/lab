@@ -48,13 +48,13 @@ const DEFAULT_SCOPE: StrategyRunSubmission['scope'] = {
 export async function authorStrategyBundleHandler(
   input: AuthorStrategyInput,
   deps: {
-    builder: StrategyBuilder;
+    strategyBuilder: StrategyBuilder;
     artifacts: ArtifactStorePort;
-    backtester: BacktesterStrategyPort;
+    backtesterStrategy: BacktesterStrategyPort;
   },
 ): Promise<AuthorStrategyResult> {
   // Step 1: build
-  const out = await deps.builder.build(input);
+  const out = await deps.strategyBuilder.build(input);
 
   // Step 2: assemble (may throw on esbuild infra errors — let propagate)
   const assembled = await assembleStrategyBundle(out);
@@ -82,7 +82,7 @@ export async function authorStrategyBundleHandler(
   const bundleHash = assembled.bundleHash;
 
   // Step 5: submit to backtester
-  const result = await deps.backtester.submitStrategyRun({
+  const result = await deps.backtesterStrategy.submitStrategyRun({
     bundleBytes: assembled.bytes,
     bundleHash: assembled.bundleHash,
     manifest: assembled.manifest,

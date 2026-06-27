@@ -51,9 +51,9 @@ describe('authorStrategyBundleHandler', () => {
   it('happy path (signed): returns signed status with bundleRef and evidenceRef persisted', async () => {
     const artifacts = new InMemoryArtifactStore();
     const result = await authorStrategyBundleHandler(BASE_INPUT, {
-      builder: new FakeStrategyBuilder(),
+      strategyBuilder: new FakeStrategyBuilder(),
       artifacts,
-      backtester: new FixtureBacktesterAdapter({ outcome: 'signed' }),
+      backtesterStrategy: new FixtureBacktesterAdapter({ outcome: 'signed' }),
     });
 
     expect(result.status).toBe('signed');
@@ -86,9 +86,9 @@ describe('authorStrategyBundleHandler', () => {
       it(`outcome=${outcome}: bundleRef defined, evidenceRef undefined`, async () => {
         const artifacts = new InMemoryArtifactStore();
         const result = await authorStrategyBundleHandler(BASE_INPUT, {
-          builder: new FakeStrategyBuilder(),
+          strategyBuilder: new FakeStrategyBuilder(),
           artifacts,
-          backtester: new FixtureBacktesterAdapter({ outcome }),
+          backtesterStrategy: new FixtureBacktesterAdapter({ outcome }),
         });
 
         expect(result.status).toBe(outcome);
@@ -99,9 +99,9 @@ describe('authorStrategyBundleHandler', () => {
 
     it('divergent outcome includes divergence field', async () => {
       const result = await authorStrategyBundleHandler(BASE_INPUT, {
-        builder: new FakeStrategyBuilder(),
+        strategyBuilder: new FakeStrategyBuilder(),
         artifacts: new InMemoryArtifactStore(),
-        backtester: new FixtureBacktesterAdapter({ outcome: 'divergent' }),
+        backtesterStrategy: new FixtureBacktesterAdapter({ outcome: 'divergent' }),
       });
 
       expect(result.status).toBe('divergent');
@@ -112,9 +112,9 @@ describe('authorStrategyBundleHandler', () => {
   it('idempotent retry: same input twice → same bundleRef (content-addressed dedup)', async () => {
     const artifacts = new InMemoryArtifactStore();
     const deps = {
-      builder: new FakeStrategyBuilder(),
+      strategyBuilder: new FakeStrategyBuilder(),
       artifacts,
-      backtester: new FixtureBacktesterAdapter({ outcome: 'signed' }),
+      backtesterStrategy: new FixtureBacktesterAdapter({ outcome: 'signed' }),
     };
 
     const r1 = await authorStrategyBundleHandler(BASE_INPUT, deps);
@@ -134,9 +134,9 @@ describe('authorStrategyBundleHandler', () => {
     };
 
     const result = await authorStrategyBundleHandler(BASE_INPUT, {
-      builder: ambientBuilder,
+      strategyBuilder: ambientBuilder,
       artifacts,
-      backtester: spyBacktester,
+      backtesterStrategy: spyBacktester,
     });
 
     expect(result.status).toBe('rejected');
