@@ -26,6 +26,7 @@ function deps(over: Partial<ReadApiDeps> = {}): ReadApiDeps {
     researchTasks: { findById: async () => null },
     strategyProfiles: { findById: async () => null },
     tokenUsage: { getCost: async () => 0 },
+    phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
     ...over,
   };
 }

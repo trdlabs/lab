@@ -6,6 +6,7 @@ import type { AgentActivityProjection } from './projection.ts';
 import type { ResearchTaskRepository } from '../ports/research-task.repository.ts';
 import type { StrategyProfileRepository } from '../ports/strategy-profile.repository.ts';
 import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
+import type { PhoenixTraceReader } from './phoenix/phoenix-trace-reader.ts';
 
 export interface ReadApiDeps {
   hypotheses: HypothesisReadPort;
@@ -21,4 +22,5 @@ export interface ReadApiDeps {
   researchTasks: Pick<ResearchTaskRepository, 'findById'>;
   strategyProfiles: Pick<StrategyProfileRepository, 'findById'>;
   tokenUsage: Pick<TokenUsageRepository, 'getCost'>;
+  phoenixTraces: Pick<PhoenixTraceReader, 'getAgentTraces'>;
 }

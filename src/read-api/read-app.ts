@@ -9,6 +9,7 @@ import { registerAgentEventRoutes } from './routes/agent-events.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerCompletionSummaryRoutes } from './routes/completion-summary.ts';
+import { registerAgentTraceRoutes } from './routes/agent-traces.ts';
 
 const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary'];
 
@@ -33,6 +34,7 @@ export function createReadApp(deps: ReadApiDeps): Hono {
   registerBacktestRoutes(v1, deps);
   registerAgentEventRoutes(v1, deps);
   registerAgentRoutes(v1, deps);
+  registerAgentTraceRoutes(v1, deps);
   registerCompletionSummaryRoutes(v1, deps);
   registerStreamRoutes(v1, {
     agentEvents: deps.agentEvents,

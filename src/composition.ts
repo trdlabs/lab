@@ -74,6 +74,7 @@ import { DrizzleAgentEventReadAdapter } from './adapters/read/drizzle-agent-even
 import { AgentActivityProjection } from './read-api/projection.ts';
 import { PgNotifyAgentEventStream } from './adapters/read/pg-notify-agent-event-stream.ts';
 import type { ReadApiDeps } from './read-api/deps.ts';
+import { PhoenixTraceReader } from './read-api/phoenix/phoenix-trace-reader.ts';
 
 function buildAnalyst(rt: MastraRuntime): StrategyAnalystPort {
   const e = rt.agents.analyst;
@@ -310,6 +311,12 @@ export function composeRuntime() {
     researchTasks: services.researchTasks,
     strategyProfiles,
     tokenUsage: services.tokenUsage,
+    phoenixTraces: new PhoenixTraceReader({
+      enabled: env.PHOENIX_ENABLED,
+      baseUrl: env.PHOENIX_READ_BASE_URL,
+      projectName: env.PHOENIX_PROJECT_NAME,
+      apiKey: env.PHOENIX_API_KEY,
+    }),
   };
 
   return { env, db, pool, queue, router, services, chat, read, mastraRuntime };
