@@ -5,7 +5,7 @@ import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
 import type { StrategyAnalystInput } from '../../domain/strategy-source.ts';
 import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 import type { JudgeVerdict } from './types.ts';
-import { GOOD_LONG_OI_PROFILE } from './__fixtures__/profiles.ts';
+import { GOOD_LONG_OI_PROFILE, GOOD_SHORT_PUMP_PROFILE } from './__fixtures__/profiles.ts';
 
 function fakeAnalyst(out: AnalystProfileOutput): StrategyAnalystPort {
   return {
@@ -47,6 +47,7 @@ const baseInput = {
   fixtureText: 'long only strategy text',
   fixtureFingerprint: 'sha256:abc',
   threshold: 0.8,
+  direction: 'long' as const,
 };
 
 function deps(map: Record<string, StrategyAnalystPort>, judge?: (p: AnalystProfileOutput) => Promise<JudgeVerdict>) {
@@ -159,5 +160,34 @@ describe('runEval --repeat aggregation', () => {
     );
     expect(result.judgeEnabled).toBe(false);
     expect(result.aggregates[0]!.judge).toBeNull();
+  });
+});
+
+describe('runEval — completeness primary signal + scoreProfile secondary', () => {
+  it('long fixture: score is direction-aware completeness AND secondaryScore is the bespoke scoreProfile', async () => {
+    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }));
+    const r = result.perModel[0]!;
+    // primary deterministic verdict comes from scoreCompleteness keyed on direction 'long'
+    expect(r.score!.gates.directionMatches).toBe(true);
+    expect(r.verdict).toBe('PASS');
+    // bespoke long-oi diagnostic retained as a secondary field (uses the directionLong gate)
+    expect(r.secondaryScore).not.toBeNull();
+    expect(r.secondaryScore!.gates.directionLong).toBe(true);
+  });
+
+  it('short fixture: completeness keyed on short PASSes; secondaryScore is null (not long-oi)', async () => {
+    const result = await runEval(
+      { ...baseInput, models: ['x/y'], fixtureId: 'short-pump', direction: 'short' as const },
+      deps({ 'x/y': fakeAnalyst(GOOD_SHORT_PUMP_PROFILE) }),
+    );
+    const r = result.perModel[0]!;
+    expect(r.score!.gates.directionMatches).toBe(true);
+    expect(r.verdict).toBe('PASS');
+    expect(r.secondaryScore).toBeNull();
+  });
+
+  it('a throwing model still records secondaryScore null', async () => {
+    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': throwingAnalyst('boom') }));
+    expect(result.perModel[0]!.secondaryScore).toBeNull();
   });
 });

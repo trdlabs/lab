@@ -1,7 +1,8 @@
 // src/experiments/strategy-analyst/eval-harness.ts
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
-import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
+import type { AnalystProfileOutput, Direction } from '../../domain/strategy-profile.ts';
 import { scoreProfile } from './scoring.ts';
+import { scoreCompleteness } from './completeness.ts';
 import { aggregateRuns } from './aggregate.ts';
 import type { CandidateError, CandidateResult, EvalRunResult, JudgeVerdict, ModelAggregate } from './types.ts';
 
@@ -11,6 +12,7 @@ export interface RunEvalInput {
   fixtureText: string;
   fixtureFingerprint: string;
   threshold: number;
+  direction: Direction;
   repeat?: number; // independent runs per model; default 1, assumed >= 1
 }
 
@@ -30,7 +32,7 @@ export function classifyError(err: unknown): CandidateError {
   return { type, message };
 }
 
-/** One independent run for a model: analyze() -> scoreProfile() -> (optional) judge(). Never throws. */
+/** One independent run for a model: analyze() -> scoreCompleteness() (+ scoreProfile secondary for long) -> (optional) judge(). Never throws. */
 async function runOnce(model: string, input: RunEvalInput, deps: RunEvalDeps): Promise<CandidateResult> {
   const { provider, modelId } = deps.providerOf(model);
   const start = deps.clock();
@@ -38,7 +40,8 @@ async function runOnce(model: string, input: RunEvalInput, deps: RunEvalDeps): P
     const analyst = deps.analystFor(model);
     const raw = await analyst.analyze({ kind: 'manual_description', content: input.fixtureText, title: input.fixtureId });
     const latencyMs = deps.clock() - start;
-    const score = scoreProfile(raw, { threshold: input.threshold });
+    const score = scoreCompleteness(raw, { expectedDirection: input.direction, threshold: input.threshold });
+    const secondaryScore = input.direction === 'long' ? scoreProfile(raw, { threshold: input.threshold }) : null;
 
     let judge: JudgeVerdict | null = null;
     if (deps.judge) {
@@ -51,10 +54,10 @@ async function runOnce(model: string, input: RunEvalInput, deps: RunEvalDeps): P
       }
     }
 
-    return { model, provider, modelId, latencyMs, verdict: score.verdict, score, rawOutput: raw, error: null, judge };
+    return { model, provider, modelId, latencyMs, verdict: score.verdict, score, secondaryScore, rawOutput: raw, error: null, judge };
   } catch (err) {
     const latencyMs = deps.clock() - start;
-    return { model, provider, modelId, latencyMs, verdict: 'FAIL', score: null, rawOutput: null, error: classifyError(err), judge: null };
+    return { model, provider, modelId, latencyMs, verdict: 'FAIL', score: null, secondaryScore: null, rawOutput: null, error: classifyError(err), judge: null };
   }
 }
 

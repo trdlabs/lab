@@ -26,7 +26,7 @@ function candidate(over: Partial<CandidateResult> = {}): CandidateResult {
     model: 'openai/gpt-x', provider: 'openai', modelId: 'gpt-x', latencyMs: 123,
     verdict: 'PASS',
     score: { gates: { schemaValid: true, directionLong: true }, checks: [], score: 0.9, threshold: 0.8, verdict: 'PASS' },
-    rawOutput: null, error: null,
+    secondaryScore: null, rawOutput: null, error: null,
     judge: { dimensions: [], overallScore: 0.8, hallucinations: [], missingFromProfile: [], notes: 'n' },
     ...over,
   };

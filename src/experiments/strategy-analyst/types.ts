@@ -51,7 +51,8 @@ export interface CandidateResult {
   modelId: string;
   latencyMs: number;
   verdict: 'PASS' | 'FAIL';
-  score: ScoreResult | null;        // null only when analyze() threw
+  score: ScoreResult | null;        // primary deterministic signal — scoreCompleteness (null only when analyze() threw)
+  secondaryScore: ScoreResult | null; // bespoke long-oi scoreProfile diagnostic; null unless direction === 'long'
   rawOutput: AnalystProfileOutput | null; // present only when analyze() returned
   error: CandidateError | null;
   judge: JudgeVerdict | null;       // populated only when --judge ran; written to a SEPARATE file

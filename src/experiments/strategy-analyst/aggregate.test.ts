@@ -30,7 +30,7 @@ function score(s: number): ScoreResult {
 function run(over: Partial<CandidateResult> & { model: string }): CandidateResult {
   return {
     provider: 'p', modelId: 'm', latencyMs: 100, verdict: 'PASS',
-    score: score(0.9), rawOutput: null, error: null, judge: null, ...over,
+    score: score(0.9), secondaryScore: null, rawOutput: null, error: null, judge: null, ...over,
   };
 }
 
