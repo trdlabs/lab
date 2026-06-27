@@ -12,6 +12,7 @@ import type { AgentEventRepository } from '../ports/agent-event.repository.ts';
 import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
 import type { ActionProposal } from '../domain/action-proposal.ts';
+import type { StrategyCriticPort } from '../ports/strategy-critic.port.ts';
 import { createAndEnqueueTask } from '../orchestrator/task-intake.ts';
 import { parseTurn, planChatAction, type PlanDecision } from './guard.ts';
 import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
@@ -33,6 +34,8 @@ export interface ChatHandlerDeps {
   events: AgentEventRepository;
   queue: TaskQueuePort;
   proposals: ActionProposalRepository;
+  /** Pre-flight strategy critic for chat HITL; null when STRATEGY_PREFLIGHT_CRITIQUE=false. */
+  strategyCritic: StrategyCriticPort | null;
   /** Confirmation window for a proposed action — policy, not deployment tuning. */
   proposalTtlMs: number;
   minConfidence: number;

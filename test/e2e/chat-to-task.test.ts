@@ -61,6 +61,7 @@ describe('e2e: two-turn chat — propose then confirm, then worker drains', () =
       researchTasks: services.researchTasks, strategyProfiles: services.strategyProfiles,
       hypotheses: services.hypotheses, events, queue,
       proposals: services.actionProposals, proposalTtlMs: 600_000,
+      strategyCritic: null,
       minConfidence: 0.6, maxMessageChars: 4000,
       defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
       authToken: 'e2e-chat-token',

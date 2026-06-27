@@ -25,6 +25,7 @@ function appDeps(over: Partial<ChatAppDeps> = {}): ChatAppDeps {
     events: new InMemoryAgentEventRepository(),
     queue: new InMemoryQueueAdapter(),
     proposals: new InMemoryActionProposalRepository(),
+    strategyCritic: null,
     proposalTtlMs: 600_000,
     minConfidence: 0.6,
     defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },

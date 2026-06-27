@@ -33,6 +33,7 @@ function deps(over: Partial<ChatHandlerDeps> = {}) {
     hypotheses: new InMemoryHypothesisProposalRepository(),
     events, queue, minConfidence: 0.6,
     proposals, proposalTtlMs: 600_000,
+    strategyCritic: null,
     defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
     ...over,
   };
@@ -447,5 +448,12 @@ describe('handleChatMessage — confirmation consumption (second turn)', () => {
 
     // THE INVARIANT: one conversation turn = one correlationId.
     expect(planCorrelationId).toBe(enqueuedCorrelationId);
+  });
+});
+
+describe('ChatHandlerDeps strategyCritic plumbing', () => {
+  it('the base fixture exposes strategyCritic, defaulting to null', () => {
+    const { d } = deps();
+    expect(d.strategyCritic).toBeNull();
   });
 });

@@ -283,6 +283,7 @@ export function composeRuntime() {
     events: services.events,
     queue,
     proposals: services.actionProposals,
+    strategyCritic: services.strategyCritic,
     proposalTtlMs: CHAT_PROPOSAL_TTL_MS,
     minConfidence: env.TURN_INTERPRETER_MIN_CONFIDENCE,
     defaultPlatformRun: services.defaultPlatformRun,
