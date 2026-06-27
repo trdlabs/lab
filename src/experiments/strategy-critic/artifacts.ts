@@ -68,7 +68,7 @@ export function writeRunArtifacts(outDir: string, meta: ManifestMeta, result: Ev
     candidates: result.candidates.map((c) => c.label),
     perCandidate: result.aggregates.map((a) => ({
       label: a.label,
-      aggregate: { passRate: a.passRate, detMean: a.det?.mean ?? null, judgeMean: a.judge?.mean ?? null },
+      aggregate: { passRate: a.passRate, detMean: a.det?.mean ?? null, judgeMean: a.judge?.mean ?? null, profileMean: a.profile?.mean ?? null },
     })),
     overallSuccess: result.overallSuccess,
   });

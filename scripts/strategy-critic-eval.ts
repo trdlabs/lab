@@ -33,6 +33,8 @@ function parseCli() {
       judge: { type: 'boolean', default: false },
       'judge-model': { type: 'string' },
       repeat: { type: 'string', default: '1' },
+      'round-trip': { type: 'boolean', default: false },
+      'analyst-model': { type: 'string', default: 'openrouter/x-ai/grok-4.3' },
     },
   });
   const mode = values.mode!;
@@ -50,7 +52,7 @@ function parseCli() {
   const repeat = Number(values.repeat);
   if (!Number.isInteger(repeat) || repeat < 1 || repeat > 20) throw new Error(`--repeat must be an integer in [1,20], got ${values.repeat}`);
   if (values.judge && !values['judge-model']) throw new Error('--judge requires --judge-model <provider/model>');
-  return { candidates, cases, run: values.run!, threshold, judge: values.judge!, judgeModel: values['judge-model'], repeat };
+  return { candidates, cases, run: values.run!, threshold, judge: values.judge!, judgeModel: values['judge-model'], repeat, roundTrip: values['round-trip']!, analystModel: values['analyst-model']! };
 }
 
 function gitSha(): string {
@@ -75,10 +77,11 @@ async function main(): Promise<number> {
 
   // ---------- DRY RUN (default): no model construction, no composeMastra ----------
   if (!args.run) {
-    const plan = planDryRun({ candidates: args.candidates, cases: args.cases, judge: args.judge, judgeModel: args.judgeModel, env: process.env, repeat: args.repeat });
+    const plan = planDryRun({ candidates: args.candidates, cases: args.cases, judge: args.judge, judgeModel: args.judgeModel, env: process.env, repeat: args.repeat, roundTrip: args.roundTrip, analystModel: args.analystModel });
     process.stdout.write(`${JSON.stringify({
       mode: 'dry-run', threshold: args.threshold, judge: args.judge, repeat: args.repeat, cases: args.cases,
-      plannedPaidCalls: plan.totalPaidCalls, refineCalls: plan.refineCalls, judgeCalls: plan.judgeCalls,
+      roundTrip: args.roundTrip, analystModel: args.analystModel,
+      plannedPaidCalls: plan.totalPaidCalls, refineCalls: plan.refineCalls, judgeCalls: plan.judgeCalls, analystCalls: plan.analystCalls,
       candidates: plan.perCandidate, missingKeys: plan.missingKeys,
       note: 'DRY RUN — no real models constructed, nothing sent. Re-run with --run to make paid calls.',
     }, null, 2)}\n`);
@@ -92,13 +95,20 @@ async function main(): Promise<number> {
   let judge: Awaited<ReturnType<typeof buildRealJudge>> | undefined;
   if (args.judge && args.judgeModel) judge = buildRealJudge(env, args.judgeModel);
 
+  let analystFor: ((modelId: string) => import('../src/ports/strategy-analyst.port.ts').StrategyAnalystPort) | undefined;
+  if (args.roundTrip) {
+    const { buildRealAnalystFor } = await import('../src/experiments/strategy-analyst/real-analyst-factory.ts');
+    analystFor = buildRealAnalystFor(env);
+  }
+
   const result = await runEval(
-    { candidates: args.candidates, cases: args.cases.map((id) => resolveCase(id)), threshold: args.threshold, repeat: args.repeat },
+    { candidates: args.candidates, cases: args.cases.map((id) => resolveCase(id)), threshold: args.threshold, repeat: args.repeat, roundTrip: args.roundTrip, analystModel: args.analystModel },
     {
       criticFor: buildRealCriticFor(env),
       providerOf: (m) => { const r = parseRoleModel(env, m); return { provider: r.provider, modelId: r.modelId }; },
       clock: () => Date.now(),
       judge,
+      analystFor,
     },
   );
 
@@ -120,6 +130,7 @@ async function main(): Promise<number> {
     detStd: a.det ? r3(a.det.std) : null,
     judgeMean: a.judge ? r3(a.judge.mean) : null,
     judgeStd: a.judge ? r3(a.judge.std) : null,
+    profileMean: a.profile ? r3(a.profile.mean) : null,
     latencyMeanMs: Math.round(a.latency.mean),
   }));
 

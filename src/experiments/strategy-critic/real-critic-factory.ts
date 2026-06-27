@@ -9,6 +9,7 @@ import { createStrategyCriticJudgeAgent } from '../../mastra/agents/strategy-cri
 import { runJudge } from './judge.ts';
 import type { StrategyCriticPort } from '../../ports/strategy-critic.port.ts';
 import type { StrategyRefinement } from '../../domain/strategy-critic.ts';
+import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 import type { Candidate, CriticEvalCase, JudgeVerdict } from './types.ts';
 
 /** Base composition env: every adapter 'fake' except the strategy critic (set per candidate). */
@@ -53,8 +54,9 @@ export function buildRealCriticFor(baseEnv: ModelProviderEnv): (candidate: Candi
 export function buildRealJudge(
   baseEnv: ModelProviderEnv,
   judgeModelId: string,
-): (refinement: StrategyRefinement, evalCase: CriticEvalCase) => Promise<JudgeVerdict> {
+): (refinement: StrategyRefinement, evalCase: CriticEvalCase, profile?: AnalystProfileOutput) => Promise<JudgeVerdict> {
   const resolved = resolveLanguageModel(baseEnv, judgeModelId);
   const agent = createStrategyCriticJudgeAgent(resolved.model);
-  return (refinement: StrategyRefinement, evalCase: CriticEvalCase) => runJudge(agent, { originalText: evalCase.text, refinement });
+  return (refinement: StrategyRefinement, evalCase: CriticEvalCase, profile?: AnalystProfileOutput) =>
+    runJudge(agent, { originalText: evalCase.text, refinement, profile });
 }

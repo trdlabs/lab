@@ -21,6 +21,7 @@ export interface DryRunPlan {
   perCandidate: DryRunCandidatePlan[];
   refineCalls: number;
   judgeCalls: number;
+  analystCalls: number; // candidates × cases × repeat when roundTrip, else 0
   totalPaidCalls: number;
   missingKeys: string[];
 }
@@ -32,6 +33,8 @@ export interface PlanInput {
   judgeModel?: string;
   env: Record<string, string | undefined>;
   repeat?: number;
+  roundTrip?: boolean;
+  analystModel?: string;
 }
 
 function rolesOf(c: Candidate): string[] {
@@ -54,10 +57,12 @@ export function planDryRun(input: PlanInput): DryRunPlan {
 
   const refineCalls = perCandidate.reduce((s, p) => s + p.callsPerRun, 0) * caseCount * repeat;
   const judgeCalls = (input.judge ? input.candidates.length : 0) * caseCount * repeat;
+  const analystCalls = input.roundTrip ? input.candidates.length * caseCount * repeat : 0;
 
   const allModels = new Set<string>();
   for (const p of perCandidate) for (const m of p.models) allModels.add(m);
   if (input.judge && input.judgeModel) allModels.add(input.judgeModel);
+  if (input.roundTrip && input.analystModel) allModels.add(input.analystModel);
 
   const missing = new Set<string>();
   for (const m of allModels) {
@@ -67,5 +72,5 @@ export function planDryRun(input: PlanInput): DryRunPlan {
     if (!input.env[key]) missing.add(key);
   }
 
-  return { repeat, caseCount, perCandidate, refineCalls, judgeCalls, totalPaidCalls: refineCalls + judgeCalls, missingKeys: [...missing] };
+  return { repeat, caseCount, perCandidate, refineCalls, judgeCalls, analystCalls, totalPaidCalls: refineCalls + judgeCalls + analystCalls, missingKeys: [...missing] };
 }
