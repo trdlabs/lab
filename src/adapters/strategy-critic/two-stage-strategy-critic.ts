@@ -11,7 +11,7 @@ import {
 
 const RefinementDeltaSchema = z.object({
   improvedStrategyText: z.string(),
-  changeLog: z.array(z.string()).optional(),
+  changeLog: z.array(z.string()),
 });
 
 function buildCritiquePrompt(input: StrategyCriticInput): string {
@@ -77,7 +77,7 @@ export class TwoStageStrategyCritic implements StrategyCriticPort {
     return StrategyRefinementSchema.parse({
       ...critique,
       improvedStrategyText: delta.improvedStrategyText,
-      ...(delta.changeLog !== undefined ? { changeLog: delta.changeLog } : {}),
+      changeLog: delta.changeLog,
     });
   }
 }

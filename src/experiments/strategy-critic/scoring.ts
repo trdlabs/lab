@@ -46,7 +46,7 @@ export function scoreRefinement(
   const nonTrivial = nonTrivialChange(improved, evalCase.text);
   const gates = { schemaValid, directionPreserved, noRunnerOverreach, nonTrivialChange: nonTrivial };
 
-  const haystack = [improved, ...(refinement.changeLog ?? [])].join(' • ').toLowerCase();
+  const haystack = [improved, ...refinement.changeLog].join(' • ').toLowerCase();
   const checks: CheckResult[] = evalCase.expectedAspects.map((aspect) => {
     const matched = aspect.any.filter((src) => new RegExp(src, 'iu').test(haystack));
     return { id: aspect.label, weight: aspect.weight, hit: matched.length > 0, matched };

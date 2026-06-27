@@ -33,12 +33,14 @@ describe('strategy-critic schemas', () => {
     expect(StrategyCritiqueSchema.safeParse(bad).success).toBe(false);
   });
 
-  it('refinement extends the critique with improvedStrategyText + optional changeLog', () => {
+  it('refinement extends the critique with improvedStrategyText + required changeLog', () => {
     const ok = StrategyRefinementSchema.safeParse({ ...validCritique, improvedStrategyText: 'short after a >10% pump in 20m, only when BTC is range-bound; invalidate if funding flips', changeLog: ['added BTC-regime filter'] });
     expect(ok.success).toBe(true);
+    const emptyLog = StrategyRefinementSchema.safeParse({ ...validCritique, improvedStrategyText: 'x', changeLog: [] });
+    expect(emptyLog.success).toBe(true); // changeLog required but can be empty array
     const noLog = StrategyRefinementSchema.safeParse({ ...validCritique, improvedStrategyText: 'x' });
-    expect(noLog.success).toBe(true); // changeLog optional
-    const missing = StrategyRefinementSchema.safeParse(validCritique); // no improvedStrategyText
+    expect(noLog.success).toBe(false); // changeLog is now required
+    const missing = StrategyRefinementSchema.safeParse(validCritique); // no improvedStrategyText, no changeLog
     expect(missing.success).toBe(false);
   });
 });

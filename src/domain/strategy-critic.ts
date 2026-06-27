@@ -31,6 +31,6 @@ export type StrategyCritique = z.infer<typeof StrategyCritiqueSchema>;
 /** The port's return type — `improvedStrategyText` is what the analyst receives. */
 export const StrategyRefinementSchema = StrategyCritiqueSchema.extend({
   improvedStrategyText: z.string(),
-  changeLog: z.array(z.string()).optional(),
+  changeLog: z.array(z.string()),
 });
 export type StrategyRefinement = z.infer<typeof StrategyRefinementSchema>;
