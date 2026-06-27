@@ -69,7 +69,7 @@ export interface CandidateResult {
   error: CandidateError | null;
   judge: JudgeVerdict | null;           // populated only when --judge ran
   profile: AnalystProfileOutput | null;   // round-trip analyst profile; null when off or on analyst failure
-  profileScore: AnalystScoreResult | null; // deterministic scoreProfile() result; null when off or on analyst failure
+  profileScore: AnalystScoreResult | null; // deterministic scoreCompleteness() result (keyed on the case direction); null when off or on analyst failure
 }
 
 export interface Stats {

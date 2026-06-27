@@ -3,7 +3,7 @@ import type { StrategyCriticPort } from '../../ports/strategy-critic.port.ts';
 import type { StrategyRefinement } from '../../domain/strategy-critic.ts';
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
 import { scoreRefinement } from './scoring.ts';
-import { scoreProfile } from '../strategy-analyst/scoring.ts';
+import { scoreCompleteness } from '../strategy-analyst/completeness.ts';
 import { aggregateRuns } from './aggregate.ts';
 import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 import type { ScoreResult as AnalystScoreResult } from '../strategy-analyst/types.ts';
@@ -59,7 +59,7 @@ export async function runOnce(candidate: Candidate, evalCase: CriticEvalCase, in
       try {
         const analyst = deps.analystFor(input.analystModel);
         profile = await analyst.analyze({ kind: 'manual_description', content: raw.improvedStrategyText });
-        profileScore = scoreProfile(profile, { threshold: input.threshold });
+        profileScore = scoreCompleteness(profile, { expectedDirection: evalCase.direction, threshold: input.threshold });
       } catch (analystErr) {
         // Fail-soft: the analyst is downstream of the critique; its failure must NOT fail the candidate.
         process.stderr.write(`analyst failed for ${candidate.label}/${evalCase.id}: ${analystErr instanceof Error ? analystErr.message : String(analystErr)}\n`);

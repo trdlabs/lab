@@ -10,6 +10,14 @@ export const FIXTURES: Record<string, FixtureRef> = {
     sourcePath: `${DIR}/long-oi-strategy-source.md`,
     notesPath: `${DIR}/long-oi-strategy-research-notes.md`,
     rubricPath: `${DIR}/long-oi-strategy-rubric.md`,
+    direction: 'long',
+  },
+  'short-pump': {
+    id: 'short-pump',
+    sourcePath: `${DIR}/short-pump-strategy-source.md`,
+    notesPath: `${DIR}/short-pump-strategy-research-notes.md`,
+    rubricPath: `${DIR}/short-pump-strategy-rubric.md`,
+    direction: 'short',
   },
 };
 

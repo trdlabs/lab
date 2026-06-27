@@ -75,3 +75,41 @@ export const RU_PROFILE: AnalystProfileOutput = {
   exitConditions: ['первый тейк +3.5%', 'второй тейк +5%', 'жёсткий стоп -12%', 'выход по времени 180 минут'],
   positionManagementSummary: 'Усреднение (DCA) до двух доливок; перенос стопа в безубыток после TP1.',
 };
+
+/** A strong short-after-pump profile that should PASS scoreCompleteness for expectedDirection 'short'. */
+export const GOOD_SHORT_PUMP_PROFILE: AnalystProfileOutput = {
+  direction: 'short',
+  coreIdea: 'Short-only mean-reversion: after a vertical pump, enter short on confirmed exhaustion backed by stalling open interest and a liquidation cascade near the high.',
+  summary: 'Rule-based FSM on 1m candles. Detects a sharp pump, watches for exhaustion, enters short when price rolls over, open interest stalls/declines and liquidations confirm the blow-off.',
+  requiredMarketFeatures: ['ohlcv', 'open interest', 'liquidations', 'funding'],
+  entryConditions: [
+    'Pump of >=10% detected over the lookback window',
+    'Rollover/rejection from the local high confirmed by red candles',
+    'Open interest stalling or rolling over',
+    'Liquidation cascade present near the high',
+  ],
+  exitConditions: [
+    'TP1 at -3.5% (partial 50%)',
+    'TP2 at -5% (full exit)',
+    'Hard stop at +12%',
+    'Time exit after 180 minutes',
+  ],
+  timeframes: ['1m'],
+  indicators: [],
+  parameters: [
+    { name: 'pump.minRisePct', value: 10, unit: '%', description: 'Minimum rise to trigger', tunable: true },
+    { name: 'tpLadder.tp1Pct', value: 3.5, unit: '%', description: 'First take profit', tunable: true },
+  ],
+  watchLifecycleSummary: 'IDLE -> WATCHING -> IN_POSITION -> COOLDOWN.',
+  positionManagementSummary: 'DCA up to two adds on further spikes; move stop to breakeven after TP1.',
+  riskManagementSummary: 'Risk sizing, leverage and fills are owned by the runner/platform; the strategy only emits a sizing hint for DCA.',
+  runnerOwnedAuthorities: ['position sizing', 'leverage', 'fills', 'execution'],
+  confidence: 0.8,
+  unknowns: [
+    'Exact position sizing and leverage are not specified',
+    'Fees/commissions are not specified',
+    'Target exchange/venue is not specified',
+    'Instrument universe (which symbols) is not specified',
+  ],
+  evidence: ['"шорт после пампа"', '"первый тейк на -3.5%"'],
+};

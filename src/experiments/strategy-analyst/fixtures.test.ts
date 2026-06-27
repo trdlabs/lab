@@ -1,5 +1,6 @@
 // src/experiments/strategy-analyst/fixtures.test.ts
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { resolveFixture, fingerprintSource, FIXTURES } from './fixtures.ts';
 
 describe('resolveFixture', () => {
@@ -18,6 +19,23 @@ describe('resolveFixture', () => {
   it('FIXTURES is the registry of known ids', () => {
     expect(Object.keys(FIXTURES)).toContain('long-oi');
   });
+
+  it('tags long-oi as a long-direction fixture', () => {
+    expect(resolveFixture('long-oi').direction).toBe('long');
+  });
+
+  it('resolves the short-pump fixture to its source/notes/rubric paths + short direction', () => {
+    const ref = resolveFixture('short-pump');
+    expect(ref.id).toBe('short-pump');
+    expect(ref.sourcePath).toBe('docs/fixtures/strategies/short-pump-strategy-source.md');
+    expect(ref.notesPath).toBe('docs/fixtures/strategies/short-pump-strategy-research-notes.md');
+    expect(ref.rubricPath).toBe('docs/fixtures/strategies/short-pump-strategy-rubric.md');
+    expect(ref.direction).toBe('short');
+  });
+
+  it('FIXTURES registers both fixtures', () => {
+    expect(Object.keys(FIXTURES)).toEqual(expect.arrayContaining(['long-oi', 'short-pump']));
+  });
 });
 
 describe('fingerprintSource', () => {
@@ -26,5 +44,16 @@ describe('fingerprintSource', () => {
     expect(fp).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(fingerprintSource('hello')).toBe(fp); // deterministic
     expect(fingerprintSource('hello2')).not.toBe(fp);
+  });
+});
+
+describe('short-pump fixture files exist and fingerprint', () => {
+  it('source/notes/rubric files are readable and the source fingerprints', () => {
+    const ref = resolveFixture('short-pump');
+    const source = readFileSync(ref.sourcePath, 'utf8');
+    expect(source.length).toBeGreaterThan(200);
+    expect(readFileSync(ref.notesPath, 'utf8').length).toBeGreaterThan(1000);
+    expect(readFileSync(ref.rubricPath, 'utf8').length).toBeGreaterThan(200);
+    expect(fingerprintSource(source)).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

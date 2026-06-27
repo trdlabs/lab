@@ -9,7 +9,7 @@ import { GOOD_PUMP_SHORT_REFINEMENT } from './__fixtures__/refinements.ts';
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
 import type { StrategyAnalystInput } from '../../domain/strategy-source.ts';
 import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
-import { GOOD_LONG_OI_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
+import { GOOD_LONG_OI_PROFILE, GOOD_SHORT_PUMP_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
 
 const CAND: Candidate = { mode: 'two_stage', label: 'two_stage:critic=c,refiner=r', criticModel: 'c', refinerModel: 'r' };
 const CASE: CriticEvalCase = resolveCase('pump-short');
@@ -101,23 +101,37 @@ function throwingAnalyst(message: string): StrategyAnalystPort {
 describe('runOnce — round-trip stage', () => {
   const rtInput: RunEvalInput = { candidates: [CAND], cases: [CASE], threshold: 0.6, roundTrip: true, analystModel: 'fake/analyst' };
 
-  it('populates profile + profileScore and hands the profile to the judge', async () => {
+  it('populates profile + profileScore (completeness keyed on the case direction) and hands the profile to the judge', async () => {
     let analystInput: StrategyAnalystInput | undefined;
     let judgeProfile: AnalystProfileOutput | undefined;
     const d: RunEvalDeps = {
       criticFor: () => fakeCritic(GOOD_PUMP_SHORT_REFINEMENT),
       providerOf: (m) => ({ provider: 'fake', modelId: m }),
       clock: (() => { let t = 0; return () => (t += 100); })(),
-      analystFor: () => fakeAnalyst(GOOD_LONG_OI_PROFILE, (i) => { analystInput = i; }),
+      analystFor: () => fakeAnalyst(GOOD_SHORT_PUMP_PROFILE, (i) => { analystInput = i; }),
       judge: async (_r, _c, p) => { judgeProfile = p; return { dimensions: [], overallScore: 0.9, hallucinations: [], missing: [], notes: 'ok' }; },
     };
-    const r = await runOnce(CAND, CASE, rtInput, d);
+    const r = await runOnce(CAND, CASE, rtInput, d); // CASE = pump-short (direction 'short')
     expect(analystInput).toEqual({ kind: 'manual_description', content: GOOD_PUMP_SHORT_REFINEMENT.improvedStrategyText });
-    expect(r.profile).toEqual(GOOD_LONG_OI_PROFILE);
+    expect(r.profile).toEqual(GOOD_SHORT_PUMP_PROFILE);
     expect(r.profileScore).not.toBeNull();
-    expect(typeof r.profileScore!.score).toBe('number');
-    expect(judgeProfile).toEqual(GOOD_LONG_OI_PROFILE);
+    // pump-short (short) no longer fails on a long-only gate: a matching short profile is direction-valid
+    expect(r.profileScore!.gates.directionMatches).toBe(true);
+    expect(r.profileScore!.verdict).toBe('PASS');
+    expect(judgeProfile).toEqual(GOOD_SHORT_PUMP_PROFILE);
     expect(r.verdict).toBe('PASS'); // critique verdict, unaffected
+  });
+
+  it('a long profile against the short case is direction-mismatched (the confound is now visible, not silently bucket-missed)', async () => {
+    const d: RunEvalDeps = {
+      criticFor: () => fakeCritic(GOOD_PUMP_SHORT_REFINEMENT),
+      providerOf: (m) => ({ provider: 'fake', modelId: m }),
+      clock: (() => { let t = 0; return () => (t += 100); })(),
+      analystFor: () => fakeAnalyst(GOOD_LONG_OI_PROFILE),
+    };
+    const r = await runOnce(CAND, CASE, rtInput, d);
+    expect(r.profileScore).not.toBeNull();
+    expect(r.profileScore!.gates.directionMatches).toBe(false);
   });
 
   it('is fail-soft when the analyst throws: profile/profileScore null, critique verdict intact, judge still runs', async () => {
