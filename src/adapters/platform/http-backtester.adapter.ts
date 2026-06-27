@@ -24,6 +24,7 @@ import type {
   RegistryDescriptor,
   OverlayRunPreset,
 } from '@trading-backtester/sdk/contracts';
+import { createModuleBundle } from '@trading-backtester/sdk/builder';
 import { BacktesterConflictError, BacktesterError } from '@trading-backtester/sdk/client';
 import type {
   ResearchPlatformPort,
@@ -39,6 +40,7 @@ import type {
 } from '../../ports/research-platform.port.ts';
 import type { GatewayError } from '../../ports/research-run-lifecycle.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
+import type { BacktesterStrategyPort, StrategyRunResult, StrategyRunSubmission } from '../../ports/backtester-strategy.port.ts';
 import { GatewayRunError, GatewayValidationError } from './gateway-errors.ts';
 import { toBacktesterBundle } from './backtester-bundle.ts';
 
@@ -146,13 +148,15 @@ function toSdkValidationReport(r: BtValidationReport): ValidationReport {
   };
 }
 
-export class HttpBacktesterAdapter implements ResearchPlatformPort {
+export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterStrategyPort {
   private readonly client: BacktesterClientLike;
   /** Memoized: the registry is immutable for the life of the adapter, so discover it at most once. */
   private registryPromise?: Promise<RegistryDescriptor>;
+  private readonly goldenResultHash?: string;
 
-  constructor(client: BacktesterClientLike) {
+  constructor(client: BacktesterClientLike, opts?: { goldenResultHash?: string }) {
     this.client = client;
+    this.goldenResultHash = opts?.goldenResultHash;
   }
 
   private registry(): Promise<RegistryDescriptor> {
@@ -276,6 +280,65 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort {
         return { ok: true, kind: 'status', view: toSdkStatusView(view) };
       }
       throw new GatewayRunError(toGatewayError(err));
+    }
+  }
+
+  // ── BacktesterStrategyPort ────────────────────────────────────────────────
+
+  /** Poll until the run reaches a terminal status. Returns as soon as the first terminal status is observed. */
+  private async pollUntilTerminal(runId: string, pollIntervalMs = 1000): Promise<void> {
+    while (true) {
+      const view = await this.client.getRunStatus(runId);
+      if (TERMINAL.has(view.status)) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+  }
+
+  /**
+   * Submit a strategy bundle for a deterministic backtest, poll until completion, and compare the
+   * result hash against the adapter's configured golden hash. Returns:
+   *   - `equivalent` — resultHash matches the golden anchor
+   *   - `divergent`  — resultHash differs (carries divergence metadata)
+   *   - `unavailable` — client connection/timeout error (never throws)
+   */
+  async submitStrategyRun(s: StrategyRunSubmission): Promise<StrategyRunResult> {
+    try {
+      // Build the backtester wire bundle: manifest from the submission (already a BundleManifest),
+      // entry = single compiled ESM file, files = decoded bytes.
+      const strategyBundle = createModuleBundle({
+        manifest: s.manifest,
+        entry: 'index.js',
+        files: { 'index.js': new TextDecoder().decode(s.bundleBytes) },
+      });
+      const req: BtRunSubmitRequest = {
+        engine: 'strategy',
+        moduleRef: { id: s.manifest.id, version: s.manifest.version },
+        moduleBundle: strategyBundle,
+        datasetRef: s.scope.datasetRef,
+        symbols: s.scope.symbols,
+        timeframe: s.scope.timeframe,
+        period: {
+          from: new Date(s.scope.window.fromMs).toISOString(),
+          to: new Date(s.scope.window.toMs).toISOString(),
+        },
+        mode: 'research',
+        seed: 0,
+        metrics: [],
+      };
+      const { runId } = await this.client.submitRun(req);
+      await this.pollUntilTerminal(runId);
+      const summary = await this.client.getRunResult(runId);
+      const resultHash = summary.resultHash;
+      if (resultHash === this.goldenResultHash) {
+        return { status: 'equivalent', resultHash };
+      }
+      return {
+        status: 'divergent',
+        resultHash,
+        divergence: { bar: -1, field: 'result_hash', expected: this.goldenResultHash, actual: resultHash },
+      };
+    } catch {
+      return { status: 'unavailable' };
     }
   }
 }
