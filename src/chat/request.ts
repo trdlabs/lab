@@ -15,7 +15,7 @@ export type ChatMessageRequest = z.infer<typeof ChatMessageRequestSchema>;
 export const ChatConfirmRequestSchema = z.object({
   pendingInteractionId: z.string().min(1),
   sessionId: z.string().min(1),
-  decision: z.enum(['confirm', 'cancel']),
+  decision: z.enum(['confirm', 'accept_as_is', 'cancel']),
 });
 
 export type ChatConfirmRequest = z.infer<typeof ChatConfirmRequestSchema>;

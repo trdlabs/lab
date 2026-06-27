@@ -49,7 +49,7 @@ export type ChatEvFn = (type: string, payload: Record<string, unknown>) => Promi
 
 export interface ConsumeConfirmationArgs {
   proposalId: string;
-  decision: 'confirm' | 'cancel' | 'unresolved';
+  decision: 'confirm' | 'accept_as_is' | 'cancel' | 'unresolved';
   session: ChatSessionContext;
 }
 
@@ -94,7 +94,7 @@ export async function consumeConfirmation(
   const result = await deps.proposals.confirmPending(proposalId, sid, now());
   switch (result.kind) {
     case 'confirmed_now':
-      return executeConfirmedProposal(result.proposal, session, deps, ev, now);
+      return executeConfirmedProposal(result.proposal, session, deps, ev, now, decision);
     case 'already_confirmed': {
       const taskId = result.proposal.confirmedTaskId;
       if (!taskId) return assistantMessage(sid, 'Заявка уже подтверждена. Если задача не появилась — проверьте статус задачи.', { actions: [] });
@@ -296,6 +296,7 @@ async function executeConfirmedProposal(
   deps: ChatHandlerDeps,
   ev: (type: string, payload: Record<string, unknown>) => Promise<void>,
   now: () => string,
+  chosenAction: 'confirm' | 'accept_as_is' = 'confirm',
 ): Promise<ChatResponse> {
   const sid = session.sessionId;
   // Snapshot once so plan.createdAt/updatedAt, attachTask, and session.updatedAt
@@ -305,11 +306,23 @@ async function executeConfirmedProposal(
   // share the same ID — ConversationFollower in trading-office filters by this value.
   const correlationId = randomUUID();
 
+  // Resolve which candidate text the analyst sees. A chat-time critique means the chat already ran the
+  // critic, so set skipPreflightCritique:true (Task 2's worker honors it). confirm → improved text;
+  // accept_as_is → the original payload.content. No critique → enqueue the payload unchanged.
+  const critique = proposal.task.preflightCritique;
+  const payload = critique
+    ? {
+        ...proposal.task.payload,
+        content: chosenAction === 'accept_as_is' ? proposal.task.payload.content : critique.improvedStrategyText,
+        skipPreflightCritique: true,
+      }
+    : proposal.task.payload;
+
   const intake = await createAndEnqueueTask(
     {
       taskType: proposal.task.taskType,
       source: proposal.source,
-      payload: proposal.task.payload,
+      payload,
       correlationId,
       dedupeKey: proposal.task.dedupeKey,
     },

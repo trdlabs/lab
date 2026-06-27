@@ -164,6 +164,29 @@ describe('POST /chat/confirm', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('accepts decision=accept_as_is -> task_created', async () => {
+    const deps = appDeps();
+    const app = createChatApp(deps);
+    const firstRes = await app.request('/messages', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'исследуй эту стратегию: лонг при росте OI', sessionId: 'sess-accept-1' }),
+    });
+    const proposal = await firstRes.json() as { sessionId: string; pendingInteractionId?: string };
+    const res = await app.request('/confirm', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pendingInteractionId: proposal.pendingInteractionId,
+        sessionId: proposal.sessionId,
+        decision: 'accept_as_is',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { kind: string };
+    expect(body.kind).toBe('task_created');
+  });
 });
 
 describe('chat auth gate runs before body parsing', () => {
