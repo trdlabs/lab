@@ -50,6 +50,10 @@ export interface Env {
   PHOENIX_COLLECTOR_ENDPOINT: string;
   /** Phoenix project name / OTel serviceName (default: trading-lab). */
   PHOENIX_PROJECT_NAME: string;
+  /** Phoenix REST read base URL (no trailing slash). Defaults to PHOENIX_COLLECTOR_ENDPOINT minus /v1/traces, else http://localhost:6006. */
+  PHOENIX_READ_BASE_URL: string;
+  /** Optional Bearer token for the Phoenix REST API (self-hosted default: none). */
+  PHOENIX_API_KEY?: string;
   /** Cumulative token budget per research chain (correlationId). Default 200000; 0 = unlimited. */
   RESEARCH_TASK_TOKEN_BUDGET: number;
   /** Feature flag: run the pre-flight strategy critic before the analyst (default: false). */
@@ -122,6 +126,13 @@ function parseFloatOr(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function derivePhoenixReadBaseUrl(source: NodeJS.ProcessEnv): string {
+  const explicit = source.PHOENIX_READ_BASE_URL;
+  if (explicit && explicit.trim() !== '') return explicit.replace(/\/+$/, '');
+  const collector = source.PHOENIX_COLLECTOR_ENDPOINT ?? 'http://localhost:6006/v1/traces';
+  return collector.replace(/\/v1\/traces\/?$/, '').replace(/\/+$/, '') || 'http://localhost:6006';
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const agentsDefault: 'fake' | 'mastra' = source.LAB_AGENTS_ADAPTER === 'mastra' ? 'mastra' : 'fake';
   const resolveAdapter = (v: string | undefined): 'fake' | 'mastra' =>
@@ -181,6 +192,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PHOENIX_ENABLED: source.PHOENIX_ENABLED === 'true',
     PHOENIX_COLLECTOR_ENDPOINT: source.PHOENIX_COLLECTOR_ENDPOINT ?? 'http://localhost:6006/v1/traces',
     PHOENIX_PROJECT_NAME: source.PHOENIX_PROJECT_NAME ?? 'trading-lab',
+    PHOENIX_READ_BASE_URL: derivePhoenixReadBaseUrl(source),
+    PHOENIX_API_KEY: source.PHOENIX_API_KEY,
     RESEARCH_TASK_TOKEN_BUDGET: parseNonNegativeInt(source.RESEARCH_TASK_TOKEN_BUDGET, 200000),
     STRATEGY_PREFLIGHT_CRITIQUE: source.STRATEGY_PREFLIGHT_CRITIQUE === 'true',
     STRATEGY_CRITIC_ADAPTER: source.STRATEGY_CRITIC_ADAPTER === 'mastra' ? 'mastra' : 'fake',

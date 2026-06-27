@@ -340,3 +340,20 @@ describe('pre-flight strategy critic env', () => {
     expect(env.STRATEGY_REFINER_MODEL).toBe('openrouter/x-ai/grok-4.3');
   });
 });
+
+describe('loadEnv — Phoenix read config', () => {
+  it('derives PHOENIX_READ_BASE_URL from the collector endpoint by default', () => {
+    const env = loadEnv({ PHOENIX_COLLECTOR_ENDPOINT: 'http://phoenix:6006/v1/traces' } as NodeJS.ProcessEnv);
+    expect(env.PHOENIX_READ_BASE_URL).toBe('http://phoenix:6006');
+  });
+
+  it('honors an explicit PHOENIX_READ_BASE_URL and PHOENIX_API_KEY', () => {
+    const env = loadEnv({ PHOENIX_READ_BASE_URL: 'http://px:6006/', PHOENIX_API_KEY: 'k' } as NodeJS.ProcessEnv);
+    expect(env.PHOENIX_READ_BASE_URL).toBe('http://px:6006');
+    expect(env.PHOENIX_API_KEY).toBe('k');
+  });
+
+  it('defaults the read base url to localhost when nothing is set', () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).PHOENIX_READ_BASE_URL).toBe('http://localhost:6006');
+  });
+});
