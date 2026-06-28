@@ -1,4 +1,5 @@
 import type { StrategyBuilder, StrategyBuilderInput, StrategyBuilderOutput, StrategyManifestMeta } from '../../ports/strategy-builder.port.ts';
+import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
 import { SHORT_AFTER_PUMP_SOURCE } from './fixtures/short-after-pump.strategy-source.ts';
 
 const SHORT_AFTER_PUMP_META: StrategyManifestMeta = {
@@ -24,7 +25,10 @@ const SHORT_AFTER_PUMP_META: StrategyManifestMeta = {
 };
 
 export class FakeStrategyBuilder implements StrategyBuilder {
-  async build(_i: StrategyBuilderInput): Promise<StrategyBuilderOutput> {
+  readonly adapter = 'fake';
+  readonly model = 'fake';
+
+  async build(_i: StrategyBuilderInput, _opts?: AgentCallOpts): Promise<StrategyBuilderOutput> {
     return { source: SHORT_AFTER_PUMP_SOURCE, manifestMeta: SHORT_AFTER_PUMP_META };
   }
 }
