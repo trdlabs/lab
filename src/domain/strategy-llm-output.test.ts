@@ -12,7 +12,7 @@ const VALID_MANIFEST = {
   summary: 'A test strategy for unit verification',
   rationale: 'Validates the schema + adapter contract',
   hooks: ['onBarClose'] as const,
-  paramsSchema: { type: 'object', properties: {} },
+  paramsSchema: JSON.stringify({ type: 'object', additionalProperties: false }),
   capabilities: {
     exchangeDirect: null,
     brokerDirect: null,
@@ -99,6 +99,23 @@ describe('StrategyLlmOutputSchema', () => {
     const { notes: _dropped, ...withoutNotes } = VALID_OUTPUT;
     expect(() => StrategyLlmOutputSchema.parse(withoutNotes)).toThrow();
   });
+
+  it('(e) paramsSchema must be a JSON string, not a plain object', () => {
+    expect(() =>
+      StrategyLlmOutputSchema.parse({
+        ...VALID_OUTPUT,
+        manifest: { ...VALID_MANIFEST, paramsSchema: { type: 'object' } },
+      })
+    ).toThrow();
+  });
+
+  it('(f) hooks array with "init" parses OK (broadened enum)', () => {
+    const parsed = StrategyLlmOutputSchema.parse({
+      ...VALID_OUTPUT,
+      manifest: { ...VALID_MANIFEST, hooks: ['init', 'onBarClose'] },
+    });
+    expect(parsed.manifest.hooks).toEqual(['init', 'onBarClose']);
+  });
 });
 
 describe('llmToStrategyBuilderOutput', () => {
@@ -129,6 +146,12 @@ describe('llmToStrategyBuilderOutput', () => {
     const { manifestMeta } = llmToStrategyBuilderOutput(parsed);
     expect('params' in manifestMeta).toBe(false);
     expect('targetStrategyRef' in manifestMeta).toBe(false);
+  });
+
+  it('(b) paramsSchema JSON string → manifestMeta.paramsSchema is the parsed object', () => {
+    const parsed = StrategyLlmOutputSchema.parse(VALID_OUTPUT);
+    const { manifestMeta } = llmToStrategyBuilderOutput(parsed);
+    expect(manifestMeta.paramsSchema).toEqual({ type: 'object', additionalProperties: false });
   });
 
   it('(d) round-trip: manifestMeta feeds createModuleManifest({kind:"strategy"}) successfully', () => {

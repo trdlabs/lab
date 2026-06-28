@@ -7,10 +7,10 @@
  *     `required`, satisfying OpenAI strict mode which requires all object keys to be present.
  *   - All object-valued fields with a closed key-set use explicit field declarations + .strict().
  *
- * DONE_WITH_CONCERNS: `paramsSchema` and `params` accept `z.record(z.string(), z.unknown())`
- *   because they are arbitrary JSON objects (JSON Schema and params payload). This is not
- *   strictly OpenAI-safe (implies additionalProperties:true). No better representation exists
- *   for an open-ended object while preserving the SDK's `object` type.
+ * `paramsSchema` and `params` are serialized as JSON strings (per the `files` precedent in
+ *   mastra-builder.ts): the LLM emits them as JSON-encoded strings; the adapter parses them
+ *   back to objects. This avoids `additionalProperties`-based schemas which OpenAI strict-mode
+ *   rejects.
  */
 
 import { z } from 'zod';
@@ -73,16 +73,16 @@ export const StrategyManifestSchema = z.object({
   name: z.string().min(1),
   summary: z.string().min(1),
   rationale: z.string().min(1),
-  hooks: z.array(z.enum(['onBarClose', 'onPositionBar'])),
-  // DONE_WITH_CONCERNS: open-ended JSON Schema object — not OpenAI-strict-safe (see module doc)
-  paramsSchema: z.record(z.string(), z.unknown()),
+  hooks: z.array(z.enum(['init', 'onBarClose', 'onPositionBar', 'onPendingIntentBar', 'dispose'])),
+  // Serialized as a JSON string (see module doc) — LLM emits JSON Schema as a JSON-encoded string
+  paramsSchema: z.string(),
   capabilities: CapabilityDeclarationSchema,
   dataNeeds: DataNeedsDeclarationSchema,
   // Optional-in-SDK fields → .nullable() to satisfy OpenAI strict required-keys rule
   author: z.enum(['human', 'agent']).nullable(),
   status: z.enum(['research_only', 'reviewed', 'promoted']).nullable(),
-  // DONE_WITH_CONCERNS: open-ended params payload — not OpenAI-strict-safe (see module doc)
-  params: z.record(z.string(), z.unknown()).nullable(),
+  // Serialized as a JSON string or null (see module doc) — LLM emits params payload as JSON-encoded string
+  params: z.string().nullable(),
   source: z.string().nullable(),
   targetStrategyRef: z.string().nullable(),
   interceptionPoint: z.string().nullable(),
@@ -134,6 +134,7 @@ export function llmToStrategyBuilderOutput(o: StrategyLlmOutput): StrategyBuilde
     author,
     status,
     params,
+    paramsSchema,
     source: manifestSource,
     targetStrategyRef,
     interceptionPoint,
@@ -142,11 +143,12 @@ export function llmToStrategyBuilderOutput(o: StrategyLlmOutput): StrategyBuilde
 
   const manifestMeta: StrategyManifestMeta = {
     ...required,
+    paramsSchema: JSON.parse(paramsSchema) as object,
     capabilities: stripNullBooleans(capabilities) as StrategyManifestMeta['capabilities'],
     dataNeeds: stripNullBooleans(dataNeeds) as StrategyManifestMeta['dataNeeds'],
     ...(author !== null ? { author } : {}),
     ...(status !== null ? { status } : {}),
-    ...(params !== null ? { params } : {}),
+    ...(params !== null ? { params: JSON.parse(params) as object } : {}),
     ...(manifestSource !== null ? { source: manifestSource } : {}),
     ...(targetStrategyRef !== null ? { targetStrategyRef } : {}),
     ...(interceptionPoint !== null ? { interceptionPoint } : {}),
