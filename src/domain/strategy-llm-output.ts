@@ -73,6 +73,9 @@ export const StrategyManifestSchema = z.object({
   name: z.string().min(1),
   summary: z.string().min(1),
   rationale: z.string().min(1),
+  // Deliberately broader than the agent's authoring instructions (which steer the LLM toward
+  // onBarClose/onPositionBar): the schema accepts every valid SDK lifecycle hook so hand- or
+  // refiner-authored manifests parse. The real semantic gate is L2 validateStrategyBundle (F2b).
   hooks: z.array(z.enum(['init', 'onBarClose', 'onPositionBar', 'onPendingIntentBar', 'dispose'])),
   // Serialized as a JSON string (see module doc) — LLM emits JSON Schema as a JSON-encoded string
   paramsSchema: z.string(),
@@ -107,6 +110,16 @@ export type StrategyLlmOutput = z.infer<typeof StrategyLlmOutputSchema>;
 // ---------------------------------------------------------------------------
 // Adapter: LLM output → F1 StrategyBuilderOutput
 // ---------------------------------------------------------------------------
+
+/** Parse a JSON-string field to an object, failing fast on JSON-valid-but-non-object payloads
+ *  (e.g. "5", "null", "[]") that JSON.parse + `as object` would otherwise smuggle downstream. */
+function parseJsonObject(json: string, field: string): object {
+  const parsed: unknown = JSON.parse(json);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new TypeError(`${field} must be a JSON object, got: ${json}`);
+  }
+  return parsed;
+}
 
 /** Strip keys whose value is null — converts nullable-LLM booleans → optional-SDK booleans. */
 function stripNullBooleans(
@@ -143,12 +156,12 @@ export function llmToStrategyBuilderOutput(o: StrategyLlmOutput): StrategyBuilde
 
   const manifestMeta: StrategyManifestMeta = {
     ...required,
-    paramsSchema: JSON.parse(paramsSchema) as object,
+    paramsSchema: parseJsonObject(paramsSchema, 'paramsSchema'),
     capabilities: stripNullBooleans(capabilities) as StrategyManifestMeta['capabilities'],
     dataNeeds: stripNullBooleans(dataNeeds) as StrategyManifestMeta['dataNeeds'],
     ...(author !== null ? { author } : {}),
     ...(status !== null ? { status } : {}),
-    ...(params !== null ? { params: JSON.parse(params) as object } : {}),
+    ...(params !== null ? { params: parseJsonObject(params, 'params') } : {}),
     ...(manifestSource !== null ? { source: manifestSource } : {}),
     ...(targetStrategyRef !== null ? { targetStrategyRef } : {}),
     ...(interceptionPoint !== null ? { interceptionPoint } : {}),

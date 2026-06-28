@@ -64,19 +64,21 @@ describe('buildStrategyUserMessage', () => {
   });
 
   it('with parity feedback includes bar and field', () => {
+    // bar=42 is chosen so '42' is not a substring of any other serialized number
+    // (expected=100 / actual=95) — a vacuous toContain('5') would pass via '95'.
     const feedback: BuildFeedback = {
       kind: 'parity',
-      diff: { bar: 5, field: 'pnl', expected: 100, actual: 95 },
+      diff: { bar: 42, field: 'pnl', expected: 100, actual: 95 },
     };
     const msg = buildStrategyUserMessage(PROFILE, feedback);
-    expect(msg).toContain('5');
+    expect(msg).toContain('42');
     expect(msg).toContain('pnl');
   });
 
   it('with parity feedback includes expected and actual values', () => {
     const feedback: BuildFeedback = {
       kind: 'parity',
-      diff: { bar: 5, field: 'pnl', expected: 100, actual: 95 },
+      diff: { bar: 42, field: 'pnl', expected: 100, actual: 95 },
     };
     const msg = buildStrategyUserMessage(PROFILE, feedback);
     expect(msg).toContain('100');

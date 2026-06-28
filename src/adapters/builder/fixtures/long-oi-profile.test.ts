@@ -21,6 +21,11 @@ describe('long-oi-profile fixture guard', () => {
     expect(result.success).toBe(true);
   });
 
+  it('.profile.direction === "long" (nested invariant, not just top-level)', () => {
+    const profile = fixture['profile'] as Record<string, unknown>;
+    expect(profile['direction']).toBe('long');
+  });
+
   it('has required StrategyProfile structural fields', () => {
     expect(typeof fixture['id']).toBe('string');
     expect(typeof fixture['version']).toBe('number');
