@@ -71,8 +71,8 @@ function llmToStrategyBuilderOutput(o: StrategyLlmOutput): StrategyBuilderOutput
 class MastraStrategyBuilder implements StrategyBuilder {
   // build(input, opts):
   //   userMsg = buildStrategyUserMessage(input.profile, input.feedback)
-  //   raw     = await agent.generate(userMsg, { schema: StrategyLlmOutputSchema, ...opts })  // real LLM; L1-retry внутри
-  //   return llmToStrategyBuilderOutput(StrategyLlmOutputSchema.parse(raw))
+  //   out     = await <schema-valid StrategyLlmOutput от real LLM>  // Mastra structured-output ∨ generate+parse; L1-retry bounded N внутри
+  //   return llmToStrategyBuilderOutput(out)
 }
 function createStrategyBuilderAgent(deps: { authoringDoc: string; … }): Agent;  // instructions = STRATEGY_INSTRUCTIONS + authoring-doc структурно
 function buildStrategyUserMessage(profile: StrategyProfile, feedback?: BuildFeedback): string;
@@ -120,7 +120,7 @@ type BuildFeedback =
 F2b классифицирует исход и кладёт типизированный feedback в следующий `build()` — re-prompt тейлорится. L1 НИКОГДА не доходит до петли (поглощается в `build()`).
 
 **Граница F2a ↔ F2b:**
-- **F2a** = `build()`: L1-retry внутри (bounded N → на исчерпании `throw BuilderError`), принять типизированный feedback и встроить в re-prompt. НЕ ассемблит/валидирует/сабмитит.
+- **F2a** = `build()`: получить **schema-валидный** `StrategyLlmOutput` в пределах bounded N (МЕХАНИЗМ L1 — Mastra-native structured-output retry ∨ build()-side `parse`+retry — резолвится в плане, ассумпции #1/#4; важно НЕ дублировать retry); на исчерпании `throw BuilderError`. Принять типизированный feedback и встроить в re-prompt. НЕ ассемблит/валидирует/сабмитит.
 - **F2b-петля** (отдельный дизайн): `build → assemble → validate → submit049`; классифицирует L2 (validation) vs L3 (parity); кладёт typed feedback назад; до `equivalent` ∨ max-iter.
 
 ```
