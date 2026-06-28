@@ -4,7 +4,7 @@ export function swingHighLow(
   const n = highs.length;
   const start = Math.max(0, n - window);
   let hi = -Infinity, lo = Infinity;
-  for (let i = start; i < n; i++) { if (highs[i] > hi) hi = highs[i]; if (lows[i] < lo) lo = lows[i]; }
+  for (let i = start; i < n; i++) { if (highs[i]! > hi) hi = highs[i]!; if (lows[i]! < lo) lo = lows[i]!; }
   return { swingHigh: hi, swingLow: lo };
 }
 
@@ -49,7 +49,7 @@ export function pctChangeOverWindow(series: readonly (number | null)[], window: 
   if (n === 0) return null;
   const last = series[n - 1];
   const refIdx = n - 1 - window;
-  let ref: number | null = refIdx >= 0 ? series[refIdx] : null;
+  let ref: number | null = refIdx >= 0 ? (series[refIdx] ?? null) : null;
   if (ref == null) { for (const v of series) { if (v != null) { ref = v; break; } } }
   if (last == null || ref == null || ref === 0) return null;
   return ((last - ref) / ref) * 100;

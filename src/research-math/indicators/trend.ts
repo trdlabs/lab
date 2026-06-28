@@ -3,8 +3,8 @@ export function sma(values: readonly number[], period: number): (number | null)[
   if (period <= 0) return out;
   let sum = 0;
   for (let i = 0; i < values.length; i++) {
-    sum += values[i];
-    if (i >= period) sum -= values[i - period];
+    sum += values[i]!;
+    if (i >= period) sum -= values[i - period]!;
     if (i >= period - 1) out[i] = sum / period;
   }
   return out;
@@ -15,11 +15,11 @@ export function ema(values: readonly number[], period: number): (number | null)[
   if (period <= 0 || values.length < period) return out;
   const k = 2 / (period + 1);
   let seed = 0;
-  for (let i = 0; i < period; i++) seed += values[i];
+  for (let i = 0; i < period; i++) seed += values[i]!;
   let prev = seed / period;
   out[period - 1] = prev;
   for (let i = period; i < values.length; i++) {
-    prev = (values[i] - prev) * k + prev;
+    prev = (values[i]! - prev) * k + prev;
     out[i] = prev;
   }
   return out;
@@ -30,13 +30,13 @@ export function rsi(values: readonly number[], period: number): (number | null)[
   if (period <= 0 || values.length <= period) return out;
   let avgGain = 0, avgLoss = 0;
   for (let i = 1; i <= period; i++) {
-    const d = values[i] - values[i - 1];
+    const d = values[i]! - values[i - 1]!;
     if (d >= 0) avgGain += d; else avgLoss -= d;
   }
   avgGain /= period; avgLoss /= period;
   out[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   for (let i = period + 1; i < values.length; i++) {
-    const d = values[i] - values[i - 1];
+    const d = values[i]! - values[i - 1]!;
     const g = d > 0 ? d : 0, l = d < 0 ? -d : 0;
     avgGain = (avgGain * (period - 1) + g) / period;
     avgLoss = (avgLoss * (period - 1) + l) / period;
@@ -63,7 +63,7 @@ export function macd(
   const sig = ema(lineDefined, signalPeriod);
   for (let j = 0; j < sig.length; j++) {
     if (sig[j] != null) {
-      const i = lineIdx[j];
+      const i = lineIdx[j]!;
       const l = line[i] as number;
       out[i] = { line: l, signal: sig[j] as number, hist: l - (sig[j] as number) };
     }

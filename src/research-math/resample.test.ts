@@ -21,7 +21,7 @@ describe('resampleRows', () => {
     ];
     const out = resampleRows(rows, 300_000);
     expect(out).toHaveLength(1);
-    const b = out[0];
+    const b = out[0]!;
     expect([b.open, b.high, b.low, b.close]).toEqual([10, 15, 8, 9]);
     expect(b.volume).toBe(175);
     expect(b.taker_buy_volume_usd).toBe(70); // 60 + 10 (null row contributes nothing)
@@ -52,8 +52,8 @@ describe('resampleRows', () => {
     const b = { ...a, minute_ts: 60_000, oi_total_usd: 2000, funding_rate: 0.0002 } as CanonicalRowV2;
     const out = resampleRows([a, b], 300_000);
     expect(out).toHaveLength(1);
-    expect(out[0].oi_total_usd).toBe(2000);
-    expect(out[0].funding_rate).toBeCloseTo(0.0002, 10);
+    expect(out[0]!.oi_total_usd).toBe(2000);
+    expect(out[0]!.funding_rate).toBeCloseTo(0.0002, 10);
   });
 
   it('returns [] for empty input or non-positive tfMs', () => {

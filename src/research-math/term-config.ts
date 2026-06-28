@@ -50,7 +50,7 @@ export const TERM_CONFIGS: readonly TermConfig[] = [
 export function inferCadenceMs(rows: readonly Pick<CanonicalRowV2, 'minute_ts'>[]): number | null {
   let min: number | null = null;
   for (let i = 1; i < rows.length; i++) {
-    const gap = rows[i].minute_ts - rows[i - 1].minute_ts;
+    const gap = rows[i]!.minute_ts - rows[i - 1]!.minute_ts;
     if (gap > 0 && (min === null || gap < min)) min = gap;
   }
   return min;

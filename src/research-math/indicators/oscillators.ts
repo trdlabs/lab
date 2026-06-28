@@ -23,8 +23,8 @@ export function stochastic(
   const rawK: (number | null)[] = new Array(n).fill(null);
   for (let i = kPeriod - 1; i < n; i++) {
     let hh = -Infinity, ll = Infinity;
-    for (let j = i - kPeriod + 1; j <= i; j++) { if (highs[j] > hh) hh = highs[j]; if (lows[j] < ll) ll = lows[j]; }
-    rawK[i] = hh === ll ? 50 : (100 * (closes[i] - ll)) / (hh - ll);
+    for (let j = i - kPeriod + 1; j <= i; j++) { if (highs[j]! > hh) hh = highs[j]!; if (lows[j]! < ll) ll = lows[j]!; }
+    rawK[i] = hh === ll ? 50 : (100 * (closes[i]! - ll)) / (hh - ll);
   }
   const kSmoothed = smaTail(rawK, smooth);
   const dLine = smaTail(kSmoothed, dPeriod);
@@ -46,14 +46,14 @@ export function adx(
   const minusDM = new Array<number>(n).fill(0);
   const tr = new Array<number>(n).fill(0);
   for (let i = 1; i < n; i++) {
-    const up = highs[i] - highs[i - 1];
-    const down = lows[i - 1] - lows[i];
+    const up = highs[i]! - highs[i - 1]!;
+    const down = lows[i - 1]! - lows[i]!;
     plusDM[i] = up > down && up > 0 ? up : 0;
     minusDM[i] = down > up && down > 0 ? down : 0;
-    tr[i] = Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1]));
+    tr[i] = Math.max(highs[i]! - lows[i]!, Math.abs(highs[i]! - closes[i - 1]!), Math.abs(lows[i]! - closes[i - 1]!));
   }
   let trSum = 0, pdmSum = 0, mdmSum = 0;
-  for (let i = 1; i <= period; i++) { trSum += tr[i]; pdmSum += plusDM[i]; mdmSum += minusDM[i]; }
+  for (let i = 1; i <= period; i++) { trSum += tr[i]!; pdmSum += plusDM[i]!; mdmSum += minusDM[i]!; }
   const dx = new Array<number | null>(n).fill(null);
   const pDi = new Array<number | null>(n).fill(null);
   const mDi = new Array<number | null>(n).fill(null);
@@ -66,9 +66,9 @@ export function adx(
   let r = at(trSum, pdmSum, mdmSum);
   dx[period] = r.dxv; pDi[period] = r.p; mDi[period] = r.m;
   for (let i = period + 1; i < n; i++) {
-    trSum = trSum - trSum / period + tr[i];
-    pdmSum = pdmSum - pdmSum / period + plusDM[i];
-    mdmSum = mdmSum - mdmSum / period + minusDM[i];
+    trSum = trSum - trSum / period + tr[i]!;
+    pdmSum = pdmSum - pdmSum / period + plusDM[i]!;
+    mdmSum = mdmSum - mdmSum / period + minusDM[i]!;
     r = at(trSum, pdmSum, mdmSum);
     dx[i] = r.dxv; pDi[i] = r.p; mDi[i] = r.m;
   }
