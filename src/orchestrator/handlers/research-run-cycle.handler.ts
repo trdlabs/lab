@@ -136,6 +136,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     marketContextMath = undefined;
   }
 
+  let marketContextArtifactId: string | undefined;
   if (marketContextMath && marketContextMath.terms.length > 0) {
     try {
       const markdown = formatMarketContextMath(marketContextMath);
@@ -145,6 +146,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
         producer: 'research-run-cycle',
         metadata: { correlationId: task.correlationId, symbol },
       });
+      marketContextArtifactId = ref.artifact_id;
       await services.events.append(event(task.id, 'researcher.market_context_committed', {
         artifactId: ref.artifact_id, correlationId: task.correlationId, symbol,
       }));
@@ -157,7 +159,10 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     output = await services.researcher.propose({
       profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax,
       ...(marketContextMath && marketContextMath.terms.length > 0 ? { marketContextMath } : {}),
-    }, makeOnUsage(task, services));
+    }, {
+      ...makeOnUsage(task, services),
+      ...(marketContextArtifactId ? { tracingMetadata: { research_market_context_artifact_id: marketContextArtifactId } } : {}),
+    });
   } catch (err) {
     await services.events.append(event(task.id, 'researcher.failed', { error: errMsg(err) }));
     throw err;

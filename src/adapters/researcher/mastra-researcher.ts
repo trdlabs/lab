@@ -140,6 +140,7 @@ export class MastraResearcher implements ResearcherPort {
     const result = await this.agent.generate(buildPrompt(input), {
       structuredOutput: { schema: LlmResearcherOutputSchema },
       modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+      ...(opts?.tracingMetadata ? { tracingOptions: { metadata: opts.tracingMetadata } } : {}),
     });
     await opts?.onUsage?.({
       modelId: this.model,
