@@ -13,6 +13,7 @@ import {
   HYPOTHESIS_PROPOSAL_CONTRACT_VERSION, type HypothesisProposal, type ResearcherOutput,
 } from '../../domain/hypothesis.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
+import { buildMarketContextMath } from '../../research-math/market-context-math.ts';
 
 export const RESEARCH_DEFAULT_SYMBOL = 'BTCUSDT';
 export const BOT_RESULTS_MAX = 10;
@@ -115,11 +116,29 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     tradeEvidence = [];
   }
 
+  let marketContextMath;
+  try {
+    const lookbackDays = Number(process.env.MARKET_HISTORY_LOOKBACK_DAYS ?? '7');
+    const toMs = Date.parse(ts);
+    const fromMs = toMs - lookbackDays * 86_400_000;
+    const rows = await services.marketHistory.getRows({ symbol, fromMs, toMs });
+    marketContextMath = buildMarketContextMath({
+      symbol, rows,
+      direction: profile.direction,
+      regime: marketRegime,
+      requiredFeatures: profile.requiredMarketFeatures,
+      window: { fromMs, toMs },
+    }, Date.now());
+  } catch (err) {
+    await services.events.append(event(task.id, 'researcher.market_history_unavailable', { error: errMsg(err) }));
+    marketContextMath = undefined;
+  }
+
   await services.events.append(event(task.id, 'researcher.started', { strategyProfileId: profile.id }));
   let output: ResearcherOutput;
   try {
     output = await services.researcher.propose({
-      profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax,
+      profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax, marketContextMath,
     }, makeOnUsage(task, services));
   } catch (err) {
     await services.events.append(event(task.id, 'researcher.failed', { error: errMsg(err) }));

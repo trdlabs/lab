@@ -10,6 +10,7 @@ import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { AppServices } from '../app-services.ts';
 import type { BotResultsReadPort } from '../../ports/bot-results-read.port.ts';
 import type { TradeEvidenceReadPort } from '../../ports/trade-evidence-read.port.ts';
+import type { MarketHistoryReadPort } from '../../ports/market-history-read.port.ts';
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
@@ -347,5 +348,34 @@ describe('researchRunCycleHandler', () => {
     // 1000*0.00001 + 500*0.00003 = 0.01 + 0.015 = 0.025
     expect(await tokenUsage.getCost(t.correlationId)).toBeCloseTo(0.025, 10);
     expect(await tokenUsage.get(t.correlationId)).toBe(1500); // tokens still recorded
+  });
+
+  it('attaches marketContextMath to the researcher propose input when market history is available', async () => {
+    const marketHistoryRows = Array.from({ length: 60 }, (_, i) => ({
+      schema_version: 2 as const, minute_ts: i * 60_000, symbol: 'BTCUSDT',
+      open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 10, turnover: (100 + i) * 10,
+      oi_total_usd: 1000, funding_rate: 0.0001, liq_long_usd: 1, liq_short_usd: 2,
+      taker_buy_volume_usd: 6, taker_sell_volume_usd: 4,
+      has_oi: true, has_funding: true, has_liquidations: true, has_taker_flow: true,
+    }));
+    const marketHistory: MarketHistoryReadPort = { getRows: async () => marketHistoryRows };
+    const cap = capturingResearcher({ hypotheses: [draft('thesis math')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+    expect(cap.captured()?.marketContextMath).toBeDefined();
+    expect(cap.captured()?.marketContextMath?.terms.length).toBeGreaterThan(0);
+  });
+
+  it('is fail-soft: when marketHistory.getRows throws, propose is still called without marketContextMath and the unavailable event is emitted', async () => {
+    const throwingHistory: MarketHistoryReadPort = {
+      async getRows() { throw new Error('history down'); },
+    };
+    const cap = capturingResearcher({ hypotheses: [draft('thesis no-math')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port, marketHistory: throwingHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+    expect(cap.captured()?.marketContextMath).toBeUndefined();
+    expect(await types(services)).toContain('researcher.market_history_unavailable');
   });
 });
