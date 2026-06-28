@@ -23,6 +23,8 @@ const BASE_INPUT: AuthorStrategyInput = {
 const AMBIENT_SOURCE = `export default function createStrategyModule(){ const x = process.env.X; return { onBarClose(){ return { kind: 'idle' }; } }; }`;
 
 const ambientBuilder = {
+  adapter: 'fake' as const,
+  model: 'fake' as const,
   async build(_i: unknown): Promise<StrategyBuilderOutput> {
     return {
       source: AMBIENT_SOURCE,

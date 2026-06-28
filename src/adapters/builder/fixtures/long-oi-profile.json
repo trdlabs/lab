@@ -1,0 +1,199 @@
+{
+  "id": "f94468c5-8a05-44c8-990a-40ac8686fb73",
+  "version": 1,
+  "sourceKind": "manual_description",
+  "sourceFingerprint": "sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
+  "direction": "long",
+  "coreIdea": "Long-only crypto futures rebound strategy after a sharp liquidation-driven selloff. The strategy watches assets that dropped roughly 10% or more over about 20 minutes, then enters only after signs of reversal: price bounce, rising open interest, and prior long liquidations.",
+  "requiredMarketFeatures": [
+    "Price/OHLC data",
+    "Candle color / candle direction",
+    "Local low detection",
+    "Open interest",
+    "Long liquidation data"
+  ],
+  "confidence": 0.92,
+  "unknowns": [
+    "Exact candle timeframe for the two green candles is not specified.",
+    "Definition of 'fast bounce' is not quantified.",
+    "Exact method for identifying the local minimum is not specified.",
+    "Exact open interest rise threshold is not specified.",
+    "Exact long-liquidation threshold or window is not specified.",
+    "Whether the -12% hard stop is measured from initial entry, average entry, or latest entry after averaging is not specified.",
+    "Exact sizing of each averaging-down add-on is not specified.",
+    "Whether TP1/TP2 are recalculated from average entry after averaging is not specified."
+  ],
+  "profile": {
+    "direction": "long",
+    "coreIdea": "Long-only crypto futures rebound strategy after a sharp liquidation-driven selloff. The strategy watches assets that dropped roughly 10% or more over about 20 minutes, then enters only after signs of reversal: price bounce, rising open interest, and prior long liquidations.",
+    "summary": "The trader does not buy immediately after a fast dump. If price falls by at least about 10% during the last roughly 20 minutes, the instrument is placed on watch. A long entry is taken only after confirmation that price has begun rebounding from a local low, such as two green candles or a fast bounce, while open interest starts rising again and the selloff was preceded/accompanied by long liquidations. After entry, half the position is taken off at +3.5%, the stop is moved to breakeven, and the remainder is held for +5%. A hard stop is placed around -12%, and any position still open after 180 minutes without hitting TP or SL is closed by time. If price drops another roughly 3% from the latest entry price after entry, the trader may average down only if reversal confirmation appears again, with a maximum of two add-ons.",
+    "requiredMarketFeatures": [
+      "Price/OHLC data",
+      "Candle color / candle direction",
+      "Local low detection",
+      "Open interest",
+      "Long liquidation data"
+    ],
+    "entryConditions": [
+      "Trade only long.",
+      "Trade only crypto futures instruments.",
+      "If price has fallen by approximately 10% or more over the last approximately 20 minutes, place the instrument on watch rather than entering immediately.",
+      "Wait for a rebound from the local minimum before entering.",
+      "Enter only after confirmation that price has started rising.",
+      "Valid price-reversal confirmation examples include two green candles or a fast bounce.",
+      "Open interest must start rising again before/at entry confirmation.",
+      "There must have been long liquidations before the entry setup."
+    ],
+    "exitConditions": [
+      "Take profit 1 at +3.5% from entry; close half of the position there.",
+      "After TP1 is reached, move the stop to breakeven.",
+      "Take profit 2 for the remaining position at +5% from entry.",
+      "Use a hard stop-loss at approximately -12%.",
+      "If the position has not reached either take profit or stop-loss within 180 minutes, close the position by time.",
+      "Do not enter immediately after the 10% dump; entry requires rebound confirmation.",
+      "For averaging down, if price falls approximately 3% from the latest entry price, add only if reversal confirmation appears again."
+    ],
+    "timeframes": [
+      "~20 minutes lookback for dump detection",
+      "180 minutes maximum holding time",
+      "Candle timeframe unspecified"
+    ],
+    "indicators": [
+      "Price percentage drop",
+      "Green candles",
+      "Fast bounce / rebound",
+      "Local minimum",
+      "Open interest",
+      "Long liquidations"
+    ],
+    "parameters": [
+      {
+        "name": "dumpLookback",
+        "value": 20,
+        "unit": "minutes",
+        "description": "Approximate lookback window used to detect the sharp price drop.",
+        "tunable": true
+      },
+      {
+        "name": "dumpThreshold",
+        "value": 10,
+        "unit": "percent",
+        "description": "Minimum approximate price drop over the lookback window required to place the instrument on watch.",
+        "tunable": true
+      },
+      {
+        "name": "greenCandlesConfirmationCount",
+        "value": 2,
+        "unit": "candles",
+        "description": "Example confirmation signal: two green candles indicating price has started rising.",
+        "tunable": true
+      },
+      {
+        "name": "takeProfit1",
+        "value": 3.5,
+        "unit": "percent",
+        "description": "First take-profit level from entry.",
+        "tunable": true
+      },
+      {
+        "name": "takeProfit1PositionClose",
+        "value": 50,
+        "unit": "percent of position",
+        "description": "Portion of the position closed at TP1.",
+        "tunable": true
+      },
+      {
+        "name": "takeProfit2",
+        "value": 5,
+        "unit": "percent",
+        "description": "Final take-profit level for the remaining position.",
+        "tunable": true
+      },
+      {
+        "name": "hardStopLoss",
+        "value": -12,
+        "unit": "percent",
+        "description": "Approximate hard stop-loss from entry.",
+        "tunable": true
+      },
+      {
+        "name": "timeExit",
+        "value": 180,
+        "unit": "minutes",
+        "description": "Maximum time to hold a position if neither take profit nor stop-loss is reached.",
+        "tunable": true
+      },
+      {
+        "name": "averagingTriggerDrop",
+        "value": 3,
+        "unit": "percent",
+        "description": "Approximate additional drop from the latest entry price that may allow averaging down if reversal confirmation appears again.",
+        "tunable": true
+      },
+      {
+        "name": "maxAddOns",
+        "value": 2,
+        "unit": "add-ons",
+        "description": "Maximum number of averaging-down additions allowed.",
+        "tunable": true
+      }
+    ],
+    "watchLifecycleSummary": "When an instrument drops approximately 10% or more over roughly 20 minutes, it is added to a watch state. The strategy then waits for a rebound from the local low with confirmation from price action, rising open interest, and prior long liquidations before entering.",
+    "positionManagementSummary": "At +3.5%, close half the position and move the stop to breakeven. Hold the remaining half until +5%. If price drops about 3% from the latest entry price after entry, averaging down is allowed only after renewed reversal confirmation, with at most two add-ons total.",
+    "riskManagementSummary": "Hard stop-loss is approximately -12%. After TP1, stop moves to breakeven. If no TP or SL is reached within 180 minutes, the position is closed by time. Position sizing, leverage, and exact add-on sizing are not specified.",
+    "runnerOwnedAuthorities": [
+      "Order placement and execution",
+      "Fill handling",
+      "Slippage handling",
+      "Position sizing not specified by source",
+      "Leverage and margin management",
+      "Exact sizing of averaging-down add-ons",
+      "Stop/TP order implementation",
+      "Risk limits beyond the stated stop-loss and time exit"
+    ],
+    "confidence": 0.92,
+    "unknowns": [
+      "Exact candle timeframe for the two green candles is not specified.",
+      "Definition of 'fast bounce' is not quantified.",
+      "Exact method for identifying the local minimum is not specified.",
+      "Exact open interest rise threshold is not specified.",
+      "Exact long-liquidation threshold or window is not specified.",
+      "Whether the -12% hard stop is measured from initial entry, average entry, or latest entry after averaging is not specified.",
+      "Exact sizing of each averaging-down add-on is not specified.",
+      "Whether TP1/TP2 are recalculated from average entry after averaging is not specified."
+    ],
+    "evidence": [
+      "«Торгую только в long на крипто-фьючерсах.»",
+      "«если за последние примерно 20 минут цена падает на 10% или больше, я не вхожу сразу, а беру инструмент на наблюдение»",
+      "«жду отскок от локального минимума»",
+      "«Вход делаю только после подтверждения: цена начинает расти, например появляются две зелёные свечи или быстрый bounce»",
+      "«open interest снова растёт»",
+      "«перед этим были long-ликвидации»",
+      "«первый тейк на +3.5% — там фиксирую половину позиции»",
+      "«После TP1 стоп переношу в безубыток»",
+      "«Остаток держу до +5%»",
+      "«Жёсткий стоп ставлю примерно на −12%»",
+      "«Если за 180 минут позиция не дошла ни до тейка, ни до стопа, закрываю по времени»",
+      "«Если после входа цена ещё падает примерно на 3% от последней цены входа, но потом снова появляется подтверждение разворота, могу усредниться»",
+      "«Всего максимум две доливки»"
+    ]
+  },
+  "sourceArtifactRef": {
+    "artifact_id": "4f669617-1ec7-49ad-bc66-dd74cb8ed3d3",
+    "uri": "artifacts/strategy_source/sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
+    "content_hash": "sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
+    "kind": "strategy_source",
+    "size_bytes": 1414,
+    "mime_type": "text/plain",
+    "created_at": "2026-06-28T13:40:49.885Z",
+    "producer": "scripts/regen-long-oi-profile.mts",
+    "metadata": {
+      "sourceKind": "manual_description",
+      "uri": null,
+      "title": null
+    }
+  },
+  "contractVersion": "strategy-profile-v1",
+  "createdAt": "2026-06-28T13:40:49.885Z",
+  "updatedAt": "2026-06-28T13:40:49.885Z"
+}
