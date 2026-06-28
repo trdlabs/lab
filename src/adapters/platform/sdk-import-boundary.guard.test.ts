@@ -6,6 +6,7 @@ import { join } from 'node:path';
 const ALLOWED_FILES = new Set<string>([
   'src/ports/research-platform.port.ts',
   'src/ports/bot-results-read.port.ts',
+  'src/validation/strategy-bundle-validator.ts',
 ]);
 const ALLOWED_DIR = 'src/adapters/platform/';
 

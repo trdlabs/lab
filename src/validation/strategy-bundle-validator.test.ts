@@ -19,4 +19,19 @@ describe('validateStrategyBundle', () => {
     expect(v).toMatchObject({ reason: 'forbidden_ambient_authority' });
     expect(v.status === 'rejected' && v.violations.length).toBeGreaterThan(0);
   });
+
+  it('manifest fails 017 (lookahead dataNeed) → rejected, no throw', async () => {
+    const out = await new FakeStrategyBuilder().build({ spec: {}, authoringDoc: '' });
+    const a = await assembleStrategyBundle(out);
+    // Taint ONLY the manifest (source stays clean → ambient-scan passes; only the 017 gate fires).
+    // `forwardBars` is a forward-looking dataNeed → 017 `lookahead_violation`.
+    const tainted = {
+      ...a,
+      manifest: { ...a.manifest, dataNeeds: { ...a.manifest.dataNeeds, forwardBars: true } },
+    };
+    const v = validateStrategyBundle(tainted);
+    expect(v.status).toBe('rejected');
+    expect(v).toMatchObject({ reason: 'manifest_contract_invalid' });
+    expect(v.status === 'rejected' && v.violations).toContain('lookahead_violation');
+  });
 });
