@@ -1,4 +1,8 @@
 /**
+ * GATED eval — намеренно ВНЕ tsconfig.json include, поэтому НЕ покрыт tsc/vitest.
+ * Typecheck вручную: npx tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict scripts/prove-builder-loop.mts
+ * При дрейфе сигнатур F2a (model-provider / MastraStrategyBuilder) — перепроверить здесь вручную.
+ *
  * Gated real-LLM eval (ВНЕ vitest): реальный MastraStrategyBuilder + shell prove_bundle.mjs +
  * замороженный long_oi-профиль → runBuilderProofLoop против реальной СОБРАННОЙ платформы.
  * Печатает ProofOutcome. НЕ ассертит proven — любой исход валиден.
@@ -24,8 +28,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runBuilderProofLoop } from '../src/proof/builder-proof-loop.ts';
 import { createShellBundleProver } from '../src/proof/shell-bundle-prover.ts';
-import { resolveLanguageModel } from '../src/adapters/llm/model-provider.ts';
-import type { ModelProviderEnv } from '../src/adapters/llm/model-provider.ts';
+import { resolveLanguageModel, MODEL_PROVIDERS } from '../src/adapters/llm/model-provider.ts';
+import type { ModelProviderEnv, ModelProvider } from '../src/adapters/llm/model-provider.ts';
 import { createStrategyBuilderAgent } from '../src/mastra/agents/strategy-builder.agent.ts';
 import { MastraStrategyBuilder } from '../src/adapters/builder/mastra-strategy-builder.ts';
 import type { StrategyProfile } from '../src/domain/strategy-profile.ts';
@@ -44,8 +48,13 @@ const profileFixture = JSON.parse(
 
 // M5 is closed by createStrategyBuilderAgent + MastraStrategyBuilder wiring below.
 // 1) Resolve LLM model for the strategy builder from env (ModelProviderEnv subset).
+const rawProvider = process.env['MODEL_PROVIDER'];
+if (!rawProvider) throw new Error('MODEL_PROVIDER env is required (anthropic | openai | openrouter)');
+if (!(MODEL_PROVIDERS as readonly string[]).includes(rawProvider)) {
+  throw new Error(`MODEL_PROVIDER="${rawProvider}" is not valid; expected one of: ${MODEL_PROVIDERS.join(' | ')}`);
+}
 const modelEnv: ModelProviderEnv = {
-  MODEL_PROVIDER: process.env['MODEL_PROVIDER'],
+  MODEL_PROVIDER: rawProvider as ModelProvider,
   ANTHROPIC_API_KEY: process.env['ANTHROPIC_API_KEY'],
   OPENAI_API_KEY: process.env['OPENAI_API_KEY'],
   OPENROUTER_API_KEY: process.env['OPENROUTER_API_KEY'],

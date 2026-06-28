@@ -19,6 +19,7 @@ export interface BuilderProofLoopDeps {
 
 function verdictToFeedback(v: Extract<ProofVerdict, { proven: false }>): BuildFeedback {
   if ('divergence' in v) return { kind: 'parity', diff: v.divergence };
+  // BuildFeedback has only validation|parity, so a platform runtime/integrity failure is surfaced to the builder as a validation violation.
   return { kind: 'validation', violations: [v.failClosed.reason] };
 }
 
@@ -35,13 +36,20 @@ export async function runBuilderProofLoop(deps: BuilderProofLoopDeps): Promise<P
     const verdict = validateStrategyBundle(bundle);
     if (verdict.status === 'rejected') {
       lastViolations = verdict.violations;
+      lastVerdict = undefined;
       feedback = { kind: 'validation', violations: verdict.violations };
       continue;
     }
 
     const proof = await deps.prover.prove(bundle.source);
     if (proof.proven) return { proven: true, attempts: attempt };
-    lastVerdict = proof;
+    if ('divergence' in proof) {
+      lastVerdict = proof;
+      lastViolations = undefined;
+    } else {
+      // failClosed → validation feedback; clear stale parity field
+      lastVerdict = undefined;
+    }
     feedback = verdictToFeedback(proof);
   }
 

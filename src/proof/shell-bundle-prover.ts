@@ -18,8 +18,11 @@ export function createShellBundleProver(opts: { readonly cli: string }): BundleP
       try {
         writeFileSync(bundlePath, bundleSource);
         const res = spawnSync('node', [opts.cli, '--bundle', bundlePath, '--out', outPath], { encoding: 'utf8' });
+        if (res.error) {
+          throw new Error(`prove_bundle CLI не запущен: ${res.error.message}`);
+        }
         if (res.status !== 0) {
-          throw new Error(`prove_bundle CLI опер-сбой (exit ${res.status}): ${res.stderr ?? ''}`);
+          throw new Error(`prove_bundle CLI опер-сбой (exit ${res.status ?? `signal:${res.signal}`}): ${res.stderr ?? ''}`);
         }
         return JSON.parse(readFileSync(outPath, 'utf8')) as ProofVerdict;
       } finally {

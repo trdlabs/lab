@@ -76,7 +76,7 @@ async function runBuilderProofLoop(deps: {
 
 ## Тест/eval-стратегия
 
-- **Герметичный** `src/proof/builder-proof-loop.test.ts`: fake-билдер (attempt1→divergence, после parity-feedback→proven) + fake-prover → `proven:true` за 2 итерации; ассерт что feedback прокинут на 2-й `build`. Плюс лёгкая unit-ассерта feedback-маппинга L2/failClosed→validation (без полного второго сценария). Плюс maxIters-исчерпание → `{proven:false, attempts}`.
+- **Герметичный** `src/proof/builder-proof-loop.test.ts`: fake-prover (attempt1→divergence, attempt2→proven) + fake-билдер (проксирует feedback без изменения выхода) → `proven:true` за 2 итерации; ассерт что feedback прокинут на 2-й `build`. Сходимость скриптуется фейковым ПРОВЕРОМ, не билдером. Плюс лёгкая unit-ассерта feedback-маппинга L2/failClosed→validation (без полного второго сценария). Плюс maxIters-исчерпание → `{proven:false, attempts}`.
 - **Gated real-LLM eval** `scripts/prove-builder-loop.mts` (вне vitest): реальный `MastraStrategyBuilder` (composeMastra, openrouter .env) + `shellBundleProver` + замороженный long_oi-профиль → гоняет петлю против реальной собранной платформы; печатает ProofOutcome. Не в `pnpm check`.
 
 ## Границы
