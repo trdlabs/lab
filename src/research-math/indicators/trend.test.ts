@@ -29,10 +29,12 @@ describe('rsi', () => {
 });
 
 describe('macd', () => {
-  it('line is null until both EMAs warm up and hist = line - signal', () => {
+  it('line is null during warmup, positive on a rising series, and hist = line - signal', () => {
     const out = macd([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 2, 4, 2);
     const last = out.at(-1)!;
+    expect(out[0]).toBeNull(); // warmup: macd line undefined until both EMAs warm up
     expect(last).not.toBeNull();
+    expect(last.line).toBeGreaterThan(0); // rising series: faster EMA(2) tracks higher recent values than EMA(4), so the macd line is positive
     expect(last.hist).toBeCloseTo(last.line - last.signal, 10);
   });
 });
