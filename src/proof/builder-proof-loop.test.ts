@@ -3,6 +3,7 @@ import { FakeStrategyBuilder } from '../adapters/builder/fake-strategy-builder.t
 import { runBuilderProofLoop } from './builder-proof-loop.ts';
 import type { BundleProverPort, ProofVerdict } from './bundle-prover.port.ts';
 import type { StrategyBuilder, StrategyBuilderInput, StrategyBuilderOutput, BuildFeedback } from '../ports/strategy-builder.port.ts';
+import { AmbientBuilder } from './builder-proof-loop.fixtures.ts';
 
 const INPUT = {
   spec: { goal: 'long oi rebound' },
@@ -53,5 +54,45 @@ describe('runBuilderProofLoop', () => {
     // 1-я попытка — без feedback; 2-я — parity-feedback от divergence
     expect(builder.feedbacks[0]).toBeUndefined();
     expect(builder.feedbacks[1]).toEqual({ kind: 'parity', diff: { bar: 14, field: 'qty', expected: 1, actual: 1.5 } });
+  });
+
+  it('L2 reject (ambient) → validation-feedback, prover не вызывается, исчерпание maxIters', async () => {
+    let proverCalls = 0;
+    const prover: BundleProverPort = { async prove() { proverCalls += 1; return { proven: true }; } };
+    const outcome = await runBuilderProofLoop({ builder: new AmbientBuilder(), prover, input: INPUT, maxIterations: 3 });
+    expect(outcome.proven).toBe(false);
+    expect(outcome.attempts).toBe(3);
+    expect(proverCalls).toBe(0); // L2 отсекает до платформенного prove
+    // validateStrategyBundle: process.env → violations=['process_access'], reason='forbidden_ambient_authority'
+    // runBuilderProofLoop хранит verdict.violations в lastViolations, а не reason
+    expect(outcome.lastViolations).toContain('process_access');
+  });
+
+  it('platform failClosed → validation-feedback, до исчерпания', async () => {
+    const builder = new RecordingBuilder();
+    const outcome = await runBuilderProofLoop({
+      builder,
+      prover: new ScriptedProver([
+        { proven: false, failClosed: { reason: 'runtime_error:boom' } },
+        { proven: true },
+      ]),
+      input: INPUT,
+    });
+    expect(outcome.proven).toBe(true);
+    expect(outcome.attempts).toBe(2);
+    expect(builder.feedbacks[1]).toEqual({ kind: 'validation', violations: ['runtime_error:boom'] });
+  });
+
+  it('исчерпание maxIters при стойком divergence → proven:false + lastVerdict', async () => {
+    const div: ProofVerdict = { proven: false, divergence: { bar: 1, field: 'qty', expected: 1, actual: 2 } };
+    const outcome = await runBuilderProofLoop({
+      builder: new FakeStrategyBuilder(),
+      prover: new ScriptedProver([div, div]),
+      input: INPUT,
+      maxIterations: 2,
+    });
+    expect(outcome.proven).toBe(false);
+    expect(outcome.attempts).toBe(2);
+    expect(outcome.lastVerdict).toEqual(div);
   });
 });
