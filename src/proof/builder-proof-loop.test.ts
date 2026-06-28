@@ -14,7 +14,7 @@ const INPUT = {
 class ScriptedProver implements BundleProverPort {
   private i = 0;
   constructor(private readonly verdicts: ProofVerdict[]) {}
-  async prove(): Promise<ProofVerdict> { return this.verdicts[this.i++]; }
+  async prove(): Promise<ProofVerdict> { return this.verdicts[this.i++]!; }
 }
 
 class RecordingBuilder implements StrategyBuilder {
