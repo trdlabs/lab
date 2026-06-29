@@ -58,3 +58,57 @@ describe('formatMarketContextMath Phase E summary parts', () => {
     expect(md).toContain('Pivots PP=');
   });
 });
+
+describe('formatMarketContextMath price precision (sub-dollar instruments)', () => {
+  // A ~$0.05 instrument: with fixed-2-decimal rounding every price field collapses to 0.05/0.00.
+  function pennyRows(n: number, cadence: number): CanonicalRowV2[] {
+    return Array.from({ length: n }, (_, i) => {
+      const px = 0.05 + (i % 7) * 0.0001; // small, sub-dollar, varying in the 4th–5th decimal
+      return {
+        schema_version: 2, minute_ts: i * cadence, symbol: 'PENNYUSDT',
+        open: px, high: px + 0.0002, low: px - 0.0002, close: px, volume: 1000, turnover: px * 1000,
+        oi_total_usd: 1_000_000 + i, funding_rate: 0.0001, liq_long_usd: 1, liq_short_usd: 2,
+        taker_buy_volume_usd: 6, taker_sell_volume_usd: 4,
+        has_oi: true, has_funding: true, has_liquidations: true, has_taker_flow: true,
+      } as CanonicalRowV2;
+    });
+  }
+
+  it('renders sub-dollar price fields with more than 2 decimals (not collapsed to 0.05/0.00)', () => {
+    const md = formatMarketContextMath(buildMarketContextMath({ ...base, rows: pennyRows(120, 60_000) }, 0));
+    // Pivots PP must carry >2 decimals for a ~0.05 instrument (e.g. 0.0500x), not a bare "0.05".
+    const pivotMatch = md.match(/Pivots PP=([0-9.]+)/);
+    expect(pivotMatch).not.toBeNull();
+    const decimals = pivotMatch![1]!.split('.')[1]?.length ?? 0;
+    expect(decimals).toBeGreaterThan(2);
+    // No scientific notation anywhere in the block.
+    expect(md).not.toMatch(/\d[eE][+-]?\d/);
+  });
+
+  it('keeps the per-row table columns byte-unchanged (only cell precision changes)', () => {
+    const md = formatMarketContextMath(buildMarketContextMath({ ...base, rows: pennyRows(120, 60_000) }, 0));
+    expect(md).toContain('| ts | open | high | low | close | vol | ema9 | ema21 | rsi14 | atr14 | oi | oiΔ | cvd | liqL | liqS |');
+  });
+});
+
+describe('formatMarketContextMath price precision (high-priced instruments)', () => {
+  function richRows(n: number, cadence: number): CanonicalRowV2[] {
+    return Array.from({ length: n }, (_, i) => {
+      const px = 42000 + i; // five-figure price
+      return {
+        schema_version: 2, minute_ts: i * cadence, symbol: 'BTCUSDT',
+        open: px, high: px + 5, low: px - 5, close: px, volume: 10, turnover: px * 10,
+        oi_total_usd: 1000 + i, funding_rate: 0.0001, liq_long_usd: 1, liq_short_usd: 2,
+        taker_buy_volume_usd: 6, taker_sell_volume_usd: 4,
+        has_oi: true, has_funding: true, has_liquidations: true, has_taker_flow: true,
+      } as CanonicalRowV2;
+    });
+  }
+
+  it('keeps high prices at 2 decimals (no trailing-zero noise beyond 2 dp)', () => {
+    const md = formatMarketContextMath(buildMarketContextMath({ ...base, rows: richRows(120, 60_000) }, 0));
+    const pivotMatch = md.match(/Pivots PP=([0-9.]+)/);
+    expect(pivotMatch).not.toBeNull();
+    expect(pivotMatch![1]!.split('.')[1]?.length ?? 0).toBe(2);
+  });
+});
