@@ -128,10 +128,11 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
         const fromMs = b.enteredAtMs - warmupMin * 60_000;
         const rows = await services.marketHistory.getRows({ symbol: b.symbol, fromMs, toMs: b.closedAtMs });
         const pnlPctNum = Number(b.pnlPct);
+        const realizedPnlNum = Number(b.realizedPnl);
         tradeContexts.push(buildTradeContextMath({
           tradeId: b.tradeId, symbol: b.symbol, rows,
           entryMs: b.enteredAtMs, exitMs: b.closedAtMs,
-          realizedPnl: Number(b.realizedPnl), pnlPct: Number.isFinite(pnlPctNum) ? pnlPctNum : null,
+          realizedPnl: Number.isFinite(realizedPnlNum) ? realizedPnlNum : 0, pnlPct: Number.isFinite(pnlPctNum) ? pnlPctNum : null,
           closeReason: b.closeReason,
           direction: profile.direction, regime: marketRegime, requiredFeatures: profile.requiredMarketFeatures,
         }, Date.now()));

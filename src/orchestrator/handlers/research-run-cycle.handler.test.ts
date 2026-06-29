@@ -572,4 +572,18 @@ describe('researchRunCycleHandler per-trade context', () => {
     await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
     expect(cap.captured()?.tradeContexts).toBeUndefined();
   });
+
+  it('guards malformed realizedPnl: a non-finite parse falls back to 0 (not NaN)', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis malformed-pnl')], researchSummary: 's' });
+    const malformedBundle = { ...losingBundle(), realizedPnl: 'not-a-number' };
+    const tradeEvidence: TradeEvidenceReadPort = { async getTradeEvidence() { return [malformedBundle]; } };
+    const marketHistory: MarketHistoryReadPort = { async getRows() { return historyRows(); } };
+    const services = makeServices({ researcher: cap.port, botResults: losingBotResults(), tradeEvidence, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    const ctxs = cap.captured()?.tradeContexts;
+    expect(ctxs?.length).toBe(1);
+    expect(Number.isNaN(ctxs?.[0]?.realizedPnl)).toBe(false);
+    expect(ctxs?.[0]?.realizedPnl).toBe(0);
+  });
 });
