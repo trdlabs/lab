@@ -4,6 +4,8 @@
 >
 > **Bundle this with the pending [trade-evidence handoff](2026-06-29-platform-trade-evidence-handoff.md)** (entry/exit prices + lifecycle). One ops.3 contract bump + one SDK release should deliver all three: prices, lifecycle, and the typed `closeReason`.
 
+> **✅ SHIPPED (2026-06-30) — trading-platform PR #33 (396cc63), ops.4→ops.5, SDK `@trading-platform/sdk` 0.9.0.** Delivered exactly as specced: `ClosedTrade`/`TradeEvidence.closeReason: CloseReason | null` (the 10-value enum below) + `closeReasonRaw: string | null`, **and** the bundled prices + lifecycle (`entryPrice`/`exitPrice`, full `TradeEvidence.lifecycle[]`). Lab consumes it (`@trading-platform/sdk` 0.9.0). **Still pending:** the mock-platform fixture must bake ≥2 distinct typed winner close-reasons for live integration-verify (separate mock-platform instance + VPS — `scratchpad/HANDOFF-close-reason-mock.md`). Platform investigate-finding: host-owned breakeven (long_oi) isn't written as its own exit-reason → classified by the recorded reason (gap documented, `other` fallback); for long_oi the ≥2 distinct winner reasons are `take_profit_final` (tp2) vs `time_exit`/`signal_exit`.
+
 ---
 
 ## Task: promote `ClosedTrade.closeReason` (and `TradeEvidence.closeReason`) from free-form `string | null` to a canonical `CloseReason` enum on ops-read (Surface A, ops.3)

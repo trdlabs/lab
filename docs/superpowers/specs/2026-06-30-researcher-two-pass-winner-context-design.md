@@ -89,7 +89,7 @@ Two gaps:
 
 ## 5. Dependencies & sequencing
 
-- **Platform `CloseReason` enum** (handoff `2026-06-30-platform-close-reason-enum-handoff.md`, bundled with the pending prices/lifecycle handoff): enables the cheap typed selection path. **Not blocking** — the headroom fallback ships and works without it; the typed path replaces the fallback when the SDK release lands.
+- **Platform `CloseReason` enum** (handoff `2026-06-30-platform-close-reason-enum-handoff.md`): **✅ SHIPPED in SDK 0.9.0 (2026-06-30)** — lab is bumped to it, so the typed selection path is **live in code** (`isTypedCloseReason` recognizes the SDK enum; a compile-time drift guard pins `CANONICAL_CLOSE_REASONS` ≡ SDK `CloseReason`). The headroom fallback is retained only until the **mock fixture** carries ≥2 typed winner reasons (separate mock-platform/VPS work); on the live HTTP path the typed path now activates automatically.
 - Builds on the merged per-trade context + post-exit tail (`main`). PR #111 (post-exit tail) should be merged before this lands (this sub-project assumes the `@post` tail exists).
 
 ---
