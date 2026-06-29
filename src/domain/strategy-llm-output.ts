@@ -16,44 +16,11 @@
 import { z } from 'zod';
 import type { StrategyBuilderOutput, StrategyManifestMeta } from '../ports/strategy-builder.port.ts';
 
-// ---------------------------------------------------------------------------
-// Nested object schemas (closed key-sets → strict-safe)
-// ---------------------------------------------------------------------------
-
-/**
- * CapabilityDeclaration from SDK — all fields optional booleans.
- * Modelled with .nullable() so OpenAI strict mode keeps each key in `required`.
- */
-const CapabilityDeclarationSchema = z.object({
-  exchangeDirect: z.boolean().nullable(),
-  brokerDirect: z.boolean().nullable(),
-  filesystem: z.boolean().nullable(),
-  network: z.boolean().nullable(),
-  process: z.boolean().nullable(),
-  env: z.boolean().nullable(),
-  dynamicEval: z.boolean().nullable(),
-  platformSdk: z.boolean().nullable(),
-}).strict();
-
-/**
- * DataNeedsDeclaration from SDK — all fields optional booleans.
- * Same nullable-not-optional discipline for OpenAI strict mode.
- */
-const DataNeedsDeclarationSchema = z.object({
-  closedCandlesUpToCurrent: z.boolean().nullable(),
-  asOfIndicators: z.boolean().nullable(),
-  openInterest: z.boolean().nullable(),
-  liquidations: z.boolean().nullable(),
-  funding: z.boolean().nullable(),
-  taker: z.boolean().nullable(),
-  forwardBars: z.boolean().nullable(),
-  forwardWindow: z.boolean().nullable(),
-  oracle: z.boolean().nullable(),
-  labeling: z.boolean().nullable(),
-  postTradeOutcome: z.boolean().nullable(),
-  wallClock: z.boolean().nullable(),
-  uncontrolledRandom: z.boolean().nullable(),
-}).strict();
+// `capabilities` and `dataNeeds` are serialized as JSON strings (same `params`/`paramsSchema`
+// precedent below). Originally modelled as nested objects of 8 + 13 `.nullable()` booleans — but that
+// is 21 union-typed parameters, which exceeds Anthropic structured-output's 16-union limit (OpenAI has
+// no such cap). JSON-string fields are opaque to the provider's schema compiler → provider-portable
+// (works on OpenAI, Anthropic, DeepSeek, …). The LLM emits a JSON object string; the adapter parses it.
 
 // ---------------------------------------------------------------------------
 // StrategyManifestSchema — mirrors CreateModuleManifestInput
@@ -79,8 +46,9 @@ export const StrategyManifestSchema = z.object({
   hooks: z.array(z.enum(['init', 'onBarClose', 'onPositionBar', 'onPendingIntentBar', 'dispose'])),
   // Serialized as a JSON string (see module doc) — LLM emits JSON Schema as a JSON-encoded string
   paramsSchema: z.string(),
-  capabilities: CapabilityDeclarationSchema,
-  dataNeeds: DataNeedsDeclarationSchema,
+  // JSON-encoded object strings (provider-portable; see note above) — adapter parses + strips nulls.
+  capabilities: z.string(),
+  dataNeeds: z.string(),
   // Optional-in-SDK fields → .nullable() to satisfy OpenAI strict required-keys rule
   author: z.enum(['human', 'agent']).nullable(),
   status: z.enum(['research_only', 'reviewed', 'promoted']).nullable(),
@@ -157,8 +125,8 @@ export function llmToStrategyBuilderOutput(o: StrategyLlmOutput): StrategyBuilde
   const manifestMeta: StrategyManifestMeta = {
     ...required,
     paramsSchema: parseJsonObject(paramsSchema, 'paramsSchema'),
-    capabilities: stripNullBooleans(capabilities) as StrategyManifestMeta['capabilities'],
-    dataNeeds: stripNullBooleans(dataNeeds) as StrategyManifestMeta['dataNeeds'],
+    capabilities: stripNullBooleans(parseJsonObject(capabilities, 'capabilities') as Record<string, boolean | null>) as StrategyManifestMeta['capabilities'],
+    dataNeeds: stripNullBooleans(parseJsonObject(dataNeeds, 'dataNeeds') as Record<string, boolean | null>) as StrategyManifestMeta['dataNeeds'],
     ...(author !== null ? { author } : {}),
     ...(status !== null ? { status } : {}),
     ...(params !== null ? { params: parseJsonObject(params, 'params') } : {}),

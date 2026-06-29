@@ -13,7 +13,7 @@ const VALID_MANIFEST = {
   rationale: 'Validates the schema + adapter contract',
   hooks: ['onBarClose'] as const,
   paramsSchema: JSON.stringify({ type: 'object', additionalProperties: false }),
-  capabilities: {
+  capabilities: JSON.stringify({
     exchangeDirect: null,
     brokerDirect: null,
     filesystem: null,
@@ -22,8 +22,8 @@ const VALID_MANIFEST = {
     env: null,
     dynamicEval: null,
     platformSdk: true,
-  },
-  dataNeeds: {
+  }),
+  dataNeeds: JSON.stringify({
     closedCandlesUpToCurrent: true,
     asOfIndicators: null,
     openInterest: null,
@@ -37,7 +37,7 @@ const VALID_MANIFEST = {
     postTradeOutcome: null,
     wallClock: null,
     uncontrolledRandom: null,
-  },
+  }),
   author: 'agent' as const,
   status: 'research_only' as const,
   params: null,

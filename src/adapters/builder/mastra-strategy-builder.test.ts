@@ -19,16 +19,16 @@ const validObject = {
     rationale: 'Testing purposes',
     hooks: ['onBarClose'],
     paramsSchema: '{}',
-    capabilities: {
+    capabilities: JSON.stringify({
       exchangeDirect: null, brokerDirect: null, filesystem: null, network: null,
       process: null, env: null, dynamicEval: null, platformSdk: null,
-    },
-    dataNeeds: {
+    }),
+    dataNeeds: JSON.stringify({
       closedCandlesUpToCurrent: null, asOfIndicators: null, openInterest: null,
       liquidations: null, funding: null, taker: null, forwardBars: null,
       forwardWindow: null, oracle: null, labeling: null, postTradeOutcome: null,
       wallClock: null, uncontrolledRandom: null,
-    },
+    }),
     author: null,
     status: null,
     params: null,
