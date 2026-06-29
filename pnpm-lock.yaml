@@ -33,8 +33,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
       '@trading-backtester/sdk':
-        specifier: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.4.0/trading-backtester-sdk-0.4.0.tgz
-        version: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.4.0/trading-backtester-sdk-0.4.0.tgz
+        specifier: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz
+        version: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz
       '@trading-platform/sdk':
         specifier: https://github.com/alexnikolskiy/trading-platform-sdk/releases/download/sdk-v0.7.2/trading-platform-sdk-0.7.2.tgz
         version: https://github.com/alexnikolskiy/trading-platform-sdk/releases/download/sdk-v0.7.2/trading-platform-sdk-0.7.2.tgz
@@ -1137,9 +1137,9 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.4.0/trading-backtester-sdk-0.4.0.tgz':
-    resolution: {tarball: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.4.0/trading-backtester-sdk-0.4.0.tgz}
-    version: 0.4.0
+  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz':
+    resolution: {tarball: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz}
+    version: 0.5.0
 
   '@trading-platform/sdk@https://github.com/alexnikolskiy/trading-platform-sdk/releases/download/sdk-v0.7.2/trading-platform-sdk-0.7.2.tgz':
     resolution: {tarball: https://github.com/alexnikolskiy/trading-platform-sdk/releases/download/sdk-v0.7.2/trading-platform-sdk-0.7.2.tgz}
@@ -3288,7 +3288,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.4.0/trading-backtester-sdk-0.4.0.tgz':
+  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz':
     dependencies:
       decimal.js: 10.6.0
 
