@@ -15,6 +15,7 @@ import {
 import { makeOnUsage } from '../make-on-usage.ts';
 import { buildMarketContextMath } from '../../research-math/market-context-math.ts';
 import { formatMarketContextMath } from '../../research-math/format-market-context-math.ts';
+import { buildTradeContextMath, type TradeContextMath } from '../../research-math/trade-context-math.ts';
 
 export const RESEARCH_DEFAULT_SYMBOL = 'BTCUSDT';
 export const BOT_RESULTS_MAX = 10;
@@ -117,6 +118,29 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     tradeEvidence = [];
   }
 
+  const tradeContexts: TradeContextMath[] = [];
+  {
+    const parsedWarmup = Number(process.env.TRADE_CONTEXT_WARMUP_MIN ?? '150');
+    const warmupMin = Number.isFinite(parsedWarmup) && parsedWarmup > 0 ? parsedWarmup : 150;
+    for (const b of tradeEvidence) {
+      if (b.closedAtMs == null) continue;
+      try {
+        const fromMs = b.enteredAtMs - warmupMin * 60_000;
+        const rows = await services.marketHistory.getRows({ symbol: b.symbol, fromMs, toMs: b.closedAtMs });
+        const pnlPctNum = Number(b.pnlPct);
+        tradeContexts.push(buildTradeContextMath({
+          tradeId: b.tradeId, symbol: b.symbol, rows,
+          entryMs: b.enteredAtMs, exitMs: b.closedAtMs,
+          realizedPnl: Number(b.realizedPnl), pnlPct: Number.isFinite(pnlPctNum) ? pnlPctNum : null,
+          closeReason: b.closeReason,
+          direction: profile.direction, regime: marketRegime, requiredFeatures: profile.requiredMarketFeatures,
+        }, Date.now()));
+      } catch (err) {
+        await services.events.append(event(task.id, 'researcher.trade_context_unavailable', { tradeId: b.tradeId, error: errMsg(err) }));
+      }
+    }
+  }
+
   let marketContextMath;
   try {
     const parsedLookback = Number(process.env.MARKET_HISTORY_LOOKBACK_DAYS ?? '7');
@@ -159,6 +183,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     output = await services.researcher.propose({
       profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax,
       ...(marketContextMath && marketContextMath.terms.length > 0 ? { marketContextMath } : {}),
+      ...(tradeContexts.length > 0 ? { tradeContexts } : {}),
     }, {
       ...makeOnUsage(task, services),
       ...(marketContextArtifactId ? { tracingMetadata: { research_market_context_artifact_id: marketContextArtifactId } } : {}),

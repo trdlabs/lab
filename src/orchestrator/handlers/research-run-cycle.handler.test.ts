@@ -10,7 +10,7 @@ import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { AppServices } from '../app-services.ts';
 import type { BotResultsReadPort } from '../../ports/bot-results-read.port.ts';
 import type { TradeEvidenceReadPort } from '../../ports/trade-evidence-read.port.ts';
-import type { MarketHistoryReadPort } from '../../ports/market-history-read.port.ts';
+import type { MarketHistoryReadPort, CanonicalRowV2 } from '../../ports/market-history-read.port.ts';
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 import { InMemoryArtifactStore } from '../../adapters/artifact/in-memory-artifact-store.ts';
@@ -502,5 +502,74 @@ describe('researchRunCycleHandler', () => {
     await seedProfile(services);
     await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
     expect(cap.captured()?.marketContextMath).toBeUndefined();
+  });
+});
+
+describe('researchRunCycleHandler per-trade context', () => {
+  const MIN = 60_000;
+  function losingBotResults(): BotResultsReadPort {
+    return {
+      async listBotRuns() {
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+      },
+      async getRunSummary() {
+        return { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 1, wins: 0, losses: 1, breakeven: 0, winratePct: 0, pnlUsd: '-15', avgPnl: '-15', exitReasons: { stop_loss: 1 } };
+      },
+      async getClosedTrades() {
+        return [{ tradeId: 't-loss-1', runId: 'r1', symbol: 'BTCUSDT', side: 'long', openedAtMs: 200 * MIN, closedAtMs: 240 * MIN, realizedPnl: '-15', pnlPct: '-1.5', isWin: false, closeReason: 'stop_loss' }];
+      },
+      async getOperationalEvents() { return { items: [], nextCursor: null, asOf: 2, window: {}, freshness: 'fresh' }; },
+      async getDecisionLog() { return { items: [], nextCursor: null, asOf: 2, window: {}, freshness: 'fresh' }; },
+    };
+  }
+  function losingBundle() {
+    return {
+      tradeId: 't-loss-1', runId: 'r1', symbol: 'BTCUSDT', side: 'long' as const,
+      enteredAtMs: 200 * MIN, closedAtMs: 240 * MIN, entryPrice: '1.0', exitPrice: '0.9',
+      realizedPnl: '-15', pnlPct: '-1.5', holdingDurationMs: 40 * MIN, closeReason: 'stop_loss',
+      lifecycleEvents: [], minuteContext: [],
+    };
+  }
+  function historyRows(): CanonicalRowV2[] {
+    return Array.from({ length: 260 }, (_, i) => ({
+      schema_version: 2 as const, minute_ts: i * MIN, symbol: 'BTCUSDT',
+      open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 10, turnover: (100 + i) * 10,
+      oi_total_usd: 1000 + i, funding_rate: 0.0001, liq_long_usd: 1, liq_short_usd: 2,
+      taker_buy_volume_usd: 6, taker_sell_volume_usd: 4,
+      has_oi: true, has_funding: true, has_liquidations: true, has_taker_flow: true,
+    }));
+  }
+
+  it('attaches per-trade contexts built from the fetched losing bundles', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis ptc')], researchSummary: 's' });
+    const tradeEvidence: TradeEvidenceReadPort = { async getTradeEvidence() { return [losingBundle()]; } };
+    const marketHistory: MarketHistoryReadPort = { async getRows() { return historyRows(); } };
+    const services = makeServices({ researcher: cap.port, botResults: losingBotResults(), tradeEvidence, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    const ctxs = cap.captured()?.tradeContexts;
+    expect(ctxs?.length).toBe(1);
+    expect(ctxs?.[0]?.tradeId).toBe('t-loss-1');
+    expect(ctxs?.[0]?.atExit.some((t) => t.config.key === 'micro')).toBe(true);
+  });
+
+  it('is fail-soft: a per-trade getRows failure skips that context + emits an event, cycle still completes', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis ptc-fail')], researchSummary: 's' });
+    const tradeEvidence: TradeEvidenceReadPort = { async getTradeEvidence() { return [losingBundle()]; } };
+    const marketHistory: MarketHistoryReadPort = { async getRows() { throw new Error('history down'); } };
+    const services = makeServices({ researcher: cap.port, botResults: losingBotResults(), tradeEvidence, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    expect(cap.captured()?.tradeContexts).toBeUndefined();
+    expect(await types(services)).toContain('researcher.trade_context_unavailable');
+    expect((await types(services)).at(-1)).toBe('research.run_cycle.completed');
+  });
+
+  it('omits tradeContexts when there are no losing trades', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis no-losers')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port }); // default botResults → no trades
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+    expect(cap.captured()?.tradeContexts).toBeUndefined();
   });
 });
