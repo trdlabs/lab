@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMarketContextMath } from './market-context-math.ts';
+import { buildMarketContextMath, momentumStateOf } from './market-context-math.ts';
 import type { CanonicalRowV2 } from '../ports/market-history-read.port.ts';
 
 function series(n: number, cadence: number, withTaker: boolean): CanonicalRowV2[] {
@@ -68,5 +68,25 @@ describe('buildMarketContextMath Phase E indicators', () => {
     expect(long.indicators.pivots).not.toBeNull();
     expect(long.indicators.squeeze).not.toBeNull();
     expect(math.notes.some((n) => /Pressure/i.test(n))).toBe(true);
+  });
+});
+
+describe('momentumStateOf', () => {
+  it('is rising when momentum increased', () => {
+    expect(momentumStateOf(5, 3)).toBe('rising');
+  });
+  it('is falling when momentum decreased', () => {
+    expect(momentumStateOf(3, 5)).toBe('falling');
+  });
+  it('is flat when equal', () => {
+    expect(momentumStateOf(5, 5)).toBe('flat');
+  });
+  it('is flat within the epsilon', () => {
+    expect(momentumStateOf(5 + 5e-10, 5)).toBe('flat');
+  });
+  it('is flat when either side is null (warmup)', () => {
+    expect(momentumStateOf(5, null)).toBe('flat');
+    expect(momentumStateOf(null, 5)).toBe('flat');
+    expect(momentumStateOf(null, null)).toBe('flat');
   });
 });

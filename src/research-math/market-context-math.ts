@@ -95,6 +95,12 @@ function cvdTrendOf(cvdSeries: readonly (number | null)[]): TermIndicatorSnapsho
   return d > 0 ? 'rising' : 'falling';
 }
 
+export function momentumStateOf(cur: number | null, prev: number | null): 'rising' | 'falling' | 'flat' {
+  if (cur == null || prev == null) return 'flat';
+  const diff = cur - prev;
+  return Math.abs(diff) < 1e-9 ? 'flat' : diff > 0 ? 'rising' : 'falling';
+}
+
 function buildTerm(rows: readonly CanonicalRowV2[], cfg: TermConfig): TermMath {
   const cov = coverageOf(rows);
   const closes = rows.map((r) => r.close);
@@ -143,12 +149,7 @@ function buildTerm(rows: readonly CanonicalRowV2[], cfg: TermConfig): TermMath {
       const cur = sqArr[last] ?? null;
       if (cur == null) return null;
       const prev = last >= 1 ? (sqArr[last - 1] ?? null) : null;
-      let state: 'rising' | 'falling' | 'flat' = 'flat';
-      if (cur.momentum != null && prev?.momentum != null) {
-        const diff = cur.momentum - prev.momentum;
-        state = Math.abs(diff) < 1e-9 ? 'flat' : diff > 0 ? 'rising' : 'falling';
-      }
-      return { on: cur.on, momentum: cur.momentum, momentumState: state };
+      return { on: cur.on, momentum: cur.momentum, momentumState: momentumStateOf(cur.momentum, prev?.momentum ?? null) };
     })(),
     pivots: cov.hasOhlc && rows.length >= 2 ? pivots(highs[last - 1]!, lows[last - 1]!, closes[last - 1]!) : null,
     pressure: ((): TermIndicatorSnapshot['pressure'] => {
