@@ -22,7 +22,7 @@ import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-ga
 import { selectResearchPlatform } from './adapters/platform/select-research-platform.ts';
 import { selectBotResults } from './adapters/platform/select-bot-results.ts';
 import { selectMarketHistory } from './adapters/platform/select-market-history.ts';
-import { MockTradeEvidenceAdapter } from './adapters/platform/mock-trade-evidence.adapter.ts';
+import { selectTradeEvidence } from './adapters/platform/select-trade-evidence.ts';
 import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
 import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
 import { FakeCritic } from './adapters/critic/fake-critic.ts';
@@ -240,7 +240,7 @@ export function composeRuntime() {
     researchIntegration: env.TRADING_PLATFORM_INTEGRATION,
     botResults: selectBotResults(process.env),
     marketHistory: selectMarketHistory(process.env),
-    tradeEvidence: new MockTradeEvidenceAdapter(),
+    tradeEvidence: selectTradeEvidence(process.env),
     researcher: buildResearcher(mastraRuntime),
     critic: buildCritic(env, mastraRuntime),
     strategyCritic: buildStrategyCritic(env, mastraRuntime),

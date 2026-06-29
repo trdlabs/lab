@@ -82,7 +82,8 @@ describe('buildPrompt bot-results block', () => {
     expect(out).toContain('Forensic trade evidence');
     expect(out).toContain('COAIUSDT tradeId=t1 entryPrice=1.25 exitPrice=1.10');
     expect(out).toContain('type=dca');
-    expect(out).toContain('close=1.11 volume=18000 oi=390000');
+    expect(out).not.toContain('close=1.11 volume=18000'); // raw minute-context dropped (redundant with per-trade context)
+    expect(out).not.toMatch(/^ {2}minute tsMs=/m);
   });
   it('omits the block when botResults is empty or undefined', () => {
     expect(buildPrompt(baseInput)).not.toContain('Live/paper bot performance');

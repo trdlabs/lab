@@ -99,9 +99,6 @@ function forensicBundleText(bundles: readonly TradeEvidenceBundle[] | undefined)
       + ` pnlPct=${bundle.pnlPct} holdingDurationMs=${bundle.holdingDurationMs ?? 'unknown'} closeReason=${bundle.closeReason ?? 'unknown'}`,
       ...bundle.lifecycleEvents.map((event) =>
         `  lifecycle tsMs=${event.tsMs} type=${event.type} price=${event.price ?? 'unknown'} qty=${event.qty ?? 'unknown'} note=${event.note ?? ''}`),
-      ...bundle.minuteContext.map((point) =>
-        `  minute tsMs=${point.tsMs} close=${point.close} volume=${point.volume ?? 'unknown'}`
-        + ` oi=${point.oi ?? 'unknown'} liquidationsLong=${point.liquidationsLong ?? 'unknown'} liquidationsShort=${point.liquidationsShort ?? 'unknown'}`),
     ]),
   ];
 }
