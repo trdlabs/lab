@@ -33,6 +33,7 @@ async function runOnce(model: string, input: ResearcherEvalInput, deps: RunEvalD
       botResults: input.botResults,
       tradeEvidence: input.tradeEvidence,
       maxHypotheses: 2,
+      focus: 'loss_reduction',
     });
     const latencyMs = deps.clock() - start;
     const score = scoreResearcherOutput(raw, input);

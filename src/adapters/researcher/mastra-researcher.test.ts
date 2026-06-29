@@ -31,6 +31,7 @@ const baseInput: ResearcherInput = {
   marketRegime: 'ranging',
   similarHypotheses: [],
   maxHypotheses: 2,
+  focus: 'loss_reduction',
 };
 
 const detail: BotRunResultDetail = {
@@ -172,6 +173,7 @@ describe('MastraResearcher.propose – tracingOptions forwarding', () => {
     const input: ResearcherInput = {
       profile, marketContext: { symbol: 'BTCUSDT', ts: '2026-01-01T00:00:00Z', features: { oi: 1 } },
       marketRegime: 'capitulation', similarHypotheses: [], maxHypotheses: 2,
+      focus: 'loss_reduction',
     };
     const out = await new MastraResearcher(createResearcherAgent(model), label).propose(input);
     expect(ResearcherOutputSchema.safeParse(out).success).toBe(true);
@@ -206,5 +208,35 @@ describe('buildPrompt per-trade context', () => {
   it('omits per-trade sections when tradeContexts is absent', () => {
     const prompt = buildPrompt(baseInput);
     expect(prompt).not.toContain('## Per-trade context');
+  });
+});
+
+describe('buildPrompt focus branching', () => {
+  it('loss_reduction renders similar hypotheses + forensic; profit_improvement omits them', () => {
+    const loss = buildPrompt({ ...baseInput, focus: 'loss_reduction',
+      similarHypotheses: [{ hypothesisId: 'h', thesis: 'old idea', status: 'validated', score: 1 }] });
+    expect(loss).toMatch(/Similar past hypotheses/);
+
+    const profit = buildPrompt({ ...baseInput, focus: 'profit_improvement',
+      similarHypotheses: [{ hypothesisId: 'h', thesis: 'old idea', status: 'validated', score: 1 }] });
+    expect(profit).not.toMatch(/Similar past hypotheses/);
+    expect(profit).toMatch(/PROFIT IMPROVEMENT/);
+    expect(profit).toMatch(/trail/i);
+  });
+
+  it('both passes carry the profile-critical framing and render active overlay rules', () => {
+    const rules = [{ thesis: 'skip when oi flat', ruleAction: { appliesTo: 'long' as const,
+      rules: [{ when: 'oi flat', action: 'skip_entry' as const, params: {} }] }, status: 'validated' as const }];
+    for (const focus of ['loss_reduction', 'profit_improvement'] as const) {
+      const p = buildPrompt({ ...baseInput, focus, activeOverlayRules: rules });
+      expect(p).toMatch(/BE CRITICAL OF THE PROFILE/);
+      expect(p).toMatch(/Active overlay rules/);
+      expect(p).toMatch(/skip when oi flat/);
+    }
+  });
+
+  it('degrades to no active overlay rules', () => {
+    const p = buildPrompt({ ...baseInput, focus: 'loss_reduction', activeOverlayRules: [] });
+    expect(p).toMatch(/no active overlay rules yet/i);
   });
 });

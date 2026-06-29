@@ -9,6 +9,7 @@ import type { TradeEvidenceBundle } from '../../ports/trade-evidence-read.port.t
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
 import { formatMarketContextMath } from '../../research-math/format-market-context-math.ts';
 import { formatTradeContexts } from '../../research-math/format-trade-context-math.ts';
+import { RESEARCHER_PROFIT_FRAMING, RESEARCHER_PROFILE_CRITICAL_FRAMING } from '../../mastra/agents/researcher-capabilities.ts';
 
 /**
  * OpenAI/Azure strict mode requires all schema properties to be listed in `required`.
@@ -103,12 +104,16 @@ function forensicBundleText(bundles: readonly TradeEvidenceBundle[] | undefined)
   ];
 }
 
+function activeOverlayRulesText(input: ResearcherInput): string {
+  const rules = input.activeOverlayRules ?? [];
+  if (rules.length === 0) return 'Active overlay rules on this profile: (no active overlay rules yet — critique the base profile)';
+  const lines = rules.map((r) => `- [${r.status}] ${r.thesis} :: ${JSON.stringify(r.ruleAction)}`).join('\n');
+  return `Active overlay rules on this profile (critique these):\n${lines}`;
+}
+
 export function buildPrompt(input: ResearcherInput): string {
-  const similar = input.similarHypotheses.length > 0
-    ? input.similarHypotheses.map((s) => `- [${s.status}] ${s.thesis}`).join('\n')
-    : '(none)';
   const botPerf = buildBotResultsDigestText(input.botResults);
-  return [
+  const head = [
     `Strategy core idea: ${input.profile.coreIdea}`,
     `Direction: ${input.profile.direction}`,
     `Profile required features: ${input.profile.requiredMarketFeatures.join(', ') || '(none)'}`,
@@ -117,11 +122,33 @@ export function buildPrompt(input: ResearcherInput): string {
     input.marketContextMath
       ? formatMarketContextMath(input.marketContextMath)
       : `Market context features: ${JSON.stringify(input.marketContext.features)}`,
-    `Similar past hypotheses (advisory, avoid duplicating):\n${similar}`,
+    RESEARCHER_PROFILE_CRITICAL_FRAMING,
+    activeOverlayRulesText(input),
     ...(botPerf ? [botPerf] : []),
+  ];
+
+  const tradeBlock = input.tradeContexts && input.tradeContexts.length > 0
+    ? [formatTradeContexts(input.tradeContexts)] : [];
+
+  if (input.focus === 'profit_improvement') {
+    return [
+      ...head,
+      RESEARCHER_PROFIT_FRAMING,
+      ...tradeBlock,
+      `Produce at most ${input.maxHypotheses} profit-improvement hypotheses.`,
+    ].join('\n');
+  }
+
+  // loss_reduction (default): similar hypotheses + forensic evidence + losers' context
+  const similar = input.similarHypotheses.length > 0
+    ? input.similarHypotheses.map((s) => `- [${s.status}] ${s.thesis}`).join('\n')
+    : '(none)';
+  return [
+    ...head,
+    `Similar past hypotheses (advisory, avoid duplicating):\n${similar}`,
     ...forensicBundleText(input.tradeEvidence),
-    ...(input.tradeContexts && input.tradeContexts.length > 0 ? [formatTradeContexts(input.tradeContexts)] : []),
-    `Produce at most ${input.maxHypotheses} hypotheses.`,
+    ...tradeBlock,
+    `Produce at most ${input.maxHypotheses} loss-reduction hypotheses.`,
   ].join('\n');
 }
 

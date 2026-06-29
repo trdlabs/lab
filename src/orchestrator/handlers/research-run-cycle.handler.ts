@@ -263,6 +263,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   try {
     output = await services.researcher.propose({
       profile, marketContext, marketRegime, similarHypotheses, botResults, tradeEvidence, maxHypotheses: effectiveMax,
+      focus: 'loss_reduction',
       ...(marketContextMath && marketContextMath.terms.length > 0 ? { marketContextMath } : {}),
       ...(tradeContexts.length > 0 ? { tradeContexts } : {}),
     }, {

@@ -23,6 +23,7 @@ function input(maxHypotheses: number): ResearcherInput {
     marketRegime: 'ranging',
     similarHypotheses: [],
     maxHypotheses,
+    focus: 'loss_reduction',
   };
 }
 
@@ -59,6 +60,7 @@ const inputWithBotResults = (botResults?: readonly BotRunResultDetail[]): Resear
   similarHypotheses: [],
   ...(botResults ? { botResults } : {}),
   maxHypotheses: 2,
+  focus: 'loss_reduction',
 });
 
 describe('FakeResearcher botResults reflection', () => {

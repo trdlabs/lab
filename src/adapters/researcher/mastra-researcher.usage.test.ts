@@ -24,6 +24,7 @@ const validInput: ResearcherInput = {
   marketRegime: 'ranging',
   similarHypotheses: [],
   maxHypotheses: 2,
+  focus: 'loss_reduction',
 };
 
 /** Valid LLM output satisfying LlmResearcherOutputSchema. */
