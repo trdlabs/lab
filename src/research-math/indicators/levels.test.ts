@@ -100,4 +100,9 @@ describe('takerPressure', () => {
   it('returns nulls (no divide-by-zero) when totals are zero', () => {
     expect(takerPressure([0, 0], [0, 0], 2)).toEqual({ bias: null, buyShare: null });
   });
+
+  it('returns nulls for a non-positive window (no bars summed)', () => {
+    expect(takerPressure([6, 4], [4, 6], 0)).toEqual({ bias: null, buyShare: null });
+    expect(takerPressure([6, 4], [4, 6], -3)).toEqual({ bias: null, buyShare: null });
+  });
 });
