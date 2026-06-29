@@ -1,199 +1,475 @@
 {
-  "id": "f94468c5-8a05-44c8-990a-40ac8686fb73",
+  "id": "b4f1c2b3-9d66-4f8b-996e-a57161a734ac",
   "version": 1,
-  "sourceKind": "manual_description",
-  "sourceFingerprint": "sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
+  "sourceKind": "bot_code",
+  "sourceFingerprint": "sha256:2bdc5389969657cd46ec2500022350e768a0426d8d7bcbb01b14f344157f82b5",
   "direction": "long",
-  "coreIdea": "Long-only crypto futures rebound strategy after a sharp liquidation-driven selloff. The strategy watches assets that dropped roughly 10% or more over about 20 minutes, then enters only after signs of reversal: price bounce, rising open interest, and prior long liquidations.",
+  "coreIdea": "Long-only dump-reversal strategy: detect a sharp selloff, enter only after price bounce + OI recovery + current long-liquidation confirmation. While in position it manages TP1/TP2, hard stop, time exit, optional BE protection after TP1, DCA reconfirmation, and optional fail-fast exit.",
   "requiredMarketFeatures": [
-    "Price/OHLC data",
-    "Candle color / candle direction",
-    "Local low detection",
-    "Open interest",
-    "Long liquidation data"
+    "OHLCV closed candles/current bar: open, high, low, close, ts; `recentCandles(ctx,n)` uses `ctx.data.closedCandles(n-1)` strictly before current bar plus `ctx.bar` as current bar.",
+    "Open interest: `ctx.market.oiWindow(3)` returning 3 defined `OiPoint` slots with `oiTotalUsd`; index 2 is current minute, index 1 previous, index 0 two bars back.",
+    "Liquidations: `ctx.market.liqAsOf().longUsd` for current minute only; `undefined` is treated as missing, while covered no-events longUsd=0 is valid data.",
+    "Position snapshot from runner: `ctx.position.entryPrice`, `ctx.position.size`, `ctx.position.side`; used for in-position management, not a market-data feature.",
+    "No funding rate, CVD, taker buy/sell volume, order book, short liquidations, or as-of TA indicators are used by runtime logic."
   ],
-  "confidence": 0.92,
+  "confidence": 0.99,
   "unknowns": [
-    "Exact candle timeframe for the two green candles is not specified.",
-    "Definition of 'fast bounce' is not quantified.",
-    "Exact method for identifying the local minimum is not specified.",
-    "Exact open interest rise threshold is not specified.",
-    "Exact long-liquidation threshold or window is not specified.",
-    "Whether the -12% hard stop is measured from initial entry, average entry, or latest entry after averaging is not specified.",
-    "Exact sizing of each averaging-down add-on is not specified.",
-    "Whether TP1/TP2 are recalculated from average entry after averaging is not specified."
+    "Exact external SDK semantics of `ctx.data.closedCandles(n)` ordering are assumed from comments as old-to-new; implementation is not included.",
+    "Exact live/backtest runner behavior for applying `enter`, `exit`, `percent`, `add_to_position`, and `update_protection` decisions is outside the source.",
+    "Exact bar interval is not explicitly declared as a timeframe field, although code/comments consistently use minute buckets and `MIN=60000`.",
+    "Whether `ctx.market.oiWindow(3)` order is guaranteed old-to-new is inferred from comments/index usage but SDK implementation is not shown.",
+    "No exchange, symbol universe, fees, slippage, leverage, notional sizing, or portfolio-level risk constraints are specified.",
+    "No behavior is implemented for trailing modes beyond enum value `off`.",
+    "No runtime use is present for `warmup.candlesMin`, `liqFilter.lookbackMin`, or `liqFilter.minLongLiqUsd` despite defaults/schema."
   ],
   "profile": {
     "direction": "long",
-    "coreIdea": "Long-only crypto futures rebound strategy after a sharp liquidation-driven selloff. The strategy watches assets that dropped roughly 10% or more over about 20 minutes, then enters only after signs of reversal: price bounce, rising open interest, and prior long liquidations.",
-    "summary": "The trader does not buy immediately after a fast dump. If price falls by at least about 10% during the last roughly 20 minutes, the instrument is placed on watch. A long entry is taken only after confirmation that price has begun rebounding from a local low, such as two green candles or a fast bounce, while open interest starts rising again and the selloff was preceded/accompanied by long liquidations. After entry, half the position is taken off at +3.5%, the stop is moved to breakeven, and the remainder is held for +5%. A hard stop is placed around -12%, and any position still open after 180 minutes without hitting TP or SL is closed by time. If price drops another roughly 3% from the latest entry price after entry, the trader may average down only if reversal confirmation appears again, with a maximum of two add-ons.",
+    "coreIdea": "Long-only dump-reversal strategy: detect a sharp selloff, enter only after price bounce + OI recovery + current long-liquidation confirmation. While in position it manages TP1/TP2, hard stop, time exit, optional BE protection after TP1, DCA reconfirmation, and optional fail-fast exit.",
+    "summary": "The module is an FSM with phases IDLE → WATCHING → IN_POSITION / COOLDOWN. When flat and IDLE, it scans the last `dump.lookbackMin` recent candles, including the current bar, for either a high-to-low or open-to-close dump. A valid dump arms a WATCHING state for `watch.maxMinutes`; during watch it tracks local low/high after signal and evaluates entry on each bar close using the last 3 candles, the last 3 OI buckets, current-minute long liquidations, OI recovery, price bounce, and green/fast candle logic. Entry emits `enter` long only if all runtime gates pass. In position, one first-priority decision is emitted per bar: TP2 full exit, hard stop, time exit, pending BE protection update, TP1 action, DCA add, fail-fast exit, else idle. Market data degradation is deterministic: missing OI/liquidation surfaces suppresses entry/DCA or annotates rather than substituting zero.",
     "requiredMarketFeatures": [
-      "Price/OHLC data",
-      "Candle color / candle direction",
-      "Local low detection",
-      "Open interest",
-      "Long liquidation data"
+      "OHLCV closed candles/current bar: open, high, low, close, ts; `recentCandles(ctx,n)` uses `ctx.data.closedCandles(n-1)` strictly before current bar plus `ctx.bar` as current bar.",
+      "Open interest: `ctx.market.oiWindow(3)` returning 3 defined `OiPoint` slots with `oiTotalUsd`; index 2 is current minute, index 1 previous, index 0 two bars back.",
+      "Liquidations: `ctx.market.liqAsOf().longUsd` for current minute only; `undefined` is treated as missing, while covered no-events longUsd=0 is valid data.",
+      "Position snapshot from runner: `ctx.position.entryPrice`, `ctx.position.size`, `ctx.position.side`; used for in-position management, not a market-data feature.",
+      "No funding rate, CVD, taker buy/sell volume, order book, short liquidations, or as-of TA indicators are used by runtime logic."
     ],
     "entryConditions": [
-      "Trade only long.",
-      "Trade only crypto futures instruments.",
-      "If price has fallen by approximately 10% or more over the last approximately 20 minutes, place the instrument on watch rather than entering immediately.",
-      "Wait for a rebound from the local minimum before entering.",
-      "Enter only after confirmation that price has started rising.",
-      "Valid price-reversal confirmation examples include two green candles or a fast bounce.",
-      "Open interest must start rising again before/at entry confirmation.",
-      "There must have been long liquidations before the entry setup."
+      "Flat-only: `onBarClose` immediately returns idle when `ctx.position != null`. Entry can only be emitted by flat phase.",
+      "Parameter resolution: if `ctx.params` contains all groups `tpLadder`, `protection`, `dca`, `dump`, `watch`, `entry`, `oiFilter`, `liqFilter`, `warmup`, `failFast`, use it; otherwise fall back entirely to `DEFAULT_PARAMS`.",
+      "FSM reconciliation: if flat while `state.phase === 'IN_POSITION'`, enter COOLDOWN at current `ctx.bar.ts`, reset watch/miniWatch/TP/BE/openedAt/DCA/lastEntryPrice/diagnostics, set `cooldownUntil = ts + watch.cooldownMinutes * 60000`, return idle.",
+      "COOLDOWN gate: if `state.phase === 'COOLDOWN'`, and `ts >= cooldownUntil`, set phase IDLE and `cooldownUntil=0`; always return idle on that bar.",
+      "Dump detection is evaluated only in `state.phase === 'IDLE'`: `window = recentCandles(ctx, dump.lookbackMin)`, where `recentCandles(n)` returns `closedCandles(n-1) + current bar`; `detectDump` returns null if `klines.length < 2` or `dump.lookbackMin < 2`; then uses `klines.slice(-dump.lookbackMin)`.",
+      "Dump trigger mode `high_to_low`: find highest high over window by iterating all bars and updating on `high > highest` where `Number(high)` is finite; then find lowest low from `highestIdx` through window end where low is finite, `>0`, and `< lowest`. If no highest/lowest found, no signal.",
+      "`high_to_low` dump formulas: `dumpPctHighLow = pctDrop(highest, lowest) = ((highest-lowest)/highest)*100` if highest finite and >0 else 0; `dumpPctHighToClose = pctDrop(highest,lastClose)`; `bounceFromLowPct = pctRise(lowest,lastClose)=((lastClose-lowest)/lowest)*100` if lowest >0 else 0; `closePosInRangePct = range>0 ? ((lowClose-lowLow)/(lowHigh-lowLow))*100 : 0`; `isGreenLowCandle = lowClose >= lowOpen`.",
+      "`high_to_low` dump gates, all required: `dumpPctHighLow >= dump.minDropPct`; `dumpPctHighToClose >= dump.highToLowMinCloseHoldPct`; `closePosInRangePct <= dump.highToLowMaxClosePosInRangePct`; and NOT (`isGreenLowCandle && bounceFromLowPct > dump.highToLowMaxGreenRecoveryBouncePct`). Defaults: minDrop 10%, close-hold 6%, max close position 55%, max green recovery bounce 3.5%.",
+      "`high_to_low` signal fields: `ts=last.ts`, `signalPrice=lastClose`, `triggerMode='high_to_low'`, `triggerPct=dumpPctHighLow`, `dumpPctOpenClose=pctDrop(window[0].open,lastClose)`, `dumpPctHighLow`, `highest`, `highestTs=window[highestIdx].ts`, `lowest`, `lowTs=lowCandle.ts`, `bounceFromLowPct`, `firstOpen=window[0].open`, `lastClose`.",
+      "Dump trigger mode `open_to_close`: requires `window.length >= 2`; `firstOpen=window[0].open`, `lastClose=last.close`; `dumpPctOpenClose=pctDrop(firstOpen,lastClose)` must be `>= dump.minDropPct`; otherwise no signal. It also computes highest/lowest over whole window for diagnostics.",
+      "`open_to_close` signal fields: `ts=last.ts`, `signalPrice=lastClose`, `triggerMode='open_to_close'`, `triggerPct=dumpPctOpenClose`, `dumpPctOpenClose`, `dumpPctHighLow=highInfo&&lowInfo ? pctDrop(high,low) : 0`, `highest`, `highestTs`, `lowest`, `lowTs`, `bounceFromLowPct=lowInfo ? pctRise(low,lastClose) : 0`, `firstOpen`, `lastClose`.",
+      "Warmup skip after dump signal: only active if `warmup.firstLiveCandleTs` is truthy. `fromWarmup = signal.lowTs < firstLiveTs || signal.highestTs < firstLiveTs`; if false, do not skip. If true: `ageMin=(barTs-signal.lowTs)/60000`; `bouncePct=signal.bounceFromLowPct || 0`; skip with annotation `warmup_signal_too_old` if `ageMin > warmup.maxSignalAgeMin`; skip with annotation `warmup_signal_already_bounced` if `bouncePct > warmup.maxBounceFromLowPct`; comparisons are strict `>`.",
+      "If dump signal is not warmup-skipped, arm watch: `phase='WATCHING'`; `watch.startedAt=bar.ts`; `watch.expireAt=bar.ts + watch.maxMinutes*60000`; `watch.localLowAfterSignal=Math.min(signal.signalPrice, bar.low)`; `watch.localHighAfterSignal=Math.max(signal.signalPrice, bar.high)`; annotate `dump_detected` with trigger mode, trigger pct, signal ts.",
+      "WATCHING protective reconciliation: if `state.watch === null`, set phase IDLE and return idle.",
+      "While WATCHING, before timeout/entry evaluation, update local extremes: if `ctx.bar.low < watch.localLowAfterSignal`, assign it; if `ctx.bar.high > watch.localHighAfterSignal`, assign it.",
+      "WATCH timeout: if `ts >= watch.expireAt`, enter cooldown with `cooldownUntil = ts + watch.cooldownMinutes*60000`, reset state fields, return idle; this occurs before entry evaluation on that bar.",
+      "Entry market-data gate: `oiWindow3(ctx)` must return non-null. It returns null if `ctx.market` undefined, `ctx.market.oiWindow(3).length < 3`, or any slot is `undefined`; no carry-forward and no zero substitution. Missing OI causes annotation `watch_tick` with `missing_market_data` if no market surface else `missing_open_interest`.",
+      "Entry liquidation-data gate: `liqLongNow(ctx)` must return non-null. It returns null if `ctx.market` undefined or `ctx.market.liqAsOf() === undefined`; covered no-events returns `longUsd`, possibly 0. Missing liquidation causes annotation `watch_tick`, `missing_liquidations`.",
+      "Entry candle-count gate: `candles3 = recentCandles(ctx,3)` must have length >= 3; otherwise idle.",
+      "Entry evaluation inputs: `candles3` last 3 candles including current where index 2=current and index 1=previous; `oi3` last 3 OI totals where index 2=current; `liqLongUsd=current longUsd`; `oiNow=oi3[2]`; `localLow=watch.localLowAfterSignal`.",
+      "Entry formulas: `pctChange(a,b)= b ? ((a-b)/b)*100 : 0`; `bouncePct=pctChange(candles3[2].close, localLow || candles3[2].close)`; `fastCandlePct=pctChange(candles3[2].close, candles3[1].close)`; `fastEntry = fastCandlePct >= entry.fastBouncePct`; `greenCandles=countGreenCandles(candles3)` counting transitions `close[i] > close[i-1]` for i=1..2; `priceUpEnough = fastEntry || greenCandles >= entry.requireGreenPriceCandles`.",
+      "Entry price-up gate: require `priceUpEnough`; if false, reject reason `price_not_rising_2m`. Defaults: fast candle >= 2.5% OR at least 2 green close-to-close transitions over 3 candles.",
+      "Entry OI recovery formula: if `fastEntry`, `oiRecovery=pctChange(oi3[2],oi3[1])`; else `oiRecovery=pctChange(oi3[2],oi3[0])`. Require `oiRecovery >= oiFilter.entryMinOiRecoveryPct2m`; if false, reject `oi_not_recovered`. Default threshold 0.05%.",
+      "Entry bounce gate: require `bouncePct >= entry.minBouncePctFromLow`; if false reject `bounce_too_small`. Default threshold 0.6%.",
+      "Entry liquidation gate only if `liqFilter.requireLiquidation` is true. Runtime requires `liqUsd > 0`; if `liqUsd <= 0`, reject `no_liquidations`. Then compute `liqRatioPct = oiNow > 0 ? (liqLongUsd/oiNow)*100 : 0`; require `liqRatioPct >= liqFilter.minLongLiqOiRatioPct`; if false reject `liq_ratio_too_small`. Default requireLiquidation true, min ratio 0.02%.",
+      "Important exact runtime detail: `liqFilter.minLongLiqUsd` default 10 and `liqFilter.lookbackMin` default 8 exist in params/schema but are not referenced by `evaluateEntry`; runtime does not enforce a USD minimum or liquidation lookback window beyond current-minute `liqAsOf().longUsd`.",
+      "On entry success, set `state.entryDiagnostics = { fastEntry: ev.fastEntry ? 1 : 0, oiRecovery, bouncePct, liqRatioPct, triggerPct: watch.signal.triggerPct, signalTs: watch.signal.ts }` and emit exactly `{kind:'enter', side:'long', tags:['long_oi_entry']}`. Phase remains WATCHING until runner provides `ctx.position` and position hook initializes IN_POSITION."
     ],
     "exitConditions": [
-      "Take profit 1 at +3.5% from entry; close half of the position there.",
-      "After TP1 is reached, move the stop to breakeven.",
-      "Take profit 2 for the remaining position at +5% from entry.",
-      "Use a hard stop-loss at approximately -12%.",
-      "If the position has not reached either take profit or stop-loss within 180 minutes, close the position by time.",
-      "Do not enter immediately after the 10% dump; entry requires rebound confirmation.",
-      "For averaging down, if price falls approximately 3% from the latest entry price, add only if reversal confirmation appears again."
+      "Position management hook only acts when `ctx.position != null`; if position null, returns idle.",
+      "On first position bar or any mismatch where `state.phase !== 'IN_POSITION' || state.openedAt == null`, initialize in-position state: `phase='IN_POSITION'`, `openedAt=ctx.bar.ts`, `dcaCount=0`, `tp1Done=false`, `bePending=false`, `breakEvenArmed=false`, `lastEntryPrice=avgEntry`, `watch=null`, `miniWatch={ localLowAfterSignal: Math.min(ctx.bar.low, avgEntry), dcaCycleCount:0 }`.",
+      "Per-position-bar decision priority is exact and single-action: TP2 full exit → hard stop full exit → time exit full exit → pending BE update_protection → TP1 action → DCA → fail-fast → idle.",
+      "TP2 full exit: `shouldTakeTp(avgEntry, close, tpLadder.tp2Pct)` where `shouldTakeTp` returns false if entry/current are not finite, else `pctChange(currentPrice, entryPrice) >= pct`. Default TP2 threshold 5%; emits `{kind:'exit', target:'tp2'}`.",
+      "Hard stop full exit: `shouldHardStop(avgEntry, close, hardStopPct)` where false if entry/current not finite, else `pctChange(currentPrice, entryPrice) <= -pct`. Default hard stop 12%; emits `{kind:'exit', target:'hard_stop'}`.",
+      "Time exit full exit: `heldMs = ctx.bar.ts - (state.openedAt ?? ctx.bar.ts)`; if `heldMs >= maxHoldMin*60000`, emit `{kind:'exit', target:'time_exit'}`. Default max hold 180 minutes.",
+      "Pending BE protection update: if `state.bePending` is true after higher-priority exits fail, set `bePending=false`, `breakEvenArmed=true`, emit `{kind:'update_protection', stop: avgEntry}`. BE formula is exact numeric stop equal to `ctx.position.entryPrice`, without fee/slippage adjustment. BE is emitted on the bar after TP1 because only one first decision is used.",
+      "TP1 gate: only if `!state.tp1Done` and `shouldTakeTp(avgEntry, close, tpLadder.tp1Pct)` with default threshold 3.5%. On trigger set `state.tp1Done=true`; `armBe = protection.moveProtectionToBEAfterTp1`.",
+      "TP1 action `full_exit`: emit `{kind:'exit', target:'tp1'}` as full exit, no percent; BE is not armed in this branch even if `moveProtectionToBEAfterTp1` is true because the switch returns immediately.",
+      "TP1 action `milestone_only`: if `armBe`, set `state.bePending=true`; emit annotation `{kind:'annotate', tags:['tp1_milestone'], metrics:{tp1Pct}}`; no exit size reduction.",
+      "TP1 action `partial_exit` default: if `armBe`, set `state.bePending=true`; emit `{kind:'exit', target:'tp1', percent: tpLadder.tp1ExitPercent}`. Default percent 50%.",
+      "No module-emitted BE stop exit exists; after `update_protection`, the host/runner owns actual intrabar stop triggering/close behavior.",
+      "Fail-fast is evaluated after DCA and only if no higher-priority action emitted. Default `failFast.enabled=false`, so inert by default.",
+      "Fail-fast immediate null conditions: disabled; `tp1Done` true; `avgEntry` non-finite or <=0; candles strictly after entry `< failFast.minCandlesAfterEntry`; max high bounce since entry `>= failFast.skipIfBounceFromEntryPct`; missing closeDrift3 or sumGreenBodies2; `sumGreenBodies2 >= failFast.maxSumGreenBodies2Pct`; drift condition false.",
+      "Fail-fast candle inputs: `klines = recentCandles(ctx, maxHoldMin + 2)` including current. `countCandlesStrictlyAfterEntry` counts bars with `k.ts > openedAt`. Default min candles after entry 2.",
+      "Fail-fast bounce skip: `maxHighBouncePctSinceEntry` considers bars with `k.ts >= openedAt`, takes maximum high, computes `((maxHigh-avgEntry)/avgEntry)*100`; if this is `>= skipIfBounceFromEntryPct`, skip fail-fast. Default skip threshold 1.25%.",
+      "Fail-fast `closeDrift3Pct`: requires at least 4 klines; `closeNow=last.close`, `closeThreeBack=klines[length-4].close`; if closeThreeBack <=0 or closeNow non-finite, null; else `((closeNow-closeThreeBack)/closeThreeBack)*100`. Default hard drift threshold -1.5%.",
+      "Fail-fast `sumGreenBodiesLast2`: requires at least 2 klines; each green body pct is `open>0 && close>open ? ((close-open)/open)*100 : 0`; sum of last two bars. Runtime requires `sumGreenBodies2 < maxSumGreenBodies2Pct`. Default 0.75%.",
+      "Fail-fast PnL vs entry: `pnlPctVsEntry = pctChange(currentClose, avgEntry)`. If `driftCompositeEnabled=false` default, require `closeDrift3 < maxCloseDrift3Pct`. If `driftCompositeEnabled=true`, require `closeDrift3 < maxCloseDrift3Pct || (closeDrift3 < compositeDriftSoftPct && pnlPctVsEntry < compositeMinLossPctVsEntry)`. Defaults: composite disabled, soft drift -1.2%, min loss -2.3%.",
+      "If fail-fast fires, emit `{kind:'exit', target:'fail_fast'}`. Diagnostic object returned internally contains `closeDrift3`, `sumGreenBodies2`, `candlesSinceEntry`, `pnlPctVsEntry`, `maxHighBounceSinceEntryPct`, but emitted decision does not include it.",
+      "After a position closes and flat phase later sees `state.phase === 'IN_POSITION'`, it moves to COOLDOWN with `cooldownUntil = ts + watch.cooldownMinutes*60000`; default cooldown 20 minutes."
     ],
     "timeframes": [
-      "~20 minutes lookback for dump detection",
-      "180 minutes maximum holding time",
-      "Candle timeframe unspecified"
+      "Minute-based bars/buckets are implied throughout: constants use `MIN=60000`, parameters are in minutes, OI/liquidation comments refer to current minute, and recent candles are treated as 1-minute legacy series.",
+      "Dump lookback default: last 20 recent candles/minutes including current.",
+      "Entry confirmation: last 3 candles and last 3 OI buckets including current.",
+      "DCA confirmation: last 3 candles and last 3 OI buckets including current.",
+      "Liquidation runtime check: current minute only via `liqAsOf()`, despite `liqFilter.lookbackMin` parameter default 8 being present but unused.",
+      "Watch duration default: 40 minutes; cooldown default: 20 minutes; max hold default: 180 minutes.",
+      "Fail-fast lookback passed to `recentCandles`: `maxHoldMin + 2`, default 182 recent candles including current."
     ],
     "indicators": [
-      "Price percentage drop",
-      "Green candles",
-      "Fast bounce / rebound",
-      "Local minimum",
-      "Open interest",
-      "Long liquidations"
+      "Dump percentage high-to-low: `pctDrop(highest, lowest)` over sliced dump window.",
+      "Dump percentage high-to-current-close: `pctDrop(highest, lastClose)` for high-to-low close-hold filter.",
+      "Dump percentage open-to-close: `pctDrop(firstOpen, lastClose)`.",
+      "Low-candle close position in range: `((lowClose-lowLow)/(lowHigh-lowLow))*100` when range > 0 else 0.",
+      "Bounce from low: `pctRise(lowest,lastClose)` for dump signal; `pctChange(current close, watch.localLowAfterSignal)` for entry; `pctChange(currentPrice, miniWatch.localLowAfterSignal)` for DCA.",
+      "Green close-to-close transition count over last 3 candles: count of `close[i] > close[i-1]`.",
+      "Fast candle percentage: `pctChange(current close, previous close)`.",
+      "OI recovery: fast path `pctChange(oi3[2],oi3[1])`; normal path `pctChange(oi3[2],oi3[0])`.",
+      "Liquidation-to-OI ratio percentage: `liqLongUsd / oiTotalUsd * 100` when OI > 0 else 0.",
+      "TP and stop PnL percentage vs average entry: `pctChange(current close, entryPrice)`.",
+      "Fail-fast green body percentage, sum of last 2 green bodies.",
+      "Fail-fast 3-candle close drift percentage.",
+      "Fail-fast maximum high bounce since entry.",
+      "No technical-analysis indicators are declared; manifest has `asOfIndicators:false`."
     ],
     "parameters": [
       {
-        "name": "dumpLookback",
-        "value": 20,
-        "unit": "minutes",
-        "description": "Approximate lookback window used to detect the sharp price drop.",
-        "tunable": true
-      },
-      {
-        "name": "dumpThreshold",
-        "value": 10,
-        "unit": "percent",
-        "description": "Minimum approximate price drop over the lookback window required to place the instrument on watch.",
-        "tunable": true
-      },
-      {
-        "name": "greenCandlesConfirmationCount",
-        "value": 2,
-        "unit": "candles",
-        "description": "Example confirmation signal: two green candles indicating price has started rising.",
-        "tunable": true
-      },
-      {
-        "name": "takeProfit1",
+        "name": "tpLadder.tp1Pct",
         "value": 3.5,
         "unit": "percent",
-        "description": "First take-profit level from entry.",
+        "description": "TP1 threshold: TP1 triggers when `pctChange(current close, avgEntry) >= tp1Pct`. Schema: number > 0.",
         "tunable": true
       },
       {
-        "name": "takeProfit1PositionClose",
-        "value": 50,
-        "unit": "percent of position",
-        "description": "Portion of the position closed at TP1.",
-        "tunable": true
-      },
-      {
-        "name": "takeProfit2",
+        "name": "tpLadder.tp2Pct",
         "value": 5,
         "unit": "percent",
-        "description": "Final take-profit level for the remaining position.",
+        "description": "TP2/full-exit threshold: TP2 triggers when `pctChange(current close, avgEntry) >= tp2Pct`. Schema: number > 0.",
         "tunable": true
       },
       {
-        "name": "hardStopLoss",
-        "value": -12,
+        "name": "tpLadder.tp1Action",
+        "value": "partial_exit",
+        "unit": null,
+        "description": "TP1 behavior enum: `milestone_only`, `partial_exit`, or `full_exit`. Default emits partial TP1 exit. Legacy equivalent noted as `milestone_only`.",
+        "tunable": true
+      },
+      {
+        "name": "tpLadder.tp1ExitPercent",
+        "value": 50,
+        "unit": "percent of position",
+        "description": "Partial-exit percent used only when `tp1Action='partial_exit'`. Schema: number >0 and <=100.",
+        "tunable": true
+      },
+      {
+        "name": "hardStopPct",
+        "value": 12,
         "unit": "percent",
-        "description": "Approximate hard stop-loss from entry.",
+        "description": "Hard stop against avg entry: exit when `pctChange(current close, avgEntry) <= -hardStopPct`. Schema: number >0.",
         "tunable": true
       },
       {
-        "name": "timeExit",
+        "name": "maxHoldMin",
         "value": 180,
         "unit": "minutes",
-        "description": "Maximum time to hold a position if neither take profit nor stop-loss is reached.",
+        "description": "Time exit threshold: exit when `ctx.bar.ts - openedAt >= maxHoldMin*60000`. Also used for fail-fast candle lookback `maxHoldMin+2`. Schema: number >0.",
         "tunable": true
       },
       {
-        "name": "averagingTriggerDrop",
-        "value": 3,
-        "unit": "percent",
-        "description": "Approximate additional drop from the latest entry price that may allow averaging down if reversal confirmation appears again.",
+        "name": "protection.moveProtectionToBEAfterTp1",
+        "value": true,
+        "unit": null,
+        "description": "If true, TP1 milestone/partial branches set `bePending=true`; next eligible position bar emits `update_protection` stop equal to avg entry. In `full_exit` branch no BE update is armed.",
         "tunable": true
       },
       {
-        "name": "maxAddOns",
+        "name": "protection.trailing",
+        "value": "off",
+        "unit": null,
+        "description": "Trailing mode enum currently only `off`; no trailing-stop runtime behavior implemented.",
+        "tunable": true
+      },
+      {
+        "name": "dca.maxAdds",
         "value": 2,
-        "unit": "add-ons",
-        "description": "Maximum number of averaging-down additions allowed.",
+        "unit": "adds",
+        "description": "Maximum number of DCA additions; DCA considered only while `state.dcaCount < maxAdds`; evaluateDca also rejects if `dcaCount >= maxAdds`. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.dropPcts",
+        "value": "[3,3]",
+        "unit": "percent",
+        "description": "Per-add drop thresholds from last entry anchor to miniWatch local low. Runtime selects `dropPcts[Math.min(dcaCount, dropPcts.length-1)] ?? 0`; DCA evaluation starts when `dropFromLastEntryPct >= threshold`. Schema array of numbers >0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.reconfirm.minBouncePctFromNewLow",
+        "value": 0.5,
+        "unit": "percent",
+        "description": "DCA reconfirmation bounce threshold: require `pctChange(currentPrice, miniWatch.localLowAfterSignal || currentPrice) >= value`. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.reconfirm.minOiRecoveryPct2m",
+        "value": 0.005,
+        "unit": "percent",
+        "description": "DCA OI recovery threshold. If fast DCA, compare `oi3[2]` vs `oi3[1]`; otherwise `oi3[2]` vs `oi3[0]`; require >= value. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.reconfirm.requireGreenCandles",
+        "value": 2,
+        "unit": "count",
+        "description": "DCA normal price-rising requirement: count close-to-close green transitions over last 3 candles must be >= value unless fast DCA condition holds. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.reconfirm.fastBouncePct",
+        "value": 2,
+        "unit": "percent",
+        "description": "DCA fast candle threshold: `fastEntry = pctChange(current close, previous close) >= value`; fastEntry bypasses green-candle count and uses 1-bucket OI recovery. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "dca.sizeMultipliers",
+        "value": "[1.2,1.5]",
+        "unit": "sizing hint multiplier",
+        "description": "When DCA succeeds, after incrementing dcaCount runtime selects `sizeMultipliers[Math.min(dcaCount-1, length-1)]`; if numeric, emits as `sizingHint`. Actual sizing is host-owned. Schema array numbers >0.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.enabled",
+        "value": false,
+        "unit": null,
+        "description": "Enable pre-TP1 fail-fast exit. If false, fail-fast immediately returns null.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.minCandlesAfterEntry",
+        "value": 2,
+        "unit": "candles",
+        "description": "Minimum count of klines with `ts > openedAt` before fail-fast evaluation may proceed. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.maxCloseDrift3Pct",
+        "value": -1.5,
+        "unit": "percent",
+        "description": "Default non-composite fail-fast requires `closeDrift3 < maxCloseDrift3Pct`; strict `<`.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.maxSumGreenBodies2Pct",
+        "value": 0.75,
+        "unit": "percent",
+        "description": "Fail-fast requires `sumGreenBodiesLast2 < maxSumGreenBodies2Pct`; if `sumGreenBodies2 >= value`, no fail-fast. Strict `<` runtime.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.skipIfBounceFromEntryPct",
+        "value": 1.25,
+        "unit": "percent",
+        "description": "Skip fail-fast if max high bounce since entry is `>=` this value.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.driftCompositeEnabled",
+        "value": false,
+        "unit": null,
+        "description": "If true, drift condition is hard drift OR soft drift plus PnL loss; if false only hard drift is used.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.compositeDriftSoftPct",
+        "value": -1.2,
+        "unit": "percent",
+        "description": "Composite-mode soft drift threshold: `closeDrift3 < compositeDriftSoftPct`. Used only when `driftCompositeEnabled=true`.",
+        "tunable": true
+      },
+      {
+        "name": "failFast.compositeMinLossPctVsEntry",
+        "value": -2.3,
+        "unit": "percent",
+        "description": "Composite-mode PnL loss threshold: `pnlPctVsEntry < compositeMinLossPctVsEntry`. Used only when `driftCompositeEnabled=true`.",
+        "tunable": true
+      },
+      {
+        "name": "dump.lookbackMin",
+        "value": 20,
+        "unit": "minutes/candles",
+        "description": "Dump detection lookback. Runtime uses `recentCandles(ctx, lookbackMin)` then `slice(-lookbackMin)`. No signal if `lookbackMin < 2`. Schema integer >0.",
+        "tunable": true
+      },
+      {
+        "name": "dump.minDropPct",
+        "value": 10,
+        "unit": "percent",
+        "description": "Minimum dump percentage. In high-to-low require `dumpPctHighLow >= value`; in open-to-close require `dumpPctOpenClose >= value`. Schema number >0.",
+        "tunable": true
+      },
+      {
+        "name": "dump.triggerMode",
+        "value": "high_to_low",
+        "unit": null,
+        "description": "Dump trigger enum: `high_to_low` or `open_to_close`. Determines detector branch.",
+        "tunable": true
+      },
+      {
+        "name": "dump.highToLowMinCloseHoldPct",
+        "value": 6,
+        "unit": "percent",
+        "description": "High-to-low detector close-hold gate: require `pctDrop(highest,lastClose) >= value`.",
+        "tunable": true
+      },
+      {
+        "name": "dump.highToLowMaxGreenRecoveryBouncePct",
+        "value": 3.5,
+        "unit": "percent",
+        "description": "High-to-low detector green low-candle recovery filter: reject only if low candle is green (`lowClose >= lowOpen`) AND `bounceFromLowPct > value`. Strict `>`.",
+        "tunable": true
+      },
+      {
+        "name": "dump.highToLowMaxClosePosInRangePct",
+        "value": 55,
+        "unit": "percent",
+        "description": "High-to-low detector low-candle close-position gate: require `closePosInRangePct <= value`; reject if greater.",
+        "tunable": true
+      },
+      {
+        "name": "watch.maxMinutes",
+        "value": 40,
+        "unit": "minutes",
+        "description": "WATCH state expiry duration: `expireAt = signal bar ts + maxMinutes*60000`; timeout if `ts >= expireAt`. Schema integer >0.",
+        "tunable": true
+      },
+      {
+        "name": "watch.cooldownMinutes",
+        "value": 20,
+        "unit": "minutes",
+        "description": "Cooldown duration after watch timeout or post-position reconciliation: `cooldownUntil = ts + cooldownMinutes*60000`. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "entry.minBouncePctFromLow",
+        "value": 0.6,
+        "unit": "percent",
+        "description": "Entry requires `bouncePct >= value` where bounce is current close versus watch local low. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "entry.requireGreenPriceCandles",
+        "value": 2,
+        "unit": "count",
+        "description": "Entry normal price-rising requirement: last-3 close-to-close green transition count >= value unless fast entry holds. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "entry.fastBouncePct",
+        "value": 2.5,
+        "unit": "percent",
+        "description": "Entry fast candle threshold: `fastEntry = pctChange(current close, previous close) >= value`; fastEntry bypasses green-candle count and uses 1-bucket OI recovery. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "oiFilter.entryMinOiRecoveryPct2m",
+        "value": 0.05,
+        "unit": "percent",
+        "description": "Entry OI recovery threshold; require `oiRecovery >= value`. Fast entry uses current vs previous OI, non-fast uses current vs two buckets back. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "liqFilter.lookbackMin",
+        "value": 8,
+        "unit": "minutes",
+        "description": "Declared parameter/schema field for liquidation lookback, but exact runtime code does not use it; entry uses only current `liqAsOf().longUsd`. Schema integer >0.",
+        "tunable": true
+      },
+      {
+        "name": "liqFilter.minLongLiqUsd",
+        "value": 10,
+        "unit": "USD",
+        "description": "Declared parameter/schema field for minimum long liquidation USD, but exact runtime code does not compare against it; runtime only checks `liqUsd > 0` when liquidation is required. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "liqFilter.requireLiquidation",
+        "value": true,
+        "unit": null,
+        "description": "If true, entry requires current long liquidation USD > 0 and liq/OI ratio >= threshold. If false, both liquidation gates are skipped after computing metrics.",
+        "tunable": true
+      },
+      {
+        "name": "liqFilter.minLongLiqOiRatioPct",
+        "value": 0.02,
+        "unit": "percent",
+        "description": "Entry requires `liqLongUsd / oiNow * 100 >= value` when `requireLiquidation=true`; if `oiNow <= 0`, ratio is 0. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "warmup.candlesMin",
+        "value": 30,
+        "unit": "candles",
+        "description": "Declared warmup minimum candles parameter, but exact runtime code in this module does not reference it for gating.",
+        "tunable": true
+      },
+      {
+        "name": "warmup.maxSignalAgeMin",
+        "value": 5,
+        "unit": "minutes",
+        "description": "Live warmup skip threshold: if signal is from warmup and `(barTs - signal.lowTs)/60000 > value`, annotate skip. Schema integer >=0.",
+        "tunable": true
+      },
+      {
+        "name": "warmup.maxBounceFromLowPct",
+        "value": 5,
+        "unit": "percent",
+        "description": "Live warmup skip threshold: if signal is from warmup and `signal.bounceFromLowPct > value`, annotate skip. Schema number >=0.",
+        "tunable": true
+      },
+      {
+        "name": "warmup.firstLiveCandleTs",
+        "value": null,
+        "unit": "timestamp ms",
+        "description": "Optional runtime-only parameter supplied via `ctx.params`; absent from DEFAULT_PARAMS. If falsy, warmup skip logic is inert. Schema allows number.",
         "tunable": true
       }
     ],
-    "watchLifecycleSummary": "When an instrument drops approximately 10% or more over roughly 20 minutes, it is added to a watch state. The strategy then waits for a rebound from the local low with confirmation from price action, rising open interest, and prior long liquidations before entering.",
-    "positionManagementSummary": "At +3.5%, close half the position and move the stop to breakeven. Hold the remaining half until +5%. If price drops about 3% from the latest entry price after entry, averaging down is allowed only after renewed reversal confirmation, with at most two add-ons total.",
-    "riskManagementSummary": "Hard stop-loss is approximately -12%. After TP1, stop moves to breakeven. If no TP or SL is reached within 180 minutes, the position is closed by time. Position sizing, leverage, and exact add-on sizing are not specified.",
+    "watchLifecycleSummary": "Initial state is IDLE with null watch/miniWatch, no TP/BE flags, `openedAt=null`, `dcaCount=0`, `lastEntryPrice=null`, `cooldownUntil=0`, diagnostics null. IDLE scans for dump and arms WATCHING unless live warmup skip applies. WATCHING stores the dump signal, `startedAt`, `expireAt`, local low/high initialized from signal price and signal bar low/high, updates local extremes every bar, times out to COOLDOWN at `ts >= expireAt`, and evaluates entry only when OI window, liquidation point, and 3 candles are present. Successful entry emits a long enter but leaves phase WATCHING until `ctx.position` appears; first position bar initializes IN_POSITION and miniWatch. After position close, flat-phase reconciliation moves IN_POSITION to COOLDOWN. COOLDOWN returns idle until `ts >= cooldownUntil`, then resets to IDLE.",
+    "positionManagementSummary": "In-position state is initialized from runner position entry price and current bar. TP2, hard stop, and time exit are full exits with highest priority. TP1 is one-time and parameterized: full exit, annotation-only milestone, or partial exit percent; default is 50% partial. BE protection after TP1 is delayed one bar via `bePending` and emits `update_protection` stop equal to avg entry; actual stop execution is host-owned. DCA uses miniWatch local low, drop from last entry anchor, max add count, last-3-candle/OI reconfirmation, and optional sizingHint. After each DCA success: increment `dcaCount`, set `lastEntryPrice=current close`, reset miniWatch local low to current close, set `miniWatch.dcaCycleCount=dcaCount`, and emit add_to_position. Fail-fast is pre-TP1, optional, and evaluated last.",
+    "riskManagementSummary": "Built-in risk exits are TP2 full exit at +5% default, hard stop at -12% default, time exit after 180 minutes default, optional BE protection after TP1, TP1 partial/full/milestone behavior, max 2 DCA adds default with drop/reconfirmation gates, and optional fail-fast early exit default off. Position notional, leverage, actual DCA sizing, order fills, slippage, fees, and stop execution are not determined by the module. BE stop is exactly entry price without fee/slippage adjustment.",
     "runnerOwnedAuthorities": [
-      "Order placement and execution",
-      "Fill handling",
-      "Slippage handling",
-      "Position sizing not specified by source",
-      "Leverage and margin management",
-      "Exact sizing of averaging-down add-ons",
-      "Stop/TP order implementation",
-      "Risk limits beyond the stated stop-loss and time exit"
+      "Position sizing/notional/equity fraction/base order size/leverage; source explicitly excludes `risk.notionalUsd`, `baseOrderUsd`, `leverage`, and riskScoreScaler from module params.",
+      "Order execution timing, fills, slippage, fees, and actual open price; source notes host opens position on next bar open after enter.",
+      "Maintaining `ctx.position`, including entryPrice/average entry, size, side, and settle/reconciliation after partial exits or DCA.",
+      "Interpreting and executing `exit` decisions, including full vs partial percent exits.",
+      "Actual DCA order size; module only emits optional `sizingHint` from configured multipliers.",
+      "Protection-stop lifecycle and intrabar stop triggering after `update_protection`; module does not emit BE-stop exits.",
+      "Risk limits such as maximum adds relative to host RiskProfile; comment says `maxAdds` must be <= host risk-profile limit.",
+      "Data provisioning for closed candles, OI windows, and liquidation as-of surfaces, including gaps/undefined behavior."
     ],
-    "confidence": 0.92,
+    "confidence": 0.99,
     "unknowns": [
-      "Exact candle timeframe for the two green candles is not specified.",
-      "Definition of 'fast bounce' is not quantified.",
-      "Exact method for identifying the local minimum is not specified.",
-      "Exact open interest rise threshold is not specified.",
-      "Exact long-liquidation threshold or window is not specified.",
-      "Whether the -12% hard stop is measured from initial entry, average entry, or latest entry after averaging is not specified.",
-      "Exact sizing of each averaging-down add-on is not specified.",
-      "Whether TP1/TP2 are recalculated from average entry after averaging is not specified."
+      "Exact external SDK semantics of `ctx.data.closedCandles(n)` ordering are assumed from comments as old-to-new; implementation is not included.",
+      "Exact live/backtest runner behavior for applying `enter`, `exit`, `percent`, `add_to_position`, and `update_protection` decisions is outside the source.",
+      "Exact bar interval is not explicitly declared as a timeframe field, although code/comments consistently use minute buckets and `MIN=60000`.",
+      "Whether `ctx.market.oiWindow(3)` order is guaranteed old-to-new is inferred from comments/index usage but SDK implementation is not shown.",
+      "No exchange, symbol universe, fees, slippage, leverage, notional sizing, or portfolio-level risk constraints are specified.",
+      "No behavior is implemented for trailing modes beyond enum value `off`.",
+      "No runtime use is present for `warmup.candlesMin`, `liqFilter.lookbackMin`, or `liqFilter.minLongLiqUsd` despite defaults/schema."
     ],
     "evidence": [
-      "«Торгую только в long на крипто-фьючерсах.»",
-      "«если за последние примерно 20 минут цена падает на 10% или больше, я не вхожу сразу, а беру инструмент на наблюдение»",
-      "«жду отскок от локального минимума»",
-      "«Вход делаю только после подтверждения: цена начинает расти, например появляются две зелёные свечи или быстрый bounce»",
-      "«open interest снова растёт»",
-      "«перед этим были long-ликвидации»",
-      "«первый тейк на +3.5% — там фиксирую половину позиции»",
-      "«После TP1 стоп переношу в безубыток»",
-      "«Остаток держу до +5%»",
-      "«Жёсткий стоп ставлю примерно на −12%»",
-      "«Если за 180 минут позиция не дошла ни до тейка, ни до стопа, закрываю по времени»",
-      "«Если после входа цена ещё падает примерно на 3% от последней цены входа, но потом снова появляется подтверждение разворота, могу усредниться»",
-      "«Всего максимум две доливки»"
+      "Manifest summary: `Long-only модуль long_oi: вход после dump c восстановлением OI/ликвидациями, DCA, TP-ладдер, BE.`",
+      "Manifest rationale: `detect dump → watch → confirm (OI-recovery + bounce + long-liq) → enter; in-position TP1/TP2/BE/DCA/fail_fast.`",
+      "Data needs: `closedCandlesUpToCurrent: true`, `openInterest: true`, `liquidations: true`, `asOfIndicators: false`.",
+      "Flat phase comment: `Действует только при ctx.position == null. FSM: IDLE → (dump) WATCHING → (entry) enter / (timeout) COOLDOWN → IDLE.`",
+      "Entry missing-data behavior: `при ctx.market===undefined / undefined-слоте OI/liq во время entry-оценки — no-throw / no-zero-substitution / no-NaN`.",
+      "Position priority comment: `приоритет: полные выходы (tp2/hard_stop/time_exit) → отложенный BE-update_protection → TP1 ... → DCA → fail_fast → idle.`",
+      "BE formula comment/code: `update_protection{ stop: ctx.position.entryPrice }` and `return [{ kind: 'update_protection', stop: avgEntry }]`.",
+      "Recent candles implementation: `closedCandles(n - 1)` plus `ctx.bar`.",
+      "OI implementation: `ctx.market.oiWindow(3)` and `out.push((slot as OiPoint).oiTotalUsd)`, null if missing/undefined/length<3.",
+      "Liquidation implementation: `ctx.market.liqAsOf().longUsd`; `covered-no-events → 0`; gap/OHLCV-only → null.",
+      "Entry implementation: `fastEntry = fastCandlePct >= p.entry.fastBouncePct`; `priceUpEnough = fastEntry || greenCandles >= p.entry.requireGreenPriceCandles`; `oiRecovery = fastEntry ? pctChange(inp.oi3[2], inp.oi3[1]) : pctChange(inp.oi3[2], inp.oi3[0])`; liquidation ratio gate uses `liqRatioPct`.",
+      "Default params include TP1 3.5, TP2 5, hardStop 12, maxHold 180, DCA maxAdds 2, dump lookback 20/minDrop 10, watch 40/cooldown 20, entry bounce 0.6/green 2/fast 2.5, OI recovery 0.05, liquidation ratio 0.02.",
+      "DCA code: drop threshold selected with `Math.min(state.dcaCount, p.dca.dropPcts.length - 1)`, OI missing skips, success emits `add_to_position` with optional `sizingHint`.",
+      "Fail-fast code: disabled default; pre-TP1; strict comparisons for green body and drift; composite optional.",
+      "Params comment: `НЕ воспроизводятся (host-owned sizing ...): risk.notionalUsd/baseOrderUsd/leverage, весь riskScoreScaler.*`."
     ]
   },
   "sourceArtifactRef": {
-    "artifact_id": "4f669617-1ec7-49ad-bc66-dd74cb8ed3d3",
-    "uri": "artifacts/strategy_source/sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
-    "content_hash": "sha256:f6374542d7f9c32abd68532a490e1cb956b477310aedcf6d3d068ead77408d50",
+    "artifact_id": "5727fa1e-06ac-44e2-bef7-e175b976d3a8",
+    "uri": "artifacts/strategy_source/sha256:2bdc5389969657cd46ec2500022350e768a0426d8d7bcbb01b14f344157f82b5",
+    "content_hash": "sha256:2bdc5389969657cd46ec2500022350e768a0426d8d7bcbb01b14f344157f82b5",
     "kind": "strategy_source",
-    "size_bytes": 1414,
+    "size_bytes": 70863,
     "mime_type": "text/plain",
-    "created_at": "2026-06-28T13:40:49.885Z",
-    "producer": "scripts/regen-long-oi-profile.mts",
+    "created_at": "2026-06-29T21:01:46.487Z",
+    "producer": "scripts/regen-from-code.mts",
     "metadata": {
-      "sourceKind": "manual_description",
+      "sourceKind": "bot_code",
       "uri": null,
       "title": null
     }
   },
   "contractVersion": "strategy-profile-v1",
-  "createdAt": "2026-06-28T13:40:49.885Z",
-  "updatedAt": "2026-06-28T13:40:49.885Z"
+  "createdAt": "2026-06-29T21:01:46.487Z",
+  "updatedAt": "2026-06-29T21:01:46.487Z"
 }
