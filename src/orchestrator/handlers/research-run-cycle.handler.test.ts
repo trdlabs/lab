@@ -47,11 +47,13 @@ function stubResearcher(out: ResearcherOutput): ResearcherPort {
   return { adapter: 'fake', model: 'stub', async propose(_in: ResearcherInput) { return out; } };
 }
 
-function capturingResearcher(out: ResearcherOutput): { port: ResearcherPort; captured: () => ResearcherInput | undefined } {
+function capturingResearcher(out: ResearcherOutput): { port: ResearcherPort; captured: () => ResearcherInput | undefined; capturedOpts: () => AgentCallOpts | undefined } {
   let cap: ResearcherInput | undefined;
+  let capOpts: AgentCallOpts | undefined;
   return {
-    port: { adapter: 'fake', model: 'stub', async propose(inp: ResearcherInput) { cap = inp; return out; } },
+    port: { adapter: 'fake', model: 'stub', async propose(inp: ResearcherInput, opts?: AgentCallOpts) { cap = inp; capOpts = opts; return out; } },
     captured: () => cap,
+    capturedOpts: () => capOpts,
   };
 }
 
@@ -460,6 +462,29 @@ describe('researchRunCycleHandler', () => {
     expect(commitEvent?.payload.artifactId).toBe(ref.artifact_id);
     expect(commitEvent?.payload.correlationId).toBe('c1');
     expect(commitEvent?.payload.symbol).toBe('BTCUSDT');
+  });
+
+  it('E3: passes tracingMetadata with the committed artifact id to propose when market history yields terms', async () => {
+    const marketHistoryRows = Array.from({ length: 60 }, (_, i) => ({
+      schema_version: 2 as const, minute_ts: i * 60_000, symbol: 'BTCUSDT',
+      open: 100 + i, high: 101 + i, low: 99 + i, close: 100 + i, volume: 10, turnover: (100 + i) * 10,
+      oi_total_usd: 1000, funding_rate: 0.0001, liq_long_usd: 1, liq_short_usd: 2,
+      taker_buy_volume_usd: 6, taker_sell_volume_usd: 4,
+      has_oi: true, has_funding: true, has_liquidations: true, has_taker_flow: true,
+    }));
+    const marketHistory: MarketHistoryReadPort = { getRows: async () => marketHistoryRows };
+    const artifactStore = new InMemoryArtifactStore();
+    const putSpy = vi.spyOn(artifactStore, 'put');
+    const cap = capturingResearcher({ hypotheses: [draft('thesis E3 tracing')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port, marketHistory, artifacts: artifactStore });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+
+    expect(putSpy).toHaveBeenCalledOnce();
+    const ref = await (putSpy.mock.results[0]!.value as Promise<import('../../domain/types.ts').ArtifactRef>);
+    expect(cap.capturedOpts()?.tracingMetadata).toEqual({
+      research_market_context_artifact_id: ref.artifact_id,
+    });
   });
 
   it('M1: does not attach marketContextMath to propose when rows are too sparse to form any term (zero terms → raw fallback)', async () => {

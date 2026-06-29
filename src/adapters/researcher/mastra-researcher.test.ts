@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MastraResearcher, buildPrompt } from './mastra-researcher.ts';
 import { ResearcherOutputSchema } from '../../domain/hypothesis.ts';
 import type { ResearcherInput } from '../../ports/researcher.port.ts';
@@ -120,6 +120,37 @@ describe('MastraResearcher (construction)', () => {
     const r = new MastraResearcher(createResearcherAgent(model), label);
     expect(r.adapter).toBe('mastra');
     expect(r.model).toBe('anthropic/claude-sonnet-4-6');
+  });
+});
+
+describe('MastraResearcher.propose – tracingOptions forwarding', () => {
+  const minimalLlmOutput = { researchSummary: 'summary', hypotheses: [] };
+
+  function makeFakeAgent() {
+    const generateFn = vi.fn().mockResolvedValue({
+      object: minimalLlmOutput,
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+    return {
+      generateFn,
+      agent: { generate: generateFn } as unknown as import('@mastra/core/agent').Agent,
+    };
+  }
+
+  it('forwards tracingMetadata as tracingOptions.metadata on the generate call', async () => {
+    const { agent, generateFn } = makeFakeAgent();
+    const researcher = new MastraResearcher(agent, 'test-model');
+    await researcher.propose(baseInput, { tracingMetadata: { research_market_context_artifact_id: 'art_123' } });
+    const opts = generateFn.mock.calls[0]![1] as Record<string, unknown>;
+    expect(opts['tracingOptions']).toEqual({ metadata: { research_market_context_artifact_id: 'art_123' } });
+  });
+
+  it('omits tracingOptions entirely when no tracingMetadata is given', async () => {
+    const { agent, generateFn } = makeFakeAgent();
+    const researcher = new MastraResearcher(agent, 'test-model');
+    await researcher.propose(baseInput);
+    const opts = generateFn.mock.calls[0]![1] as Record<string, unknown>;
+    expect(opts).not.toHaveProperty('tracingOptions');
   });
 });
 
