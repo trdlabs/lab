@@ -20,6 +20,8 @@ export interface TermConfig {
   readonly adxPeriod: number;
   readonly swingWindow: number;
   readonly oiPctWindow: number;
+  readonly kcMult: number;
+  readonly pressureWindow: number;
 }
 
 const MIN = 60_000;
@@ -29,21 +31,25 @@ export const TERM_CONFIGS: readonly TermConfig[] = [
     key: 'micro', label: 'Micro (1m)', tfMs: MIN, maxRows: 30, minBars: 30,
     emaFast: 9, emaSlow: 21, rsiPeriod: 14, atrPeriod: 14, realizedVolWindow: 14,
     macd: [8, 21, 5], bbPeriod: 8, bbK: 2, stoch: [5, 3, 3], adxPeriod: 9, swingWindow: 60, oiPctWindow: 30,
+    kcMult: 1.5, pressureWindow: 14,
   },
   {
     key: 'short', label: 'Short (5m)', tfMs: 5 * MIN, maxRows: 24, minBars: 30,
     emaFast: 9, emaSlow: 21, rsiPeriod: 14, atrPeriod: 14, realizedVolWindow: 14,
     macd: [8, 21, 5], bbPeriod: 10, bbK: 2, stoch: [5, 3, 3], adxPeriod: 9, swingWindow: 48, oiPctWindow: 24,
+    kcMult: 1.5, pressureWindow: 14,
   },
   {
     key: 'swing', label: 'Swing (15m)', tfMs: 15 * MIN, maxRows: 24, minBars: 30,
     emaFast: 9, emaSlow: 21, rsiPeriod: 14, atrPeriod: 14, realizedVolWindow: 14,
     macd: [12, 26, 9], bbPeriod: 20, bbK: 2, stoch: [14, 3, 3], adxPeriod: 14, swingWindow: 48, oiPctWindow: 24,
+    kcMult: 1.5, pressureWindow: 20,
   },
   {
     key: 'long', label: 'Long (1h)', tfMs: 60 * MIN, maxRows: 24, minBars: 28,
     emaFast: 9, emaSlow: 21, rsiPeriod: 14, atrPeriod: 14, realizedVolWindow: 14,
     macd: [12, 26, 9], bbPeriod: 20, bbK: 2, stoch: [14, 3, 3], adxPeriod: 14, swingWindow: 48, oiPctWindow: 24,
+    kcMult: 1.5, pressureWindow: 20,
   },
 ];
 

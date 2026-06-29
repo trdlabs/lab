@@ -48,3 +48,26 @@ describe('buildMarketContextMath', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('buildMarketContextMath Phase E indicators', () => {
+  it('populates squeeze, pivots and pressure on a dense taker-bearing term', () => {
+    const math = buildMarketContextMath({ ...base, rows: series(120, 60_000, true) }, 1_700_000_000_000);
+    const micro = math.terms.find((t) => t.config.key === 'micro')!;
+    expect(micro.indicators.squeeze).not.toBeNull();
+    expect(typeof micro.indicators.squeeze!.on).toBe('boolean');
+    expect(micro.indicators.pivots).not.toBeNull();
+    expect(micro.indicators.pressure).not.toBeNull();
+    expect(micro.indicators.pressure!.buyShare).toBeCloseTo(0.6, 9); // taker_buy 6 / (6+4)
+    expect(micro.indicators.pressure!.state).toBe('buy');
+  });
+
+  it('marks pressure n/a (no taker) but keeps squeeze/pivots on a coarse OHLC term', () => {
+    const math = buildMarketContextMath({ ...base, rows: series(60, 3_600_000, false) }, 1_700_000_000_000);
+    const long = math.terms[0]!;
+    expect(long.indicators.pressure).toBeNull();
+    expect(long.indicators.pivots).not.toBeNull();
+    expect(long.indicators.squeeze).not.toBeNull();
+    expect(math.notes.some((n) => /Pressure/i.test(n))).toBe(true);
+    expect(math.notes.some((n) => /Squeeze|Pivots/i.test(n))).toBe(true);
+  });
+});

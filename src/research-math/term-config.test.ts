@@ -20,3 +20,12 @@ describe('isTermIncluded', () => {
     expect(isTermIncluded(60_000, micro.minBars - 1, micro)).toBe(false); // too few bars
   });
 });
+
+describe('TERM_CONFIGS Phase E fields', () => {
+  it('every config has a Keltner multiplier and a pressure window', () => {
+    for (const c of TERM_CONFIGS) {
+      expect(c.kcMult).toBe(1.5);
+      expect(c.pressureWindow).toBeGreaterThan(0);
+    }
+  });
+});

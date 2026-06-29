@@ -2,10 +2,11 @@ import type { CanonicalRowV2 } from '../ports/market-history-read.port.ts';
 import type { Direction } from '../domain/strategy-profile.ts';
 import type { MarketRegime } from '../ports/platform-gateway.port.ts';
 import { ema, rsi, macd, type MacdPoint } from './indicators/trend.ts';
-import { atr, realizedVol, bollinger, type BollingerPoint } from './indicators/volatility.ts';
+import { atr, realizedVol, bollinger, squeeze, type BollingerPoint, type SqueezePoint } from './indicators/volatility.ts';
 import { stochastic, adx, type StochPoint, type AdxPoint } from './indicators/oscillators.ts';
 import {
-  swingHighLow, fibonacci, cvd, oiDelta, pctChangeOverWindow, liquidationAggregates, type FibLevels,
+  swingHighLow, fibonacci, cvd, oiDelta, pctChangeOverWindow, liquidationAggregates, pivots, takerPressure,
+  type FibLevels, type PivotLevels,
 } from './indicators/levels.ts';
 import { resampleRows } from './resample.ts';
 import { TERM_CONFIGS, inferCadenceMs, isTermIncluded, type TermConfig } from './term-config.ts';
@@ -34,6 +35,9 @@ export interface TermIndicatorSnapshot {
   readonly macd: MacdPoint | null; readonly bollinger: BollingerPoint | null;
   readonly stochastic: StochPoint | null; readonly adx: AdxPoint | null;
   readonly fibonacci: FibLevels | null;
+  readonly squeeze: { on: boolean; momentum: number | null; momentumState: 'rising' | 'falling' | 'flat' } | null;
+  readonly pivots: PivotLevels | null;
+  readonly pressure: { bias: number; buyShare: number; state: 'buy' | 'sell' | 'balanced' } | null;
   readonly oiChangePct: number | null; readonly funding: number | null;
   readonly cvdNet: number | null; readonly cvdTrend: 'rising' | 'falling' | 'flat' | 'unknown';
   readonly liqLongTotal: number | null; readonly liqShortTotal: number | null; readonly liqImbalance: number | null;
@@ -113,6 +117,9 @@ function buildTerm(rows: readonly CanonicalRowV2[], cfg: TermConfig): TermMath {
   const adxArr = cov.hasOhlc ? adx(highs, lows, closes, cfg.adxPeriod) : new Array(rows.length).fill(null);
   const cvdArr = cov.hasTaker ? cvd(buys, sells) : new Array(rows.length).fill(null);
   const oiDeltaArr = oiDelta(oiArr);
+  const sqArr = cov.hasOhlc
+    ? squeeze(highs, lows, closes, cfg.bbPeriod, cfg.bbK, cfg.kcMult)
+    : new Array<SqueezePoint | null>(rows.length).fill(null);
 
   const tableRows: TermMathRow[] = rows.map((r, i) => ({
     tsMs: r.minute_ts,
@@ -132,6 +139,25 @@ function buildTerm(rows: readonly CanonicalRowV2[], cfg: TermConfig): TermMath {
     atr: atrArr[last], realizedVol: rvArr[last] ?? null,
     macd: macdArr[last] ?? null, bollinger: bbArr[last] ?? null, stochastic: stochArr[last], adx: adxArr[last],
     fibonacci: swing ? fibonacci(swing.swingHigh, swing.swingLow) : null,
+    squeeze: ((): TermIndicatorSnapshot['squeeze'] => {
+      const cur = sqArr[last] ?? null;
+      if (cur == null) return null;
+      const prev = last >= 1 ? (sqArr[last - 1] ?? null) : null;
+      let state: 'rising' | 'falling' | 'flat' = 'flat';
+      if (cur.momentum != null && prev?.momentum != null) {
+        const diff = cur.momentum - prev.momentum;
+        state = Math.abs(diff) < 1e-9 ? 'flat' : diff > 0 ? 'rising' : 'falling';
+      }
+      return { on: cur.on, momentum: cur.momentum, momentumState: state };
+    })(),
+    pivots: cov.hasOhlc && rows.length >= 2 ? pivots(highs[last - 1]!, lows[last - 1]!, closes[last - 1]!) : null,
+    pressure: ((): TermIndicatorSnapshot['pressure'] => {
+      if (!cov.hasTaker) return null;
+      const tp = takerPressure(buys, sells, cfg.pressureWindow);
+      if (tp.bias == null || tp.buyShare == null) return null;
+      const state = tp.bias > 0.05 ? 'buy' : tp.bias < -0.05 ? 'sell' : 'balanced';
+      return { bias: tp.bias, buyShare: tp.buyShare, state };
+    })(),
     oiChangePct: cov.hasOi ? pctChangeOverWindow(oiArr, cfg.oiPctWindow) : null,
     funding: cov.hasFunding ? (rows[last]!.funding_rate ?? null) : null,
     cvdNet: cov.hasTaker ? (cvdArr[last] ?? null) : null, cvdTrend: cov.hasTaker ? cvdTrendOf(cvdArr) : 'unknown',
@@ -167,8 +193,9 @@ export function buildMarketContextMath(input: MarketContextMathInput, nowMs: num
     terms.push(buildTerm(resampled, cfg));
   }
 
-  if (!overall.hasTaker) notes.push('Taker flow absent in this source → CVD shown as n/a.');
-  if (!overall.hasOhlc) notes.push('OHLC high/low absent → ATR/Stochastic/ADX/Fibonacci shown as n/a.');
+  if (!overall.hasTaker) notes.push('Taker flow absent in this source → CVD/Pressure shown as n/a.');
+  if (!overall.hasOhlc) notes.push('OHLC high/low absent → ATR/Stochastic/ADX/Fibonacci/Squeeze/Pivots shown as n/a.');
+  if (!overall.hasTaker && overall.hasOhlc) notes.push('Squeeze/Pivots computed from OHLC data.');
 
   return {
     symbol: input.symbol, generatedAtMs: nowMs, window: input.window,
