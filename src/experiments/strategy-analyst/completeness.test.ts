@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { scoreCompleteness, UNKNOWNS_CAP } from './completeness.ts';
 import type { ScoreResult } from './types.ts';
-import { GOOD_LONG_OI_PROFILE, GOOD_SHORT_PUMP_PROFILE } from './__fixtures__/profiles.ts';
+import { CLEAN_LONG_OI_BASE, GOOD_SHORT_PUMP_PROFILE } from './__fixtures__/profiles.ts';
 
 function checkById(r: ScoreResult, id: string) {
   const c = r.checks.find((x) => x.id === id);
@@ -21,7 +21,7 @@ describe('scoreCompleteness — gates', () => {
   });
 
   it('direction mismatch: directionMatches false, verdict FAIL even with high score', () => {
-    const r = scoreCompleteness(GOOD_LONG_OI_PROFILE, { expectedDirection: 'short' });
+    const r = scoreCompleteness(CLEAN_LONG_OI_BASE, { expectedDirection: 'short' });
     expect(r.gates.schemaValid).toBe(true);
     expect(r.gates.directionMatches).toBe(false);
     expect(r.score).toBeGreaterThanOrEqual(0.99);
@@ -31,7 +31,7 @@ describe('scoreCompleteness — gates', () => {
 
 describe('scoreCompleteness — complete matching-direction profiles PASS', () => {
   it('long profile, expectedDirection long -> PASS, score ~1', () => {
-    const r = scoreCompleteness(GOOD_LONG_OI_PROFILE, { expectedDirection: 'long' });
+    const r = scoreCompleteness(CLEAN_LONG_OI_BASE, { expectedDirection: 'long' });
     expect(r.gates).toEqual({ schemaValid: true, directionMatches: true });
     expect(r.score).toBeGreaterThanOrEqual(0.99);
     expect(r.verdict).toBe('PASS');
@@ -52,12 +52,12 @@ describe('scoreCompleteness — structural checks miss', () => {
   });
 
   it('empty exitConditions -> has_exit misses', () => {
-    const r = scoreCompleteness({ ...GOOD_LONG_OI_PROFILE, exitConditions: [] }, { expectedDirection: 'long' });
+    const r = scoreCompleteness({ ...CLEAN_LONG_OI_BASE, exitConditions: [] }, { expectedDirection: 'long' });
     expect(checkById(r, 'has_exit').contribution).toBe(0);
   });
 
   it('empty requiredMarketFeatures -> has_market_features misses', () => {
-    const r = scoreCompleteness({ ...GOOD_LONG_OI_PROFILE, requiredMarketFeatures: [] }, { expectedDirection: 'long' });
+    const r = scoreCompleteness({ ...CLEAN_LONG_OI_BASE, requiredMarketFeatures: [] }, { expectedDirection: 'long' });
     expect(checkById(r, 'has_market_features').contribution).toBe(0);
   });
 
@@ -69,7 +69,7 @@ describe('scoreCompleteness — structural checks miss', () => {
 
   it('fabricated risk text -> no_fabrication misses with labels (long and short)', () => {
     const fabLong = scoreCompleteness(
-      { ...GOOD_LONG_OI_PROFILE, riskManagementSummary: 'Use 10x leverage with a base order size of $100 per entry.' },
+      { ...CLEAN_LONG_OI_BASE, riskManagementSummary: 'Use 10x leverage with a base order size of $100 per entry.' },
       { expectedDirection: 'long' },
     );
     const cLong = checkById(fabLong, 'no_fabrication');
@@ -86,7 +86,7 @@ describe('scoreCompleteness — structural checks miss', () => {
 
 describe('scoreCompleteness — threshold', () => {
   it('default threshold is DEFAULT_THRESHOLD (0.8)', () => {
-    expect(scoreCompleteness(GOOD_LONG_OI_PROFILE, { expectedDirection: 'long' }).threshold).toBe(0.8);
+    expect(scoreCompleteness(CLEAN_LONG_OI_BASE, { expectedDirection: 'long' }).threshold).toBe(0.8);
   });
   it('respects an explicit threshold', () => {
     const r = scoreCompleteness(GOOD_SHORT_PUMP_PROFILE, { expectedDirection: 'short', threshold: 0.5 });

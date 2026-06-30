@@ -1,8 +1,11 @@
 // src/experiments/strategy-analyst/__fixtures__/profiles.ts
 import type { AnalystProfileOutput } from '../../../domain/strategy-profile.ts';
 
-/** A strong long_oi profile that should PASS every check. Mirrors research-notes §4–13. */
-export const GOOD_LONG_OI_PROFILE: AnalystProfileOutput = {
+/**
+ * A clean, structurally-simple long_oi-shaped profile used as the base for analyst/critic
+ * scorer-test specimens and crafted negative variants. NOT the golden — see CODE_LONG_OI_PROFILE.
+ */
+export const CLEAN_LONG_OI_BASE: AnalystProfileOutput = {
   direction: 'long',
   coreIdea: 'Long-only mean-reversion: after a sharp dump, enter on a confirmed bounce backed by OI recovery and long liquidations.',
   summary: 'Rule-based FSM on 1m candles. Detects a dump, watches for reversal, enters long when price rises, open interest recovers and long liquidations are present.',
@@ -39,42 +42,45 @@ export const GOOD_LONG_OI_PROFILE: AnalystProfileOutput = {
   evidence: ['"Торгую только в long"', '"первый тейк на +3.5%"'],
 };
 
-/** Same as GOOD but direction flipped -> gate 2 fails. */
-export const SHORT_DIRECTION_PROFILE: AnalystProfileOutput = { ...GOOD_LONG_OI_PROFILE, direction: 'short' };
+/** Same as CLEAN_LONG_OI_BASE but direction flipped -> gate 2 fails. */
+export const SHORT_DIRECTION_PROFILE: AnalystProfileOutput = { ...CLEAN_LONG_OI_BASE, direction: 'short' };
 
-/** GOOD but riskManagementSummary fabricates leverage + base size -> check 5 = 0. */
+/** CLEAN_LONG_OI_BASE but riskManagementSummary fabricates leverage + base size -> check 5 = 0. */
 export const FABRICATED_RISK_PROFILE: AnalystProfileOutput = {
-  ...GOOD_LONG_OI_PROFILE,
+  ...CLEAN_LONG_OI_BASE,
   riskManagementSummary: 'Use 10x leverage with a base order size of $100 per entry.',
 };
 
-/** GOOD but DCA size hints (1.2x/1.5x) mentioned in risk text -> must NOT trip check 5. */
+/** CLEAN_LONG_OI_BASE but DCA size hints (1.2x/1.5x) mentioned in risk text -> must NOT trip check 5. */
 export const DCA_HINT_RISK_PROFILE: AnalystProfileOutput = {
-  ...GOOD_LONG_OI_PROFILE,
+  ...CLEAN_LONG_OI_BASE,
   riskManagementSummary: 'Sizing is host-owned. DCA adds use sizing hints of 1.2x then 1.5x of the prior size.',
 };
 
-/** GOOD but exitConditions omit TP2 -> check 3 partial credit. */
+/** CLEAN_LONG_OI_BASE but exitConditions omit TP2 -> check 3 partial credit. */
 export const MISSING_TP2_PROFILE: AnalystProfileOutput = {
-  ...GOOD_LONG_OI_PROFILE,
+  ...CLEAN_LONG_OI_BASE,
   exitConditions: ['TP1 at +3.5%', 'Hard stop (SL) at -12%', 'Time exit after 180 minutes'],
 };
 
-/** GOOD but DCA/BE only in summary, positionManagementSummary empty -> check 4 via fallback. */
+/** CLEAN_LONG_OI_BASE but DCA/BE only in summary, positionManagementSummary empty -> check 4 via fallback. */
 export const POSMGMT_IN_SUMMARY_PROFILE: AnalystProfileOutput = {
-  ...GOOD_LONG_OI_PROFILE,
-  summary: GOOD_LONG_OI_PROFILE.summary + ' It uses DCA averaging and moves the stop to breakeven after TP1.',
+  ...CLEAN_LONG_OI_BASE,
+  summary: CLEAN_LONG_OI_BASE.summary + ' It uses DCA averaging and moves the stop to breakeven after TP1.',
   positionManagementSummary: null,
 };
 
 /** Russian-only phrasing for entry/exit/posmgmt -> synonym buckets must still hit. */
 export const RU_PROFILE: AnalystProfileOutput = {
-  ...GOOD_LONG_OI_PROFILE,
+  ...CLEAN_LONG_OI_BASE,
   requiredMarketFeatures: ['свечи ohlcv', 'открытый интерес (oi)', 'ликвидации'],
   entryConditions: ['пролив более 10%', 'отскок от минимума, две зелёные свечи', 'восстановление oi', 'присутствуют long-ликвидации'],
   exitConditions: ['первый тейк +3.5%', 'второй тейк +5%', 'жёсткий стоп -12%', 'выход по времени 180 минут'],
   positionManagementSummary: 'Усреднение (DCA) до двух доливок; перенос стопа в безубыток после TP1.',
 };
+
+// TODO(task5/6): remove once researcher/fixtures.ts + strategy-critic/eval-harness.test.ts move to CODE_LONG_OI_PROFILE
+export const GOOD_LONG_OI_PROFILE = CLEAN_LONG_OI_BASE;
 
 /** A strong short-after-pump profile that should PASS scoreCompleteness for expectedDirection 'short'. */
 export const GOOD_SHORT_PUMP_PROFILE: AnalystProfileOutput = {
