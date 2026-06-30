@@ -73,6 +73,7 @@ import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis
 import { DrizzleBacktestReadAdapter } from './adapters/read/drizzle-backtest-read.adapter.ts';
 import { DrizzleAgentEventReadAdapter } from './adapters/read/drizzle-agent-event-read.adapter.ts';
 import { DrizzleExperimentReadAdapter } from './adapters/read/drizzle-experiment-read.adapter.ts';
+import { DrizzleResearchExperimentRepository } from './adapters/repository/drizzle-research-experiment.repository.ts';
 import { AgentActivityProjection } from './read-api/projection.ts';
 import { PgNotifyAgentEventStream } from './adapters/read/pg-notify-agent-event-stream.ts';
 import type { ReadApiDeps } from './read-api/deps.ts';
@@ -267,6 +268,7 @@ export function composeRuntime() {
     baselineVersion: env.TRADING_PLATFORM_BASELINE_VERSION,
     defaultPlatformRun: { datasetId: 'ESPORTSUSDT:1h', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-19' }, seed: 42 },
     researchDefaultSymbol: 'ESPORTSUSDT',
+    experiments: new DrizzleResearchExperimentRepository(db),
   };
 
   const router = new WorkflowRouter();

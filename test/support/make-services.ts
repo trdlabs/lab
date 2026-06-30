@@ -24,6 +24,7 @@ import { InMemoryQueueAdapter } from '../../src/adapters/queue/in-memory-queue.a
 import { NoopStrategyRetrievalIndexer } from '../../src/operator/noop-strategy-retrieval-indexer.ts';
 import { InMemoryTokenUsageRepository } from '../../src/adapters/repository/in-memory-token-usage.repository.ts';
 import { NullModelPricing } from '../../src/adapters/pricing/null-model-pricing.ts';
+import { InMemoryResearchExperimentRepository } from '../../src/adapters/repository/in-memory-research-experiment.repository.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -59,6 +60,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     chatPlans: new InMemoryChatPlanRepository(),
     actionProposals: new InMemoryActionProposalRepository(),
     strategyRetrievalIndexer: new NoopStrategyRetrievalIndexer(),
+    experiments: new InMemoryResearchExperimentRepository(),
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

@@ -26,6 +26,7 @@ import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
 import type { ModelPricingPort } from '../ports/model-pricing.port.ts';
+import type { ResearchExperimentRepository } from '../ports/research-experiment.repository.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -80,4 +81,5 @@ export interface AppServices {
   defaultPlatformRun: { datasetId: string; symbols: string[]; timeframe: string; period: { from: string; to: string }; seed: number };
   /** Symbol the research cycle defaults to when the task payload omits one. Demo sets this to a fixture symbol; production falls back to RESEARCH_DEFAULT_SYMBOL. */
   researchDefaultSymbol?: string;
+  experiments: ResearchExperimentRepository;
 }
