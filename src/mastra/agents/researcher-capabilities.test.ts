@@ -14,6 +14,13 @@ describe('RESEARCHER_CAPABILITIES', () => {
   it('keeps the runner-owned execution guard', () => {
     expect(RESEARCHER_CAPABILITIES.toLowerCase()).toContain('runner-owned');
   });
+  it('requires symbol-agnostic rules generalized to a regime, evidence in rationale not params', () => {
+    expect(RESEARCHER_CAPABILITIES).toMatch(/GENERALIZE/);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/symbol-agnostic/);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/regime/);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/rationale/);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/keep `params` clean/);
+  });
 });
 
 describe('RESEARCHER_CAPABILITIES exit-quality framing', () => {
