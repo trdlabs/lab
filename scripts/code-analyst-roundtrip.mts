@@ -120,7 +120,7 @@ process.stderr.write('[roundtrip] calling analyst.analyze({kind:"bot_code"})...\
 
 const profileOut = await analyst.analyze({ kind: 'bot_code', content });
 
-// ── 3) wrap → StrategyProfile (паттерн зеркалит regen-long-oi-profile.mts) ──
+// ── 3) wrap → StrategyProfile ────────────────────────────────────────────────
 
 const fp = sourceFingerprint('bot_code', content);
 const now = new Date().toISOString();
