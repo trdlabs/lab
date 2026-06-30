@@ -3,7 +3,8 @@
 // Default = DRY RUN (no real model construction, no composeMastra, no paid calls).
 // --run is the SOLE trigger for paid calls. No DB, no backtester, no persistence.
 import { parseArgs } from 'node:util';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { resolveFixture, fingerprintSource } from '../src/experiments/strategy-analyst/fixtures.ts';
 import { planDryRun } from '../src/experiments/strategy-analyst/plan.ts';
@@ -12,6 +13,7 @@ import { writeRunArtifacts, compactTimestamp } from '../src/experiments/strategy
 import { rankAggregates } from '../src/experiments/strategy-analyst/aggregate.ts';
 import { parseRoleModel, type ModelProvider, type ModelProviderEnv } from '../src/adapters/llm/model-provider.ts';
 import { STRATEGY_PROFILE_CONTRACT_VERSION } from '../src/domain/strategy-profile.ts';
+import { gatherStrategyCode } from '../src/domain/strategy-code.ts';
 import type { ManifestMeta } from '../src/experiments/strategy-analyst/types.ts';
 
 const HARNESS_VERSION = 'analyst-eval-v1';
@@ -58,13 +60,25 @@ function modelEnv(): ModelProviderEnv {
 async function main(): Promise<number> {
   const args = parseCli();
   const fixture = resolveFixture(args.fixtureId);
-  const fixtureText = readFileSync(fixture.sourcePath, 'utf8');
+
+  let fixtureText: string;
+  let inputKind: 'manual_description' | 'bot_code';
+  if (fixture.sourceDir) {
+    const files = readdirSync(fixture.sourceDir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((name) => ({ name, content: readFileSync(join(fixture.sourceDir!, name), 'utf8') }));
+    fixtureText = gatherStrategyCode(files, { pathPrefix: 'src/strategies/long_oi' });
+    inputKind = fixture.kind ?? 'bot_code';
+  } else {
+    fixtureText = readFileSync(fixture.sourcePath!, 'utf8');
+    inputKind = fixture.kind ?? 'manual_description';
+  }
 
   // ---------- DRY RUN (default): no model construction, no composeMastra ----------
   if (!args.run) {
     const plan = planDryRun({ models: args.models, judge: args.judge, env: process.env, repeat: args.repeat });
     process.stdout.write(`${JSON.stringify({
-      mode: 'dry-run', fixture: args.fixtureId, threshold: args.threshold, judge: args.judge, repeat: args.repeat,
+      mode: 'dry-run', fixture: args.fixtureId, inputKind, threshold: args.threshold, judge: args.judge, repeat: args.repeat,
       plannedPaidCalls: plan.totalPaidCalls, analystCalls: plan.analystCalls, judgeCalls: plan.judgeCalls,
       models: plan.perModel, missingKeys: plan.missingKeys,
       note: 'DRY RUN — no real models constructed, nothing sent. Re-run with --run to make paid calls.',
@@ -84,7 +98,7 @@ async function main(): Promise<number> {
   }
 
   const result = await runEval(
-    { models: args.models, fixtureId: fixture.id, fixtureText, fixtureFingerprint: fingerprintSource(fixtureText), threshold: args.threshold, repeat: args.repeat, direction: fixture.direction },
+    { models: args.models, fixtureId: fixture.id, fixtureText, fixtureFingerprint: fingerprintSource(fixtureText), threshold: args.threshold, repeat: args.repeat, direction: fixture.direction, sourceKind: inputKind },
     {
       analystFor: buildRealAnalystFor(env),
       providerOf: (m) => { const r = parseRoleModel(env, m); return { provider: r.provider, modelId: r.modelId }; },

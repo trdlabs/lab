@@ -14,6 +14,7 @@ export interface RunEvalInput {
   threshold: number;
   direction: Direction;
   repeat?: number; // independent runs per model; default 1, assumed >= 1
+  sourceKind?: 'manual_description' | 'bot_code'; // defaults to 'manual_description' for back-compat
 }
 
 export interface RunEvalDeps {
@@ -38,7 +39,7 @@ async function runOnce(model: string, input: RunEvalInput, deps: RunEvalDeps): P
   const start = deps.clock();
   try {
     const analyst = deps.analystFor(model);
-    const raw = await analyst.analyze({ kind: 'manual_description', content: input.fixtureText, title: input.fixtureId });
+    const raw = await analyst.analyze({ kind: input.sourceKind ?? 'manual_description', content: input.fixtureText, title: input.fixtureId });
     const latencyMs = deps.clock() - start;
     const score = scoreCompleteness(raw, { expectedDirection: input.direction, threshold: input.threshold });
     const secondaryScore = input.direction === 'long' ? scoreProfile(raw, { threshold: input.threshold }) : null;

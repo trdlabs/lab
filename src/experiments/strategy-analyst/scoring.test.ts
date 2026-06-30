@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { scoreProfile } from './scoring.ts';
 import {
-  GOOD_LONG_OI_PROFILE, SHORT_DIRECTION_PROFILE, FABRICATED_RISK_PROFILE,
+  CLEAN_LONG_OI_BASE, SHORT_DIRECTION_PROFILE, FABRICATED_RISK_PROFILE,
   DCA_HINT_RISK_PROFILE, MISSING_TP2_PROFILE, POSMGMT_IN_SUMMARY_PROFILE, RU_PROFILE,
 } from './__fixtures__/profiles.ts';
 
@@ -33,7 +33,7 @@ describe('scoreProfile — gates', () => {
 
 describe('scoreProfile — positive checks', () => {
   it('good profile passes all checks (score ~1) and verdict PASS', () => {
-    const r = scoreProfile(GOOD_LONG_OI_PROFILE);
+    const r = scoreProfile(CLEAN_LONG_OI_BASE);
     expect(r.gates).toEqual({ schemaValid: true, directionLong: true });
     expect(r.score).toBeGreaterThanOrEqual(0.99);
     expect(r.verdict).toBe('PASS');
@@ -62,7 +62,7 @@ describe('scoreProfile — positive checks', () => {
 
 describe('scoreProfile — negative risk check (5)', () => {
   it('clean risk summary -> full credit', () => {
-    const c = checkById(scoreProfile(GOOD_LONG_OI_PROFILE), 'risk_no_fabrication');
+    const c = checkById(scoreProfile(CLEAN_LONG_OI_BASE), 'risk_no_fabrication');
     expect(c.contribution).toBeCloseTo(0.15, 5);
     expect(c.matched).toEqual([]);
   });
@@ -86,14 +86,14 @@ describe('scoreProfile — threshold', () => {
     expect(r.verdict).toBe('FAIL');
   });
   it('default threshold is 0.8', () => {
-    expect(scoreProfile(GOOD_LONG_OI_PROFILE).threshold).toBe(0.8);
+    expect(scoreProfile(CLEAN_LONG_OI_BASE).threshold).toBe(0.8);
   });
 });
 
 describe('bucket matching robustness', () => {
   it('the oi token does not match inside unrelated words', () => {
     // "avoid"/"point" contain the substring "oi" but must not satisfy the OI bucket
-    const profile = { ...GOOD_LONG_OI_PROFILE, requiredMarketFeatures: ['ohlcv', 'avoid the point', 'liquidations'] };
+    const profile = { ...CLEAN_LONG_OI_BASE, requiredMarketFeatures: ['ohlcv', 'avoid the point', 'liquidations'] };
     const c = checkById(scoreProfile(profile), 'market_features');
     expect(c.bucketsHit).toBe(2); // ohlcv + liquidations, NOT oi
   });

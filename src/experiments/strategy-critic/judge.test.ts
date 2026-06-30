@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildJudgePrompt } from './judge.ts';
 import { GOOD_PUMP_SHORT_REFINEMENT } from './__fixtures__/refinements.ts';
-import { GOOD_LONG_OI_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
+import { CLEAN_LONG_OI_BASE } from '../strategy-analyst/__fixtures__/profiles.ts';
 
 describe('buildJudgePrompt', () => {
   it('embeds the original text and the candidate refinement JSON', () => {
@@ -14,9 +14,9 @@ describe('buildJudgePrompt', () => {
 
 describe('buildJudgePrompt — resulting profile block', () => {
   it('appends the profile block when a profile is present', () => {
-    const prompt = buildJudgePrompt({ originalText: 'orig', refinement: GOOD_PUMP_SHORT_REFINEMENT, profile: GOOD_LONG_OI_PROFILE });
+    const prompt = buildJudgePrompt({ originalText: 'orig', refinement: GOOD_PUMP_SHORT_REFINEMENT, profile: CLEAN_LONG_OI_BASE });
     expect(prompt).toContain('--- RESULTING ANALYST PROFILE (JSON) ---');
-    expect(prompt).toContain(JSON.stringify(GOOD_LONG_OI_PROFILE, null, 2));
+    expect(prompt).toContain(JSON.stringify(CLEAN_LONG_OI_BASE, null, 2));
     expect(prompt).toContain('Return the structured judge verdict.');
   });
 

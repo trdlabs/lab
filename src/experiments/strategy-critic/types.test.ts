@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { JudgeVerdictSchema, type JudgeVerdict } from './types.ts';
 import type { CandidateResult, ModelAggregate, ScoreResult as CriticScoreResult } from './types.ts';
 import type { ScoreResult as AnalystScoreResult } from '../strategy-analyst/types.ts';
-import { GOOD_LONG_OI_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
+import { CLEAN_LONG_OI_BASE } from '../strategy-analyst/__fixtures__/profiles.ts';
 
 const VALID: JudgeVerdict = {
   dimensions: [{ name: 'strengthens-weaknesses', score: 0.8, rationale: 'addressed crowding' }],
@@ -29,7 +29,7 @@ describe('CandidateResult round-trip fields', () => {
     const profileScore: AnalystScoreResult = {
       gates: { schemaValid: true, directionLong: true }, checks: [], score: 0.9, threshold: 0.8, verdict: 'PASS',
     };
-    const on: CandidateResult = { ...off, profile: GOOD_LONG_OI_PROFILE, profileScore };
+    const on: CandidateResult = { ...off, profile: CLEAN_LONG_OI_BASE, profileScore };
     expect(on.profile?.direction).toBe('long');
     expect(on.profileScore?.score).toBe(0.9);
   });

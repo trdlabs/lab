@@ -2,12 +2,12 @@
 import { describe, it, expect } from 'vitest';
 import { detectFabrication, FAB_PATTERNS, FAB_PARAM_NAME } from './fabrication.ts';
 import {
-  GOOD_LONG_OI_PROFILE, FABRICATED_RISK_PROFILE, DCA_HINT_RISK_PROFILE,
+  CLEAN_LONG_OI_BASE, FABRICATED_RISK_PROFILE, DCA_HINT_RISK_PROFILE,
 } from './__fixtures__/profiles.ts';
 
 describe('detectFabrication', () => {
   it('clean risk summary -> no fabrication labels', () => {
-    expect(detectFabrication(GOOD_LONG_OI_PROFILE)).toEqual([]);
+    expect(detectFabrication(CLEAN_LONG_OI_BASE)).toEqual([]);
   });
 
   it('fabricated leverage + base size -> labels present, in pattern order', () => {
@@ -23,7 +23,7 @@ describe('detectFabrication', () => {
 
   it('a sizing parameter with a value appends param_sizing last', () => {
     const profile = {
-      ...GOOD_LONG_OI_PROFILE,
+      ...CLEAN_LONG_OI_BASE,
       parameters: [{ name: 'leverage', value: 5, unit: 'x', description: 'lev', tunable: true }],
     };
     const labels = detectFabrication(profile);

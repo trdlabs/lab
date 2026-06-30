@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import { resolveFixture, fingerprintSource, FIXTURES } from './fixtures.ts';
 
 describe('resolveFixture', () => {
-  it('resolves the long-oi fixture to its source/notes/rubric paths', () => {
+  it('resolves the long-oi fixture to its notes/rubric paths and sourceDir', () => {
     const ref = resolveFixture('long-oi');
     expect(ref.id).toBe('long-oi');
-    expect(ref.sourcePath).toBe('docs/fixtures/strategies/long-oi-strategy-source.md');
+    expect(ref.sourceDir).toBe('docs/fixtures/strategies/long-oi-code');
     expect(ref.notesPath).toBe('docs/fixtures/strategies/long-oi-strategy-research-notes.md');
     expect(ref.rubricPath).toBe('docs/fixtures/strategies/long-oi-strategy-rubric.md');
   });
@@ -47,10 +47,20 @@ describe('fingerprintSource', () => {
   });
 });
 
+describe('FixtureRef sourceDir / kind fields', () => {
+  it('long-oi resolves to the vendored CODE dir as bot_code; short-pump stays prose', () => {
+    const longOi = resolveFixture('long-oi');
+    expect(longOi.sourceDir).toBe('docs/fixtures/strategies/long-oi-code');
+    expect(longOi.kind).toBe('bot_code');
+    const shortPump = resolveFixture('short-pump');
+    expect(shortPump.sourcePath).toMatch(/short-pump-strategy-source\.md$/);
+  });
+});
+
 describe('short-pump fixture files exist and fingerprint', () => {
   it('source/notes/rubric files are readable and the source fingerprints', () => {
     const ref = resolveFixture('short-pump');
-    const source = readFileSync(ref.sourcePath, 'utf8');
+    const source = readFileSync(ref.sourcePath!, 'utf8');
     expect(source.length).toBeGreaterThan(200);
     expect(readFileSync(ref.notesPath, 'utf8').length).toBeGreaterThan(1000);
     expect(readFileSync(ref.rubricPath, 'utf8').length).toBeGreaterThan(200);

@@ -2,8 +2,8 @@
 
 > **Назначение.** Это вспомогательные research-заметки (подробный reverse-engineering стратегии
 > `long_oi` из `trading-platform`), а **не** primary input для StrategyAnalyst. Primary input —
-> короткое пользовательское описание в `long-oi-strategy-source.md`; эти заметки нужны для проверки/
-> сверки того, что StrategyAnalyst извлечёт из короткого текста, и как справочник по реальной логике.
+> вендоренный код модуля в `docs/fixtures/strategies/long-oi-code/`; эти заметки нужны для проверки/
+> сверки того, что StrategyAnalyst извлечёт из кода, и как справочник по реальной логике.
 >
 > **Статус.** Research-only (read-only анализ). `trading-platform` не изменялся, production-код
 > `trading-lab` не изменялся. Это не StrategyProfile и не результат запуска StrategyAnalyst.

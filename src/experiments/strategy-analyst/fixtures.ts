@@ -7,7 +7,8 @@ const DIR = 'docs/fixtures/strategies';
 export const FIXTURES: Record<string, FixtureRef> = {
   'long-oi': {
     id: 'long-oi',
-    sourcePath: `${DIR}/long-oi-strategy-source.md`,
+    sourceDir: `${DIR}/long-oi-code`,
+    kind: 'bot_code',
     notesPath: `${DIR}/long-oi-strategy-research-notes.md`,
     rubricPath: `${DIR}/long-oi-strategy-rubric.md`,
     direction: 'long',
@@ -15,6 +16,7 @@ export const FIXTURES: Record<string, FixtureRef> = {
   'short-pump': {
     id: 'short-pump',
     sourcePath: `${DIR}/short-pump-strategy-source.md`,
+    kind: 'manual_description',
     notesPath: `${DIR}/short-pump-strategy-research-notes.md`,
     rubricPath: `${DIR}/short-pump-strategy-rubric.md`,
     direction: 'short',

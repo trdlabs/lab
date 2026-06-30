@@ -5,11 +5,13 @@ import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 export type EvalMode = 'dry-run' | 'run';
 
 export interface FixtureRef {
-  id: string;
-  sourcePath: string;
-  notesPath: string;
-  rubricPath: string;
-  direction: 'long' | 'short';
+  readonly id: string;
+  readonly sourcePath?: string;   // prose source (manual_description/readme/article)
+  readonly sourceDir?: string;    // multi-file code dir (bot_code) — gathered at read time
+  readonly kind?: 'manual_description' | 'bot_code';
+  readonly notesPath: string;
+  readonly rubricPath: string;
+  readonly direction: 'long' | 'short';
 }
 
 export interface CheckResult {

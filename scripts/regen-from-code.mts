@@ -9,22 +9,16 @@ import { composeMastra } from '../src/mastra/compose-mastra.ts';
 import type { MastraCompositionEnv } from '../src/mastra/compose-mastra.ts';
 import { MastraStrategyAnalyst } from '../src/adapters/analyst/mastra-strategy-analyst.ts';
 import { sourceFingerprint } from '../src/domain/fingerprint.ts';
+import { gatherStrategyCode } from '../src/domain/strategy-code.ts';
 import { STRATEGY_PROFILE_CONTRACT_VERSION } from '../src/domain/strategy-profile.ts';
 import type { ModelProvider, ModelProviderEnv } from '../src/adapters/llm/model-provider.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Код стратегии живёт в платформе (кросс-репо). Дефолт = PLATFORM_REPO_PATH/src/strategies/long_oi,
-// иначе сосед ../../trading-platform (зеркало prove-builder-loop). Override: LONGOI_CODE_DIR.
-const platformRepo = process.env['PLATFORM_REPO_PATH'] ?? resolve(__dirname, '../../trading-platform');
-const MODULE_DIR = process.env['LONGOI_CODE_DIR'] ?? join(platformRepo, 'src/strategies/long_oi');
+// Self-contained: read the vendored long_oi code. Override with LONGOI_CODE_DIR for a fresh re-vendor source.
+const MODULE_DIR = process.env['LONGOI_CODE_DIR']
+  ?? resolve(__dirname, '../docs/fixtures/strategies/long-oi-code');
 const OUT_PATH = join(__dirname, '../src/adapters/builder/fixtures/long-oi-profile.json');
 
-function gatherCode(dir: string): string {
-  const files = readdirSync(dir).filter((f) => f.endsWith('.ts')).sort();
-  return files
-    .map((f) => `// ===== FILE: src/strategies/long_oi/${f} =====\n${readFileSync(join(dir, f), 'utf8')}`)
-    .join('\n\n');
-}
 
 function modelEnv(): ModelProviderEnv {
   const provider = process.env['MODEL_PROVIDER'];
@@ -58,7 +52,9 @@ const entry = runtime.agents.analyst;
 if (!entry) throw new Error('analyst agent not composed');
 const analyst = new MastraStrategyAnalyst(entry.agent, entry.label);
 
-const content = gatherCode(MODULE_DIR);
+const files = readdirSync(MODULE_DIR).filter((f) => f.endsWith('.ts'))
+  .map((name) => ({ name, content: readFileSync(join(MODULE_DIR, name), 'utf8') }));
+const content = gatherStrategyCode(files, { pathPrefix: 'src/strategies/long_oi' });
 const input = { kind: 'bot_code' as const, content };
 process.stderr.write(`[regen-code] model=${modelId} code=${MODULE_DIR} (${Buffer.byteLength(content)} байт)\n`);
 process.stderr.write('[regen-code] analyst.analyze(bot_code) — один реальный LLM-вызов...\n');

@@ -9,7 +9,8 @@ import { GOOD_PUMP_SHORT_REFINEMENT } from './__fixtures__/refinements.ts';
 import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
 import type { StrategyAnalystInput } from '../../domain/strategy-source.ts';
 import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
-import { GOOD_LONG_OI_PROFILE, GOOD_SHORT_PUMP_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
+import { GOOD_SHORT_PUMP_PROFILE } from '../strategy-analyst/__fixtures__/profiles.ts';
+import { CODE_LONG_OI_PROFILE } from '../strategy-analyst/__fixtures__/code-golden.ts';
 
 const CAND: Candidate = { mode: 'two_stage', label: 'two_stage:critic=c,refiner=r', criticModel: 'c', refinerModel: 'r' };
 const CASE: CriticEvalCase = resolveCase('pump-short');
@@ -127,7 +128,7 @@ describe('runOnce — round-trip stage', () => {
       criticFor: () => fakeCritic(GOOD_PUMP_SHORT_REFINEMENT),
       providerOf: (m) => ({ provider: 'fake', modelId: m }),
       clock: (() => { let t = 0; return () => (t += 100); })(),
-      analystFor: () => fakeAnalyst(GOOD_LONG_OI_PROFILE),
+      analystFor: () => fakeAnalyst(CODE_LONG_OI_PROFILE),
     };
     const r = await runOnce(CAND, CASE, rtInput, d);
     expect(r.profileScore).not.toBeNull();
@@ -135,7 +136,7 @@ describe('runOnce — round-trip stage', () => {
   });
 
   it('is fail-soft when the analyst throws: profile/profileScore null, critique verdict intact, judge still runs', async () => {
-    let judgeProfile: AnalystProfileOutput | undefined = GOOD_LONG_OI_PROFILE;
+    let judgeProfile: AnalystProfileOutput | undefined = CODE_LONG_OI_PROFILE;
     let judged = false;
     const d: RunEvalDeps = {
       criticFor: () => fakeCritic(GOOD_PUMP_SHORT_REFINEMENT),
@@ -159,7 +160,7 @@ describe('runOnce — round-trip stage', () => {
       criticFor: () => fakeCritic(GOOD_PUMP_SHORT_REFINEMENT),
       providerOf: (m) => ({ provider: 'fake', modelId: m }),
       clock: (() => { let t = 0; return () => (t += 100); })(),
-      analystFor: () => fakeAnalyst(GOOD_LONG_OI_PROFILE, () => { called = true; }),
+      analystFor: () => fakeAnalyst(CODE_LONG_OI_PROFILE, () => { called = true; }),
     };
     const r = await runOnce(CAND, CASE, baseInput, d); // baseInput has roundTrip:false
     expect(called).toBe(false);

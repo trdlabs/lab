@@ -5,7 +5,7 @@ import type { StrategyAnalystPort } from '../../ports/strategy-analyst.port.ts';
 import type { StrategyAnalystInput } from '../../domain/strategy-source.ts';
 import type { AnalystProfileOutput } from '../../domain/strategy-profile.ts';
 import type { JudgeVerdict } from './types.ts';
-import { GOOD_LONG_OI_PROFILE, GOOD_SHORT_PUMP_PROFILE } from './__fixtures__/profiles.ts';
+import { CLEAN_LONG_OI_BASE, GOOD_SHORT_PUMP_PROFILE } from './__fixtures__/profiles.ts';
 
 function fakeAnalyst(out: AnalystProfileOutput): StrategyAnalystPort {
   return {
@@ -65,7 +65,7 @@ describe('runEval', () => {
     let seen: StrategyAnalystInput | undefined;
     const capturing: StrategyAnalystPort = {
       adapter: 'fake', model: 'fake',
-      async analyze(input) { seen = input; return GOOD_LONG_OI_PROFILE; },
+      async analyze(input) { seen = input; return CLEAN_LONG_OI_BASE; },
     };
     const result = await runEval(baseInput, deps({ 'anthropic/claude-x': capturing, 'openai/gpt-x': capturing }));
     expect(seen).toEqual({ kind: 'manual_description', content: 'long only strategy text', title: 'long-oi' });
@@ -75,10 +75,26 @@ describe('runEval', () => {
     expect(result.fixture).toEqual({ id: 'long-oi', fingerprint: 'sha256:abc' });
   });
 
+  it('passes bot_code source kind to analyst.analyze (M4 guard)', async () => {
+    let seen: StrategyAnalystInput | undefined;
+    const capturing: StrategyAnalystPort = {
+      adapter: 'fake', model: 'fake',
+      async analyze(input) { seen = input; return CLEAN_LONG_OI_BASE; },
+    };
+    const result = await runEval(
+      { ...baseInput, sourceKind: 'bot_code' },
+      deps({ 'anthropic/claude-x': capturing, 'openai/gpt-x': capturing }),
+    );
+    expect(seen).toEqual({ kind: 'bot_code', content: 'long only strategy text', title: 'long-oi' });
+    expect(result.perModel).toHaveLength(2);
+    expect(result.perModel.every((r) => r.verdict === 'PASS')).toBe(true);
+    expect(result.overallSuccess).toBe(true);
+  });
+
   it('isolates a throwing model: FAIL + error recorded, run continues, other model PASSes', async () => {
     const result = await runEval(baseInput, deps({
       'anthropic/claude-x': throwingAnalyst('schema validation failed'),
-      'openai/gpt-x': fakeAnalyst(GOOD_LONG_OI_PROFILE),
+      'openai/gpt-x': fakeAnalyst(CLEAN_LONG_OI_BASE),
     }));
     expect(result.perModel).toHaveLength(2);
     const bad = result.perModel.find((r) => r.model === 'anthropic/claude-x')!;
@@ -99,7 +115,7 @@ describe('runEval', () => {
   it('runs an injected judge and attaches its verdict (separate from deterministic verdict)', async () => {
     const judgeVerdict: JudgeVerdict = { dimensions: [], overallScore: 0.9, hallucinations: [], missingFromProfile: [], notes: 'ok' };
     const result = await runEval({ ...baseInput, models: ['x/y'] },
-      deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }, async () => judgeVerdict));
+      deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }, async () => judgeVerdict));
     expect(result.judgeEnabled).toBe(true);
     expect(result.perModel[0]!.judge).toEqual(judgeVerdict);
     expect(result.perModel[0]!.verdict).toBe('PASS'); // judge did not change it
@@ -107,13 +123,13 @@ describe('runEval', () => {
 
   it('judge failure does not fail the candidate (judge stays null)', async () => {
     const result = await runEval({ ...baseInput, models: ['x/y'] },
-      deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }, async () => { throw new Error('judge boom'); }));
+      deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }, async () => { throw new Error('judge boom'); }));
     expect(result.perModel[0]!.verdict).toBe('PASS');
     expect(result.perModel[0]!.judge).toBeNull();
   });
 
   it('defaults to repeat=1 (regression: single run per model, one aggregate)', async () => {
-    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }));
+    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }));
     expect(result.repeat).toBe(1);
     expect(result.perModel).toHaveLength(1);
     expect(result.aggregates).toHaveLength(1);
@@ -125,7 +141,7 @@ describe('runEval --repeat aggregation', () => {
   it('repeat=3 runs each model 3x; identical outputs -> std 0, passRate 1, 3 ok', async () => {
     const result = await runEval(
       { ...baseInput, models: ['x/y'], repeat: 3 },
-      deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }),
+      deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }),
     );
     expect(result.repeat).toBe(3);
     expect(result.perModel).toHaveLength(3); // flat list = every run
@@ -141,7 +157,7 @@ describe('runEval --repeat aggregation', () => {
   it('counts failed runs; PASS-rate denominator is N; det stats only over ok runs', async () => {
     const result = await runEval(
       { ...baseInput, models: ['x/y'], repeat: 3 },
-      deps({ 'x/y': flakyAnalyst(1, GOOD_LONG_OI_PROFILE) }), // run1 throws; runs 2 & 3 pass
+      deps({ 'x/y': flakyAnalyst(1, CLEAN_LONG_OI_BASE) }), // run1 throws; runs 2 & 3 pass
     );
     const a = result.aggregates[0]!;
     expect(a.runs.total).toBe(3);
@@ -156,7 +172,7 @@ describe('runEval --repeat aggregation', () => {
   it('judge disabled -> aggregate.judge is null', async () => {
     const result = await runEval(
       { ...baseInput, models: ['x/y'], repeat: 2 },
-      deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }), // no judge in deps
+      deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }), // no judge in deps
     );
     expect(result.judgeEnabled).toBe(false);
     expect(result.aggregates[0]!.judge).toBeNull();
@@ -165,7 +181,7 @@ describe('runEval --repeat aggregation', () => {
 
 describe('runEval — completeness primary signal + scoreProfile secondary', () => {
   it('long fixture: score is direction-aware completeness AND secondaryScore is the bespoke scoreProfile', async () => {
-    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': fakeAnalyst(GOOD_LONG_OI_PROFILE) }));
+    const result = await runEval({ ...baseInput, models: ['x/y'] }, deps({ 'x/y': fakeAnalyst(CLEAN_LONG_OI_BASE) }));
     const r = result.perModel[0]!;
     // primary deterministic verdict comes from scoreCompleteness keyed on direction 'long'
     expect(r.score!.gates.directionMatches).toBe(true);

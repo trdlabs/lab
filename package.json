@@ -34,7 +34,7 @@
     "@mastra/observability": "^1.15.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/ai-sdk-provider": "^2.9.1",
-    "@trading-backtester/sdk": "https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.5.0/trading-backtester-sdk-0.5.0.tgz",
+    "@trading-backtester/sdk": "https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.6.0/trading-backtester-sdk-0.6.0.tgz",
     "@trading-platform/sdk": "https://github.com/alexnikolskiy/trading-platform-sdk/releases/download/sdk-v0.9.0/trading-platform-sdk-0.9.0.tgz",
     "bullmq": "^5.21.0",
     "drizzle-orm": "^0.36.0",
