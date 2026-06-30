@@ -1,7 +1,8 @@
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
 import type { BacktestRun } from '../domain/backtest-run.ts';
 import type { AgentEventRow } from '../ports/agent-event-read.port.ts';
-import type { HypothesisListItemDto, HypothesisDetailDto, BacktestDto, AgentEventDto, CuratedRuleDto } from './dto.ts';
+import type { HypothesisListItemDto, HypothesisDetailDto, BacktestDto, AgentEventDto, CuratedRuleDto, ExperimentDto, ExperimentRunMemberDto } from './dto.ts';
+import type { ResearchExperiment, ExperimentRunMember } from '../domain/research-experiment.ts';
 
 export function toHypothesisListItem(h: HypothesisProposal): HypothesisListItemDto {
   return {
@@ -84,4 +85,25 @@ export function toAgentEventDto(row: AgentEventRow): AgentEventDto {
   if (row.correlationId) dto.correlationId = row.correlationId;
   if (payloadSummary) dto.payloadSummary = payloadSummary;
   return dto;
+}
+
+// ---- Experiment mappers (null-preserving) ----
+export function toExperimentDto(e: ResearchExperiment): ExperimentDto {
+  return {
+    id: e.id, experimentType: e.experimentType, strategyProfileId: e.strategyProfileId,
+    hypothesisId: e.hypothesisId ?? null, buildId: e.buildId ?? null, bundleHash: e.bundleHash ?? null,
+    status: e.status, verdict: e.verdict ?? null, verdictReason: e.verdictReason ?? null,
+    datasetScope: e.datasetScope, holdoutPolicy: e.holdoutPolicy, holdoutBoundary: e.holdoutBoundary ?? null,
+    aggregateMetrics: e.aggregateMetrics ?? null,
+    createdAt: e.createdAt, updatedAt: e.updatedAt, completedAt: e.completedAt ?? null,
+  };
+}
+
+export function toExperimentRunMemberDto(m: ExperimentRunMember): ExperimentRunMemberDto {
+  return {
+    id: m.id, experimentId: m.experimentId, backtestRunId: m.backtestRunId ?? null,
+    role: m.role, foldId: m.foldId ?? null, periodFrom: m.periodFrom, periodTo: m.periodTo,
+    symbols: m.symbols, tradeCount: m.tradeCount ?? null, resultSummary: m.resultSummary ?? null,
+    createdAt: m.createdAt,
+  };
 }

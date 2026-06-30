@@ -87,3 +87,44 @@ export interface AgentActivityDto {
 // SSE delta payloads (carried as `data:` JSON).
 export interface AgentStatusChanged { agentId: AgentId; status: AgentLifecycle; currentTaskId: string | null; ts: string; }
 export interface AgentEventAppended { agentId: AgentId; event: AgentEventDto; }
+
+// ---- Experiment DTOs ----
+export const ExperimentListQuerySchema = z.object({
+  strategyProfileId: z.string().optional(),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'cancelled']).optional(),
+  limit,
+  cursor: z.string().optional(),
+});
+
+export interface ExperimentDto {
+  id: string;
+  experimentType: string;
+  strategyProfileId: string;
+  hypothesisId: string | null;
+  buildId: string | null;
+  bundleHash: string | null;
+  status: string;
+  verdict: string | null;
+  verdictReason: string | null;
+  datasetScope: unknown;
+  holdoutPolicy: unknown;
+  holdoutBoundary: unknown | null;
+  aggregateMetrics: unknown | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface ExperimentRunMemberDto {
+  id: string;
+  experimentId: string;
+  backtestRunId: string | null;
+  role: string;
+  foldId: number | null;
+  periodFrom: string;
+  periodTo: string;
+  symbols: string[];
+  tradeCount: number | null;
+  resultSummary: unknown | null;
+  createdAt: string;
+}

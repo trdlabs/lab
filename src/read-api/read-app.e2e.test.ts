@@ -5,6 +5,7 @@ import { InMemoryBacktestReadAdapter } from '../adapters/read/in-memory-backtest
 import { InMemoryAgentEventReadAdapter } from '../adapters/read/in-memory-agent-event-read.adapter.ts';
 import { AgentActivityProjection } from './projection.ts';
 import { InMemoryAgentEventStream } from '../adapters/read/in-memory-agent-event-stream.ts';
+import { InMemoryExperimentReadAdapter } from '../adapters/read/in-memory-experiment-read.adapter.ts';
 
 describe('read-app e2e (in-memory wiring)', () => {
   it('serves the full route table behind auth', async () => {
@@ -21,6 +22,7 @@ describe('read-app e2e (in-memory wiring)', () => {
       strategyProfiles: { findById: async () => null },
       tokenUsage: { getCost: async () => 0 },
       phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
+      experiments: new InMemoryExperimentReadAdapter(),
     });
     const auth = { authorization: 'Bearer e2e' };
     for (const path of ['/v1/hypotheses', '/v1/backtests', '/v1/agent-events']) {

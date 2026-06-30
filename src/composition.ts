@@ -72,6 +72,7 @@ import { sql } from 'drizzle-orm';
 import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis-read.adapter.ts';
 import { DrizzleBacktestReadAdapter } from './adapters/read/drizzle-backtest-read.adapter.ts';
 import { DrizzleAgentEventReadAdapter } from './adapters/read/drizzle-agent-event-read.adapter.ts';
+import { DrizzleExperimentReadAdapter } from './adapters/read/drizzle-experiment-read.adapter.ts';
 import { AgentActivityProjection } from './read-api/projection.ts';
 import { PgNotifyAgentEventStream } from './adapters/read/pg-notify-agent-event-stream.ts';
 import type { ReadApiDeps } from './read-api/deps.ts';
@@ -320,6 +321,7 @@ export function composeRuntime() {
       projectName: env.PHOENIX_PROJECT_NAME,
       apiKey: env.PHOENIX_API_KEY,
     }),
+    experiments: new DrizzleExperimentReadAdapter(db),
   };
 
   return { env, db, pool, queue, router, services, chat, read, mastraRuntime };

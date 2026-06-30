@@ -6,6 +6,7 @@ import { InMemoryBacktestReadAdapter } from '../../adapters/read/in-memory-backt
 import { InMemoryAgentEventReadAdapter } from '../../adapters/read/in-memory-agent-event-read.adapter.ts';
 import { AgentActivityProjection } from '../projection.ts';
 import { InMemoryAgentEventStream } from '../../adapters/read/in-memory-agent-event-stream.ts';
+import { InMemoryExperimentReadAdapter } from '../../adapters/read/in-memory-experiment-read.adapter.ts';
 
 const TOKEN = 'test-token';
 const auth = { headers: { authorization: `Bearer ${TOKEN}` } };
@@ -24,6 +25,7 @@ function deps(over: Partial<ReadApiDeps> = {}): ReadApiDeps {
     strategyProfiles: { findById: async () => null },
     tokenUsage: { getCost: async () => 0 },
     phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
+    experiments: new InMemoryExperimentReadAdapter(),
     ...over,
   };
 }

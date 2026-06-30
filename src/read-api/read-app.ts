@@ -10,8 +10,9 @@ import { registerAgentRoutes } from './routes/agents.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerCompletionSummaryRoutes } from './routes/completion-summary.ts';
 import { registerAgentTraceRoutes } from './routes/agent-traces.ts';
+import { registerExperimentRoutes } from './routes/experiments.ts';
 
-const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary'];
+const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary', '/experiments', '/experiments/:id', '/experiments/:id/runs'];
 
 export function createReadApp(deps: ReadApiDeps): Hono {
   const app = new Hono();
@@ -32,6 +33,7 @@ export function createReadApp(deps: ReadApiDeps): Hono {
   registerAuthzRoute(v1); // credential probe — same gate, lets consumers verify their read token
   registerHypothesisRoutes(v1, deps);
   registerBacktestRoutes(v1, deps);
+  registerExperimentRoutes(v1, deps);
   registerAgentEventRoutes(v1, deps);
   registerAgentRoutes(v1, deps);
   registerAgentTraceRoutes(v1, deps);
