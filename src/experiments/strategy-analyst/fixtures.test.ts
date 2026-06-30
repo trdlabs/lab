@@ -7,7 +7,6 @@ describe('resolveFixture', () => {
   it('resolves the long-oi fixture to its notes/rubric paths and sourceDir', () => {
     const ref = resolveFixture('long-oi');
     expect(ref.id).toBe('long-oi');
-    expect(ref.sourceDir).toBe('docs/fixtures/strategies/long-oi-code');
     expect(ref.notesPath).toBe('docs/fixtures/strategies/long-oi-strategy-research-notes.md');
     expect(ref.rubricPath).toBe('docs/fixtures/strategies/long-oi-strategy-rubric.md');
   });

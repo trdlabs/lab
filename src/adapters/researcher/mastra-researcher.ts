@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Agent } from '@mastra/core/agent';
-import type { ResearcherInput, ResearcherPort, AgentCallOpts } from '../../ports/researcher.port.ts';
+import type { ResearcherInput, ResearcherPort, AgentCallOpts, ActiveOverlayRuleSummary } from '../../ports/researcher.port.ts';
 import { ResearcherOutputSchema, type ResearcherOutput } from '../../domain/hypothesis.ts';
 import { OVERLAY_ACTIONS } from '../../domain/hypothesis-rules.ts';
 import { DIRECTIONS } from '../../domain/strategy-profile.ts';
@@ -118,10 +118,10 @@ function forensicBundleText(bundles: readonly TradeEvidenceBundle[] | undefined)
   ];
 }
 
-function activeOverlayRulesText(input: ResearcherInput): string {
-  const rules = input.activeOverlayRules ?? [];
-  if (rules.length === 0) return 'Active overlay rules on this profile: (no active overlay rules yet — critique the base profile)';
-  const lines = rules.map((r) => `- [${r.status}] ${r.thesis} :: ${JSON.stringify(r.ruleAction)}`).join('\n');
+function activeOverlayRulesText(rules: readonly ActiveOverlayRuleSummary[] | undefined): string {
+  const rulesList = rules ?? [];
+  if (rulesList.length === 0) return 'Active overlay rules on this profile: (no active overlay rules yet — critique the base profile)';
+  const lines = rulesList.map((r) => `- [${r.status}] ${r.thesis} :: ${JSON.stringify(r.ruleAction)}`).join('\n');
   return `Active overlay rules on this profile (critique these):\n${lines}`;
 }
 
@@ -137,7 +137,7 @@ export function buildPrompt(input: ResearcherInput): string {
       ? formatMarketContextMath(input.marketContextMath)
       : `Market context features: ${JSON.stringify(input.marketContext.features)}`,
     RESEARCHER_PROFILE_CRITICAL_FRAMING,
-    activeOverlayRulesText(input),
+    activeOverlayRulesText(input.activeOverlayRules),
   ];
 
   if (input.focus === 'profit_improvement') {

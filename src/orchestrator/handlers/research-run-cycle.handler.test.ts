@@ -671,6 +671,17 @@ describe('winner selection', () => {
     expect(postExitHeadroomPct(trade({ side: 'long', closedAtMs: 2 }), rows)).toBe(0);
   });
 
+  it('postExitHeadroomPct measures favourable continuation after exit for a short (downward move)', () => {
+    const rows = [
+      { minute_ts: 1, open: 0, high: 100, low: 100, close: 100 } as CanonicalRowV2,
+      { minute_ts: 2, open: 0, high: 110, low: 90, close: 100 } as CanonicalRowV2,
+    ];
+    // Short: favourable = price drops after exit; (exitClose − minLow)/exitClose = (100−90)/100 = 0.10
+    expect(postExitHeadroomPct(trade({ side: 'short', closedAtMs: 1 }), rows)).toBeCloseTo(0.10, 6);
+    // No post-exit bars → 0
+    expect(postExitHeadroomPct(trade({ side: 'short', closedAtMs: 2 }), rows)).toBe(0);
+  });
+
   it('rankWinnersByHeadroom orders by left-on-table and caps', () => {
     const big = trade({ tradeId: 'big', side: 'long', closedAtMs: 1 });
     const small = trade({ tradeId: 'small', side: 'long', closedAtMs: 1 });

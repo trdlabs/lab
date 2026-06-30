@@ -200,12 +200,13 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     tradeEvidence = [];
   }
 
+  const parsedWarmup = Number(process.env.TRADE_CONTEXT_WARMUP_MIN ?? '150');
+  const warmupMin = Number.isFinite(parsedWarmup) && parsedWarmup > 0 ? parsedWarmup : 150;
+  const parsedTail = Number(process.env.TRADE_CONTEXT_TAIL_MIN ?? '60');
+  const tailMin = Number.isFinite(parsedTail) && parsedTail > 0 ? parsedTail : 60;
+
   const tradeContexts: TradeContextMath[] = [];
   {
-    const parsedWarmup = Number(process.env.TRADE_CONTEXT_WARMUP_MIN ?? '150');
-    const warmupMin = Number.isFinite(parsedWarmup) && parsedWarmup > 0 ? parsedWarmup : 150;
-    const parsedTail = Number(process.env.TRADE_CONTEXT_TAIL_MIN ?? '60');
-    const tailMin = Number.isFinite(parsedTail) && parsedTail > 0 ? parsedTail : 60;
     for (const t of suspicious) {
       if (t.closedAtMs == null) continue;
       try {
@@ -233,19 +234,14 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   {
     const allWinners = selectWinningTrades(botResults).filter((t) => t.closedAtMs != null);
     const typed = allWinners.length > 0 && allWinners.every((t) => isTypedCloseReason(t.closeReason));
-    const parsedWarmup2 = Number(process.env.TRADE_CONTEXT_WARMUP_MIN ?? '150');
-    const warmupMin2 = Number.isFinite(parsedWarmup2) && parsedWarmup2 > 0 ? parsedWarmup2 : 150;
-    const parsedTail2 = Number(process.env.TRADE_CONTEXT_TAIL_MIN ?? '60');
-    const tailMin2 = Number.isFinite(parsedTail2) && parsedTail2 > 0 ? parsedTail2 : 60;
-
     // Fetch rows once per candidate (bounded pool), reused for both ranking and context.
     const pool = typed ? rankWinnersTyped(allWinners, winnersMax) : allWinners.slice(0, winnersMax * 2);
     const rowsByTradeId = new Map<string, readonly CanonicalRowV2[]>();
     for (const t of pool) {
       if (t.closedAtMs == null) continue;
       try {
-        const fromMs = t.openedAtMs - warmupMin2 * 60_000;
-        const rows = await services.marketHistory.getRows({ symbol: t.symbol, fromMs, toMs: t.closedAtMs + tailMin2 * 60_000 });
+        const fromMs = t.openedAtMs - warmupMin * 60_000;
+        const rows = await services.marketHistory.getRows({ symbol: t.symbol, fromMs, toMs: t.closedAtMs + tailMin * 60_000 });
         rowsByTradeId.set(t.tradeId, rows);
       } catch (err) {
         await services.events.append(event(task.id, 'researcher.trade_context_unavailable', { tradeId: t.tradeId, error: errMsg(err) }));
@@ -356,7 +352,6 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   }
   await services.events.append(event(task.id, 'researcher.completed', { count: taggedDrafts.length }));
 
-  const drafts = taggedDrafts;
   const allowedFeatures = new Set<string>([
     ...profile.requiredMarketFeatures.map(normalizeFeature),
     ...LAB_FEATURE_CATALOG,
@@ -368,7 +363,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   let deduped = 0;
   let criticReviews = 0;
 
-  for (const { draft, origin } of drafts) {
+  for (const { draft, origin } of taggedDrafts) {
     const fingerprint = hypothesisFingerprint(draft.thesis, draft.ruleAction);
     if (seen.has(fingerprint)) {
       await services.events.append(event(task.id, 'hypothesis.deduped', { fingerprint }));

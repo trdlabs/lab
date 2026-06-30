@@ -29,6 +29,10 @@ describe('RESEARCHER_CAPABILITIES exit-quality framing', () => {
       expect(RESEARCHER_CAPABILITIES).toContain(marker);
     }
   });
+
+  it('per-trade context line is not coupled to losers only', () => {
+    expect(RESEARCHER_CAPABILITIES).toMatch(/winning trades in the profit/);
+  });
 });
 
 describe('RESEARCHER_INSTRUCTIONS', () => {

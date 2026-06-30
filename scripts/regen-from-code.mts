@@ -19,7 +19,6 @@ const MODULE_DIR = process.env['LONGOI_CODE_DIR']
   ?? resolve(__dirname, '../docs/fixtures/strategies/long-oi-code');
 const OUT_PATH = join(__dirname, '../src/adapters/builder/fixtures/long-oi-profile.json');
 
-
 function modelEnv(): ModelProviderEnv {
   const provider = process.env['MODEL_PROVIDER'];
   if (!provider) throw new Error('MODEL_PROVIDER env var is required');
