@@ -75,6 +75,22 @@ describe('runEval', () => {
     expect(result.fixture).toEqual({ id: 'long-oi', fingerprint: 'sha256:abc' });
   });
 
+  it('passes bot_code source kind to analyst.analyze (M4 guard)', async () => {
+    let seen: StrategyAnalystInput | undefined;
+    const capturing: StrategyAnalystPort = {
+      adapter: 'fake', model: 'fake',
+      async analyze(input) { seen = input; return CLEAN_LONG_OI_BASE; },
+    };
+    const result = await runEval(
+      { ...baseInput, sourceKind: 'bot_code' },
+      deps({ 'anthropic/claude-x': capturing, 'openai/gpt-x': capturing }),
+    );
+    expect(seen).toEqual({ kind: 'bot_code', content: 'long only strategy text', title: 'long-oi' });
+    expect(result.perModel).toHaveLength(2);
+    expect(result.perModel.every((r) => r.verdict === 'PASS')).toBe(true);
+    expect(result.overallSuccess).toBe(true);
+  });
+
   it('isolates a throwing model: FAIL + error recorded, run continues, other model PASSes', async () => {
     const result = await runEval(baseInput, deps({
       'anthropic/claude-x': throwingAnalyst('schema validation failed'),
