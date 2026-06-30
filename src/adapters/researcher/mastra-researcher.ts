@@ -53,6 +53,20 @@ const LlmResearcherOutputSchema = z.object({
 });
 type LlmResearcherOutput = z.infer<typeof LlmResearcherOutputSchema>;
 
+/** OpenAI/Azure strict structured-output requires EVERY key in `required` and expresses optionality
+ *  via `.nullable()` (the model should send null, not omit). But a non-strict provider route (seen
+ *  live with gpt-5.5 via openrouter) sometimes OMITS a nullable key → the strict zod parse rejects it
+ *  ("rationale: Required") and hard-fails the cycle. Backfill the known nullable LLM fields with null
+ *  before parsing so a semantically-valid response survives; llmOutputToDomain then drops the nulls. */
+function backfillOmittedNullables(obj: unknown): unknown {
+  const o = obj as { hypotheses?: Array<{ ruleAction?: { rules?: Array<Record<string, unknown>> }; expectedEffect?: Record<string, unknown> }> } | null;
+  for (const h of o?.hypotheses ?? []) {
+    for (const r of h?.ruleAction?.rules ?? []) if (r && !('rationale' in r)) r.rationale = null;
+    if (h?.expectedEffect && !('magnitude' in h.expectedEffect)) h.expectedEffect.magnitude = null;
+  }
+  return obj;
+}
+
 /** Coerce LLM nullable fields back to domain optional (null → omit). */
 function llmOutputToDomain(llm: LlmResearcherOutput): ResearcherOutput {
   return ResearcherOutputSchema.parse({
@@ -61,15 +75,15 @@ function llmOutputToDomain(llm: LlmResearcherOutput): ResearcherOutput {
       ...h,
       ruleAction: {
         ...h.ruleAction,
-        rules: h.ruleAction.rules.map((r) => ({
-          ...r,
-          ...(r.rationale !== null ? { rationale: r.rationale } : {}),
-        })),
+        rules: h.ruleAction.rules.map((r) => {
+          const { rationale, ...rest } = r;
+          return { ...rest, ...(rationale != null ? { rationale } : {}) };
+        }),
       },
       expectedEffect: {
         metric: h.expectedEffect.metric,
         direction: h.expectedEffect.direction,
-        ...(h.expectedEffect.magnitude !== null ? { magnitude: h.expectedEffect.magnitude } : {}),
+        ...(h.expectedEffect.magnitude != null ? { magnitude: h.expectedEffect.magnitude } : {}),
       },
     })),
   });
@@ -176,7 +190,7 @@ export class MastraResearcher implements ResearcherPort {
       outputTokens: result.usage?.outputTokens ?? 0,
       totalTokens: result.usage?.totalTokens ?? 0,
     });
-    const llm = LlmResearcherOutputSchema.parse(result.object);
+    const llm = LlmResearcherOutputSchema.parse(backfillOmittedNullables(result.object));
     return llmOutputToDomain(llm);
   }
 }

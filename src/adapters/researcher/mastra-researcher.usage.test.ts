@@ -64,3 +64,27 @@ describe('MastraResearcher onUsage', () => {
     expect(recorded).toEqual({ modelId: 'test-researcher', inputTokens: 0, outputTokens: 0, totalTokens: 0 });
   });
 });
+
+describe('MastraResearcher tolerates omitted nullish LLM fields', () => {
+  // Regression: a real gpt-5.5 run OMITTED the `rationale` key on a rule (instead of sending null),
+  // which the previous `.nullable()` schema rejected ("rationale: Required") → hard-failed the cycle.
+  it('accepts a rule missing rationale + an effect missing magnitude, dropping them in the domain output', async () => {
+    const objectMissingNullables = {
+      hypotheses: [{
+        thesis: 'T', targetBehavior: 'b',
+        ruleAction: { appliesTo: 'long', rules: [{ when: 'c', action: 'skip_entry', params: {} }] }, // no rationale key
+        requiredFeatures: [], validationPlan: 'p',
+        expectedEffect: { metric: 'win_rate', direction: 'increase' }, // no magnitude key
+        invalidationCriteria: ['none'], confidence: 0.5,
+      }],
+      researchSummary: 's',
+    };
+    const agent = { generate: async () => ({ object: objectMissingNullables }) } as unknown as Agent;
+    const adapter = new MastraResearcher(agent, 'test');
+    const out = await adapter.propose(validInput);
+    expect(out.hypotheses).toHaveLength(1);
+    const rule = out.hypotheses[0]!.ruleAction.rules[0]!;
+    expect('rationale' in rule).toBe(false);
+    expect(out.hypotheses[0]!.expectedEffect.magnitude).toBeUndefined();
+  });
+});
