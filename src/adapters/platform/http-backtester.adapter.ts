@@ -43,6 +43,8 @@ import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import type { BacktesterStrategyPort, StrategyRunResult, StrategyRunSubmission } from '../../ports/backtester-strategy.port.ts';
 import { GatewayRunError, GatewayValidationError } from './gateway-errors.ts';
 import { toBacktesterBundle } from './backtester-bundle.ts';
+import type { RunTradesPort } from '../../ports/run-trades.port.ts';
+import type { TradeRecord } from '../../domain/research-experiment.ts';
 
 /** The subset of BacktesterClient the adapter uses (so tests can inject a fake). */
 export interface BacktesterClientLike {
@@ -54,6 +56,12 @@ export interface BacktesterClientLike {
   discoverRegistry(): Promise<RegistryDescriptor>;
   listDatasets(): Promise<BtDatasetDescriptor[]>;
   cancelRun(runId: string): Promise<BtRunStatusView>;
+  getArtifactManifest(runId: string): Promise<{
+    descriptors: readonly { artifactType: string; contentHash: string; availability: string; approxItemCount?: number }[];
+  }>;
+  readArtifact(runId: string, artifactId: string, opts?: { offset?: number; limit?: number }): Promise<{
+    page: readonly unknown[]; total: number; offset: number; nextCursor?: string;
+  }>;
 }
 
 const TERMINAL = new Set(['completed', 'failed', 'canceled', 'expired', 'timed_out']);
@@ -350,5 +358,47 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterSt
     } catch {
       return { status: 'unavailable' };
     }
+  }
+}
+
+// ── RunTradesPort implementation ────────────────────────────────────────────
+
+function parseTrade(row: unknown): TradeRecord {
+  const r = row as Record<string, unknown>;
+  if (typeof r.entryTs !== 'number' || typeof r.exitTs !== 'number') {
+    throw new Error('trades artifact row missing entryTs/exitTs');
+  }
+  return {
+    entryTs: r.entryTs,
+    exitTs: r.exitTs,
+    side: r.side === 'short' ? 'short' : 'long',
+    realizedPnl: typeof r.realizedPnl === 'number' ? r.realizedPnl : 0,
+  };
+}
+
+export class HttpBacktesterRunTradesAdapter implements RunTradesPort {
+  private readonly client: BacktesterClientLike;
+  constructor(client: BacktesterClientLike) {
+    this.client = client;
+  }
+
+  async getRunTrades(runId: string): Promise<TradeRecord[]> {
+    const manifest = await this.client.getArtifactManifest(runId);
+    const tradesDesc = manifest.descriptors.find(
+      (d) => d.artifactType === 'trades' && d.availability === 'available',
+    );
+    if (!tradesDesc) return [];
+
+    const out: TradeRecord[] = [];
+    let offset = 0;
+    const limit = 500;
+    for (;;) {
+      const pageRes = await this.client.readArtifact(runId, tradesDesc.contentHash, { offset, limit });
+      for (const row of pageRes.page) out.push(parseTrade(row));
+      const consumed = offset + pageRes.page.length;
+      if (pageRes.page.length === 0 || consumed >= pageRes.total) break;
+      offset = consumed;
+    }
+    return out;
   }
 }

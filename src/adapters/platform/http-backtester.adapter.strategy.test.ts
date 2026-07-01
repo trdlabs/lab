@@ -94,6 +94,12 @@ function makeClient(opts: {
     async cancelRun(runId: string): Promise<BtRunStatusView> {
       return { runId, jobId: 'j1', status: 'canceled', timeline: [] };
     },
+    async getArtifactManifest(_runId: string): Promise<{ descriptors: readonly { artifactType: string; contentHash: string; availability: string; approxItemCount?: number }[] }> {
+      return { descriptors: [] };
+    },
+    async readArtifact(_runId: string, _artifactId: string, _opts?: { offset?: number; limit?: number }): Promise<{ page: readonly unknown[]; total: number; offset: number; nextCursor?: string }> {
+      return { page: [], total: 0, offset: 0 };
+    },
   };
 }
 

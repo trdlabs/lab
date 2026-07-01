@@ -25,6 +25,7 @@ import { NoopStrategyRetrievalIndexer } from '../../src/operator/noop-strategy-r
 import { InMemoryTokenUsageRepository } from '../../src/adapters/repository/in-memory-token-usage.repository.ts';
 import { NullModelPricing } from '../../src/adapters/pricing/null-model-pricing.ts';
 import { InMemoryResearchExperimentRepository } from '../../src/adapters/repository/in-memory-research-experiment.repository.ts';
+import { MockRunTradesAdapter } from '../../src/adapters/platform/mock-run-trades.adapter.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -61,6 +62,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     actionProposals: new InMemoryActionProposalRepository(),
     strategyRetrievalIndexer: new NoopStrategyRetrievalIndexer(),
     experiments: new InMemoryResearchExperimentRepository(),
+    runTrades: new MockRunTradesAdapter(),
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

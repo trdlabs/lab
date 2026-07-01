@@ -20,6 +20,7 @@ import type { AppServices } from './orchestrator/app-services.ts';
 import type { StrategyAnalystPort } from './ports/strategy-analyst.port.ts';
 import { MockPlatformGatewayAdapter } from './adapters/platform/mock-platform-gateway.adapter.ts';
 import { selectResearchPlatform } from './adapters/platform/select-research-platform.ts';
+import { selectRunTrades } from './adapters/platform/select-run-trades.ts';
 import { selectBotResults } from './adapters/platform/select-bot-results.ts';
 import { selectMarketHistory } from './adapters/platform/select-market-history.ts';
 import { selectTradeEvidence } from './adapters/platform/select-trade-evidence.ts';
@@ -269,6 +270,7 @@ export function composeRuntime() {
     defaultPlatformRun: { datasetId: 'ESPORTSUSDT:1h', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-19' }, seed: 42 },
     researchDefaultSymbol: 'ESPORTSUSDT',
     experiments: new DrizzleResearchExperimentRepository(db),
+    runTrades: selectRunTrades(env.TRADING_PLATFORM_INTEGRATION),
   };
 
   const router = new WorkflowRouter();
