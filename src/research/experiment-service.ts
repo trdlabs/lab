@@ -259,20 +259,20 @@ export class ExperimentService {
   private async runStrategyMember(
     experimentId: string, role: MemberRole, input: RunStrategyBaselineValidationInput, run: PlatformRunConfig,
   ): Promise<StrategyExperimentRunResult> {
-    const memberId = this.d.newId('mem');
-    const member: ExperimentRunMember = {
-      id: memberId, experimentId, role, periodFrom: run.period.from, periodTo: run.period.to,
-      symbols: [...run.symbols], paramsHash: '', bundleHash: input.strategyBundle.bundleHash, createdAt: this.d.now(),
-    };
-    await this.d.experiments.addMember(member);
+    // Executor runs FIRST: if it throws, no member row is ever written (member XOR invariant —
+    // a persisted member must reference exactly one of backtestRunId / strategyBacktestRunId).
     const outcome = await this.d.strategyRunExecutor.execute({
       experimentId, role, strategyBundle: input.strategyBundle, strategyProfileId: input.strategyProfileId,
       run, params: {}, metrics: [...input.metrics],
     });
-    await this.d.experiments.updateMember(memberId, {
+    const memberId = this.d.newId('mem');
+    const member: ExperimentRunMember = {
+      id: memberId, experimentId, role, periodFrom: run.period.from, periodTo: run.period.to,
+      symbols: [...run.symbols], paramsHash: '', bundleHash: input.strategyBundle.bundleHash,
       strategyBacktestRunId: outcome.runId, tradeCount: outcome.totalTrades,
-      resultSummary: { totalTrades: outcome.totalTrades },
-    });
+      resultSummary: { totalTrades: outcome.totalTrades }, createdAt: this.d.now(),
+    };
+    await this.d.experiments.addMember(member);
     await this.d.events.append({
       id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.member.completed',
       payload: {

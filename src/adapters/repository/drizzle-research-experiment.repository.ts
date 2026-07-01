@@ -74,6 +74,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
   async addMember(m: ExperimentRunMember): Promise<void> {
     await this.db.insert(experimentRunMember).values({
       id: m.id, experimentId: m.experimentId, backtestRunId: m.backtestRunId ?? null,
+      strategyBacktestRunId: m.strategyBacktestRunId ?? null,
       role: m.role, foldId: m.foldId ?? null,
       periodFrom: new Date(m.periodFrom), periodTo: new Date(m.periodTo),
       symbols: m.symbols, paramsHash: m.paramsHash, bundleHash: m.bundleHash,

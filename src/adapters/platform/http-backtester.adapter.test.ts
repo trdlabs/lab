@@ -10,8 +10,9 @@ import type {
   ModuleValidateRequest as BtModuleValidateRequest,
   RegistryDescriptor,
 } from '@trading-backtester/sdk/contracts';
-import type { RunJobHandle, SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
+import type { RunJobHandle, SubmitOverlayRunOptions, SubmitStrategyResearchRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
+import type { AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { GatewayRunError } from './gateway-errors.ts';
 import { HttpBacktesterAdapter, type BacktesterClientLike } from './http-backtester.adapter.ts';
 
@@ -121,6 +122,22 @@ const opts: SubmitOverlayRunOptions = {
   resumeToken: 't1',
 };
 
+const strategyBundle: AssembledStrategyBundle = {
+  bytes: new Uint8Array(),
+  source: '',
+  manifest: { id: 'strat_x', version: '2', kind: 'strategy' } as any,
+  bundleHash: 'sha256:sb',
+};
+
+const strategyOpts: SubmitStrategyResearchRunOptions = {
+  run: { datasetId: 'smoke', symbols: ['BTC'], timeframe: '1m', period: { from: 'a', to: 'b' }, seed: 42 },
+  correlationId: 'c2',
+  metrics: ['pnl', 'sharpe'],
+  resumeToken: 't2',
+  workflowId: 'wf1',
+  callbackUrl: 'https://cb.example/hook',
+};
+
 describe('HttpBacktesterAdapter', () => {
   it('submits via the client with an overlay moduleBundle + baseline moduleRef', async () => {
     const fake = new FakeClient();
@@ -197,6 +214,23 @@ describe('HttpBacktesterAdapter', () => {
     const fake = new FakeClient();
     await new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, opts);
     expect(fake.submitted?.engine).toBe('overlay');
+  });
+
+  it('submitStrategyResearchRun sends engine:strategy with the bundle manifest as moduleRef, the run config, and passthrough resumeToken/workflowId/callbackUrl', async () => {
+    const fake = new FakeClient();
+    const handle = await new HttpBacktesterAdapter(fake).submitStrategyResearchRun(strategyBundle, strategyOpts);
+    expect(handle.status).toBe('accepted');
+    expect(fake.submitted?.engine).toBe('strategy');
+    expect(fake.submitted?.moduleRef).toEqual({ id: 'strat_x', version: '2' });
+    expect(fake.submitted?.moduleBundle?.manifest.kind).toBe('strategy');
+    expect(fake.submitted?.metrics).toEqual(['pnl', 'sharpe']);
+    expect(fake.submitted?.period).toEqual({ from: 'a', to: 'b' });
+    expect(fake.submitted?.symbols).toEqual(['BTC']);
+    expect(fake.submitted?.seed).toBe(42);
+    expect(fake.submitted?.datasetRef).toBe('smoke');
+    expect(fake.submitted?.resumeToken).toBe('t2');
+    expect(fake.submitted?.workflowId).toBe('wf1');
+    expect(fake.submitted?.callbackUrl).toBe('https://cb.example/hook');
   });
 
   it('maps an overlay result: runKind=baseline-vs-variant, comparison populated from metricDeltas', async () => {

@@ -154,4 +154,31 @@ describe('runStrategyBaselineValidation', () => {
     expect(exp?.verdict).toBe('PAPER_CANDIDATE');
     expect(exp?.experimentType).toBe('strategy_baseline_validation');
   });
+
+  it('executor throws on sanity → rejects and leaves no dangling member (member XOR invariant)', async () => {
+    class ThrowingStrategyExecutor implements StrategyExperimentRunExecutor {
+      async execute(_req: StrategyExperimentRunRequest): Promise<StrategyExperimentRunResult> {
+        throw new Error('engine unreachable');
+      }
+    }
+    const experiments = new InMemoryResearchExperimentRepository();
+    const runTrades = new FakeRunTradesAdapter({});
+    let counter = 0;
+    const svc = new ExperimentService({
+      experiments,
+      runTrades,
+      runExecutor: new NeverOverlayExecutor(),
+      strategyRunExecutor: new ThrowingStrategyExecutor(),
+      newId: (p) => `${p}-${++counter}`,
+      now: () => '2026-01-01T00:00:00.000Z',
+      events: { append: async () => {}, listByTask: async () => [] },
+    });
+
+    await expect(svc.runStrategyBaselineValidation(baseInput())).rejects.toThrow('engine unreachable');
+
+    // The experiment row itself is created before the throwing sanity call — real: id 'exp-1'
+    // (first newId call). No member must exist referencing neither run id (dangling XOR breach).
+    const members = await experiments.listMembers('exp-1');
+    expect(members).toHaveLength(0);
+  });
 });
