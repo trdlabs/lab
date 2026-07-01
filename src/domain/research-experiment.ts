@@ -4,7 +4,8 @@ export type ExperimentType =
   | 'walk_forward'
   | 'walk_forward_optimization'
   | 'robustness_suite'
-  | 'regression_suite';
+  | 'regression_suite'
+  | 'strategy_baseline_validation';
 
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type MemberRole = 'sanity' | 'train' | 'holdout' | 'targeted' | 'regression';
@@ -89,6 +90,7 @@ export interface ExperimentRunMember {
   id: string;
   experimentId: string;
   backtestRunId?: string;
+  strategyBacktestRunId?: string;
   role: MemberRole;
   foldId?: number;
   periodFrom: string;

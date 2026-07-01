@@ -102,6 +102,7 @@ export function toExperimentDto(e: ResearchExperiment): ExperimentDto {
 export function toExperimentRunMemberDto(m: ExperimentRunMember): ExperimentRunMemberDto {
   return {
     id: m.id, experimentId: m.experimentId, backtestRunId: m.backtestRunId ?? null,
+    strategyBacktestRunId: m.strategyBacktestRunId ?? null,
     role: m.role, foldId: m.foldId ?? null, periodFrom: m.periodFrom, periodTo: m.periodTo,
     symbols: m.symbols, tradeCount: m.tradeCount ?? null, resultSummary: m.resultSummary ?? null,
     createdAt: m.createdAt,

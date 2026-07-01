@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toHypothesisListItem, toHypothesisDetail, toBacktestDto, toAgentEventDto } from './mappers.ts';
+import { toHypothesisListItem, toHypothesisDetail, toBacktestDto, toAgentEventDto, toExperimentRunMemberDto } from './mappers.ts';
 import type { HypothesisProposal } from '../domain/hypothesis.ts';
 import type { BacktestRun } from '../domain/backtest-run.ts';
 import type { AgentEventRow } from '../ports/agent-event-read.port.ts';
@@ -102,5 +102,17 @@ describe('agent-event mapper (deny-by-default)', () => {
 
   it('derives error level from type', () => {
     expect(toAgentEventDto({ id: 'e', taskId: 't', type: 'strategy_analyst.failed', payload: {}, createdAt: '2026-01-01T00:00:00.000Z' }).level).toBe('error');
+  });
+});
+
+describe('experiment run member mapper', () => {
+  it('maps strategyBacktestRunId null-preserving', () => {
+    const dto = toExperimentRunMemberDto({
+      id: 'm1', experimentId: 'e1', role: 'sanity', periodFrom: 'a', periodTo: 'b',
+      symbols: ['S'], paramsHash: '', bundleHash: 'h', createdAt: 't',
+      strategyBacktestRunId: 'sbr_1',
+    } as any);
+    expect(dto.strategyBacktestRunId).toBe('sbr_1');
+    expect(dto.backtestRunId ?? null).toBeNull();
   });
 });

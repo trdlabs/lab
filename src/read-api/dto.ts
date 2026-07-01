@@ -119,6 +119,7 @@ export interface ExperimentRunMemberDto {
   id: string;
   experimentId: string;
   backtestRunId: string | null;
+  strategyBacktestRunId: string | null;
   role: string;
   foldId: number | null;
   periodFrom: string;
