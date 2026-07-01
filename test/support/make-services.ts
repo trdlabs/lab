@@ -13,8 +13,10 @@ import { InMemoryHypothesisProposalRepository } from '../../src/adapters/reposit
 import { InMemoryHypothesisReviewRepository } from '../../src/adapters/repository/in-memory-hypothesis-review.repository.ts';
 import { InMemoryLexicalSimilarHypothesisSearch } from '../../src/adapters/similarity/in-memory-lexical-similar-hypothesis-search.ts';
 import { FakeBuilder } from '../../src/adapters/builder/fake-builder.ts';
+import { FakeStrategyBuilder } from '../../src/adapters/builder/fake-strategy-builder.ts';
 import { InMemoryHypothesisBuildRepository } from '../../src/adapters/repository/in-memory-hypothesis-build.repository.ts';
 import { InMemoryBacktestRunRepository } from '../../src/adapters/repository/in-memory-backtest-run.repository.ts';
+import { InMemoryStrategyBacktestRunRepository } from '../../src/adapters/repository/in-memory-strategy-backtest-run.repository.ts';
 import { InMemoryEvaluationRepository } from '../../src/adapters/repository/in-memory-evaluation.repository.ts';
 import { DEFAULT_EVALUATOR_THRESHOLDS } from '../../src/validation/evaluator.ts';
 import { InMemoryChatSessionRepository } from '../../src/adapters/repository/in-memory-chat-session.repository.ts';
@@ -94,6 +96,8 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     experiments,
     runTrades,
     experimentService,
+    strategyBuilder: new FakeStrategyBuilder(),
+    strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',
