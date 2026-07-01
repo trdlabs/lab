@@ -125,6 +125,7 @@ function buildSvc(
     experiments,
     runTrades,
     runExecutor: new FakeExecutor(resultFor),
+    strategyRunExecutor: { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } },
     newId: (p) => `${p}-${++counter}`,
     now: () => '2026-01-01T00:00:00.000Z',
     events: { append: async () => {}, listByTask: async () => [] },

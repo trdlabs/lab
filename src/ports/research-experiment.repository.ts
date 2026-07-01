@@ -10,7 +10,7 @@ export interface ResearchExperimentRepository {
     'status' | 'verdict' | 'verdictReason' | 'holdoutBoundary' | 'aggregateMetrics' | 'completedAt' | 'updatedAt'>>): Promise<void>;
   addMember(m: ExperimentRunMember): Promise<void>;
   updateMember(id: string, patch: Partial<Pick<ExperimentRunMember,
-    'backtestRunId' | 'tradeCount' | 'resultSummary'>>): Promise<void>;
+    'backtestRunId' | 'strategyBacktestRunId' | 'tradeCount' | 'resultSummary'>>): Promise<void>;
   listMembers(experimentId: string): Promise<ExperimentRunMember[]>;
   addEvaluation(ev: ExperimentEvaluation): Promise<void>;
 }

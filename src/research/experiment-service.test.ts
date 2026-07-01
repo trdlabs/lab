@@ -36,6 +36,7 @@ function svc(resultFor: (role: MemberRole) => ExperimentRunResult, tradesByRun: 
   const emittedEvents: Array<{ id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }> = [];
   const service = new ExperimentService({
     experiments, runTrades: new FakeRunTradesAdapter(tradesByRun), runExecutor: executor,
+    strategyRunExecutor: { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } },
     newId: (p) => `${p}-${++i}`, now: () => '2026-01-01T00:00:00.000Z',
     events: { append: async (e) => { emittedEvents.push(e); }, listByTask: async () => [] },
   });

@@ -27,6 +27,7 @@ export function expToDomain(r: ExpRow): ResearchExperiment {
 export function memToDomain(r: MemRow): ExperimentRunMember {
   return {
     id: r.id, experimentId: r.experimentId, backtestRunId: r.backtestRunId ?? undefined,
+    strategyBacktestRunId: r.strategyBacktestRunId ?? undefined,
     role: r.role, foldId: r.foldId ?? undefined,
     periodFrom: r.periodFrom.toISOString(), periodTo: r.periodTo.toISOString(),
     symbols: r.symbols, paramsHash: r.paramsHash, bundleHash: r.bundleHash,
@@ -83,6 +84,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
   async updateMember(id: string, patch: Partial<ExperimentRunMember>): Promise<void> {
     const set: Record<string, unknown> = {};
     if (patch.backtestRunId !== undefined) set.backtestRunId = patch.backtestRunId;
+    if (patch.strategyBacktestRunId !== undefined) set.strategyBacktestRunId = patch.strategyBacktestRunId;
     if (patch.tradeCount !== undefined) set.tradeCount = patch.tradeCount;
     if (patch.resultSummary !== undefined) set.resultSummary = patch.resultSummary;
     await this.db.update(experimentRunMember).set(set).where(eq(experimentRunMember.id, id));

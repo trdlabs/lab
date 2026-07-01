@@ -41,6 +41,7 @@ import { FakeBuilder } from './adapters/builder/fake-builder.ts';
 import { MastraBuilder } from './adapters/builder/mastra-builder.ts';
 import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-hypothesis-build.repository.ts';
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
+import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
 import { composeMastra } from './mastra/compose-mastra.ts';
@@ -81,6 +82,7 @@ import type { ReadApiDeps } from './read-api/deps.ts';
 import { PhoenixTraceReader } from './read-api/phoenix/phoenix-trace-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { BacktesterExperimentRunExecutor } from './research/backtester-experiment-run-executor.ts';
+import { BacktesterStrategyExperimentRunExecutor } from './research/backtester-strategy-experiment-run-executor.ts';
 import { ExperimentService } from './research/experiment-service.ts';
 
 function buildAnalyst(rt: MastraRuntime): StrategyAnalystPort {
@@ -252,10 +254,19 @@ export function composeRuntime() {
     ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
     now,
   });
+  const strategyBacktests = new DrizzleStrategyBacktestRunRepository(db);
+  const strategyRunExecutor = new BacktesterStrategyExperimentRunExecutor({
+    platform: researchPlatform,
+    strategyBacktests,
+    poll: platformPoll,
+    ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
+    now,
+  });
   const experimentService = new ExperimentService({
     experiments,
     runTrades,
     runExecutor: experimentRunExecutor,
+    strategyRunExecutor,
     newId: (p) => `${p}-${randomUUID()}`,
     now,
     events,

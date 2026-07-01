@@ -47,6 +47,14 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
         comparison: comparisonSummary('strong'),
       }),
     },
+    strategyRunExecutor: {
+      execute: async (req) => ({
+        status: 'completed' as const,
+        runId: `sr-${req.role}`,
+        platformRunId: 'plat-strategy-fake',
+        totalTrades: 90,
+      }),
+    },
     newId: (p) => `${p}-${++_id}`,
     now: () => new Date().toISOString(),
     events,
