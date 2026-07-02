@@ -20,8 +20,32 @@ export function mapWithConcurrency<T, R>(
       next += 1;
       if (i >= items.length) return;
       try {
-        results[i] = await fn(items[i] as T, i);
+        const p = fn(items[i] as T, i);
+        // Attach a rejection observer immediately, at call time — before
+        // awaiting — so `failed` is set by the FIRST handler queued for
+        // this promise (rather than only via the try/catch below, which
+        // would attach its reaction later).
+        p.then(undefined, (err: unknown) => {
+          if (!failed) {
+            failed = true;
+            firstError = err;
+          }
+        });
+        results[i] = await p;
+        // Yield one more microtask turn before re-checking `failed`. When
+        // a sibling lane's item rejects in the SAME microtask drain as
+        // this lane's item resolves, this lane's post-await continuation
+        // is queued (via `p` resolving) strictly before the sibling's
+        // rejection observer above — so without this yield, `while
+        // (!failed)` below would read a stale `false` and this lane would
+        // wrongly claim one more item before the sibling's rejection has
+        // been observed. The extra tick lets any same-drain rejection
+        // observers run first.
+        await Promise.resolve();
       } catch (err) {
+        // Covers both a synchronous throw from `fn` and `p` rejecting.
+        // The observer above may have already recorded `firstError`; this
+        // is a harmless no-op in that case.
         if (!failed) {
           failed = true;
           firstError = err;
