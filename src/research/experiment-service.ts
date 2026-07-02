@@ -2,7 +2,7 @@ import type { Ref, PlatformRunConfig } from '../ports/research-platform.port.ts'
 import type { ModuleBundle } from '../domain/module-bundle.ts';
 import type {
   ResearchExperiment, ExperimentRunMember, ExperimentEvaluation, ExperimentVerdict,
-  MemberRole, DatasetScope, HoldoutPolicy,
+  MemberRole, DatasetScope, HoldoutPolicy, ParameterGrid,
 } from '../domain/research-experiment.ts';
 import { DEFAULT_HOLDOUT_POLICY } from '../domain/research-experiment.ts';
 import type { ResearchExperimentRepository } from '../ports/research-experiment.repository.ts';
@@ -11,12 +11,31 @@ import type { ExperimentRunExecutor, ExperimentRunResult } from './experiment-ru
 import type { StrategyExperimentRunExecutor, StrategyExperimentRunResult } from './strategy-experiment-run-executor.ts';
 import type { AgentEventRepository } from '../ports/agent-event.repository.ts';
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
+import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import { resolveHoldoutBoundary } from './holdout-boundary-resolver.ts';
 import { evaluateExperiment, EXPERIMENT_EVALUATOR_VERSION } from '../validation/experiment-evaluator.ts';
 import { evaluateStrategyBaseline, STRATEGY_BASELINE_EVALUATOR_VERSION } from '../validation/strategy-baseline-evaluator.ts';
 import { computeExperimentKey } from './experiment-identity.ts';
-import { computeStrategyExperimentKey } from './strategy-run-identity.ts';
+import { computeStrategyExperimentKey, computeStrategyParamsHash } from './strategy-run-identity.ts';
+import { computeWfoExperimentKey } from './wfo-experiment-identity.ts';
 import { encodeTrainPeriod, encodeHoldoutPeriod } from './period-encoding.ts';
+import { classifyEntryAffectingParams } from '../domain/wfo.ts';
+import type { Gate1DecisionPort, SweepDesignerPort, ResultInterpreterPort } from '../ports/wfo-agents.port.ts';
+import type { ParamGridRunner } from './param-grid-runner.ts';
+import type { StrategyBacktestRunRepository } from '../ports/strategy-backtest-run.repository.ts';
+import type { GridPoint } from './param-grid.ts';
+import { GridTooLargeError } from './param-grid.ts';
+import type { GridResult, RankedPoint } from './top-n-prefilter.ts';
+import { stableStringify } from '../orchestrator/handlers/backtest-support.ts';
+
+export interface WfoBudget {
+  maxRounds: number;
+  maxPointsPerRound: number;
+  minTradesTrain: number;
+  topN: number;
+}
+
+export const DEFAULT_WFO_BUDGET: WfoBudget = { maxRounds: 2, maxPointsPerRound: 8, minTradesTrain: 3, topN: 3 };
 
 export interface ExperimentServiceDeps {
   experiments: ResearchExperimentRepository;
@@ -26,6 +45,28 @@ export interface ExperimentServiceDeps {
   newId: (prefix: string) => string;
   now: () => string; // ISO
   events: AgentEventRepository;
+  gate1: Gate1DecisionPort;
+  sweepDesigner: SweepDesignerPort;
+  resultInterpreter: ResultInterpreterPort;
+  paramGridRunner: ParamGridRunner;
+  strategyBacktests: StrategyBacktestRunRepository;
+  wfoBudget?: WfoBudget;
+}
+
+/** Merges a newly-designed round grid into the running union (dedupes values per key by stable-stringify identity). */
+function mergeGrids(base: ParameterGrid, addition: Record<string, unknown[]>): ParameterGrid {
+  const out: ParameterGrid = { ...base };
+  for (const [key, values] of Object.entries(addition)) {
+    const existingValues = out[key] ?? [];
+    const seen = new Set(existingValues.map((v) => stableStringify(v)));
+    const merged = [...existingValues];
+    for (const v of values) {
+      const s = stableStringify(v);
+      if (!seen.has(s)) { seen.add(s); merged.push(v); }
+    }
+    out[key] = merged;
+  }
+  return out;
 }
 
 export interface RunStrategyBaselineValidationInput {
@@ -50,6 +91,18 @@ export interface RunNewStrategyValidationInput {
   objective?: string;
   runConfig: Omit<PlatformRunConfig, 'period'>; // datasetId, symbols, timeframe, seed
   params: Record<string, unknown>;              // request.params overlay ({} if none)
+  taskId: string;
+}
+
+export interface RunWfoInput {
+  baselineExperimentId: string;         // an existing completed strategy_baseline experiment
+  strategyBundle: AssembledStrategyBundle;
+  profile: StrategyProfile;
+  strategyProfileId: string;
+  datasetScope: DatasetScope;
+  runConfig: Omit<PlatformRunConfig, 'period'>;
+  metrics: readonly string[];
+  entrySignalEvidence?: boolean;        // GATE1 evidence flag for a 0-trade baseline; defaults false
   taskId: string;
 }
 
@@ -282,5 +335,221 @@ export class ExperimentService {
       createdAt: this.d.now(),
     });
     return outcome;
+  }
+
+  /**
+   * 1-fold walk-forward optimization decision contour: GATE1 → LLM-designed sweep round(s) →
+   * ParamGridRunner (ledgers every point) → result-interpreter select/extend/stop → one OOS
+   * holdout run → evaluateStrategyBaseline verdict. Mirrors runStrategyBaselineValidation's
+   * dedup/create/finalize structure; leaves the baseline lane (runStrategyMember) untouched.
+   */
+  async runWalkForwardOptimization(
+    input: RunWfoInput,
+  ): Promise<{ experimentId: string; verdict: ExperimentVerdict; terminalReason: string }> {
+    const budget = this.d.wfoBudget ?? DEFAULT_WFO_BUDGET;
+    const bundleHash = input.strategyBundle.bundleHash;
+
+    // --- Baseline metrics + boundary source (§ brief) ---
+    const baseline = await this.d.experiments.findById(input.baselineExperimentId);
+    if (!baseline) throw new Error(`runWalkForwardOptimization: baseline experiment not found: ${input.baselineExperimentId}`);
+    const baselineMembers = await this.d.experiments.listMembers(input.baselineExperimentId);
+    const baselineRunMember = baselineMembers.find((m) => m.role === 'sanity') ?? baselineMembers.find((m) => m.role === 'holdout');
+    if (!baselineRunMember?.strategyBacktestRunId) {
+      throw new Error('runWalkForwardOptimization: baseline experiment has no sanity/holdout member with a strategyBacktestRunId');
+    }
+    const baselineRun = await this.d.strategyBacktests.findById(baselineRunMember.strategyBacktestRunId);
+    if (!baselineRun?.metrics) throw new Error('runWalkForwardOptimization: baseline strategy backtest run has no metrics');
+    const baselineMetrics = baselineRun.metrics;
+
+    let boundary = baseline.holdoutBoundary;
+    if (!boundary) {
+      const trades = await this.d.runTrades.getRunTrades(baselineRun.platformRunId);
+      boundary = resolveHoldoutBoundary(trades, input.datasetScope.period, baseline.holdoutPolicy);
+    }
+
+    // --- Dedup / create (mirrors runStrategyBaselineValidation) ---
+    const experimentKey = computeWfoExperimentKey({ baselineExperimentId: input.baselineExperimentId, bundleHash });
+    const existing = await this.d.experiments.findByKey(experimentKey);
+    if (existing && existing.status === 'completed') {
+      return { experimentId: existing.id, verdict: existing.verdict ?? 'INCONCLUSIVE', terminalReason: existing.verdictReason ?? 'inconclusive' };
+    }
+
+    const now = this.d.now();
+    const experimentId = existing?.id ?? this.d.newId('exp');
+    if (!existing) {
+      const exp: ResearchExperiment = {
+        id: experimentId, experimentKey, experimentType: 'walk_forward_optimization',
+        strategyProfileId: input.strategyProfileId, bundleHash, parameterGrid: {},
+        datasetScope: input.datasetScope, holdoutPolicy: baseline.holdoutPolicy, holdoutBoundary: boundary,
+        status: 'running', createdAt: now, updatedAt: now,
+      };
+      await this.d.experiments.createExperiment(exp);
+      await this.d.events.append({
+        id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.started',
+        payload: { experimentId, strategyProfileId: input.strategyProfileId, experimentType: 'walk_forward_optimization' },
+        createdAt: this.d.now(),
+      });
+    }
+
+    const finalize = async (
+      verdict: ExperimentVerdict, terminalReason: string,
+    ): Promise<{ experimentId: string; verdict: ExperimentVerdict; terminalReason: string }> => {
+      await this.d.experiments.updateExperiment(experimentId, {
+        status: 'completed', verdict, verdictReason: terminalReason, completedAt: this.d.now(), updatedAt: this.d.now(),
+      });
+      await this.d.events.append({
+        id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.completed',
+        payload: { experimentId, verdict, verdictReason: terminalReason, experimentType: 'walk_forward_optimization' },
+        createdAt: this.d.now(),
+      });
+      return { experimentId, verdict, terminalReason };
+    };
+
+    // --- GATE1 ---
+    const { entryAffecting } = classifyEntryAffectingParams(input.profile.profile.parameters);
+    const hasEntrySignalEvidence = baselineMetrics.totalTrades > 0 || input.entrySignalEvidence === true;
+    const gate1Decision = await this.d.gate1.decide({
+      profile: input.profile, baselineMetrics, entryAffecting, hasEntrySignalEvidence,
+    });
+    if (gate1Decision.decision === 'stop_not_worth' || gate1Decision.decision === 'stop_insufficient_evidence') {
+      return finalize('INCONCLUSIVE', gate1Decision.decision);
+    }
+
+    // --- mode:'none' cap: no valid split boundary → no OOS possible (live 6-day-slice path) ---
+    if (boundary.mode === 'none' || !boundary.t) {
+      return finalize('INCONCLUSIVE', 'inconclusive');
+    }
+    const T = boundary.t;
+
+    // --- Round loop ---
+    let unionGrid: ParameterGrid = existing?.parameterGrid ? { ...existing.parameterGrid } : {};
+    let selected: { point: GridPoint; foldId: number } | undefined;
+
+    for (let r = 1; r <= budget.maxRounds; r += 1) {
+      const tunableParams = input.profile.profile.parameters.filter((p) => p.tunable);
+      const sweep = await this.d.sweepDesigner.design({
+        profile: input.profile, baselineTrainSummary: baselineMetrics, tunableParams,
+        restrictToEntryParams: gate1Decision.decision === 'allow_exploratory_sweep',
+        periodTo: T, maxPoints: budget.maxPointsPerRound,
+      });
+
+      unionGrid = mergeGrids(unionGrid, sweep.grid);
+      await this.d.experiments.updateExperiment(experimentId, { parameterGrid: unionGrid, updatedAt: this.d.now() });
+
+      const trainRun: PlatformRunConfig = {
+        ...input.runConfig, period: encodeTrainPeriod(input.datasetScope.period.from, T, input.runConfig.timeframe),
+      };
+
+      let allResults: GridResult[];
+      let ranked: RankedPoint[];
+      try {
+        ({ allResults, ranked } = await this.d.paramGridRunner.runGrid({
+          experimentId, strategyBundle: input.strategyBundle, strategyProfileId: input.strategyProfileId,
+          trainRun, grid: sweep.grid, metrics: input.metrics, maxPoints: budget.maxPointsPerRound,
+          topN: budget.topN, minTradesTrain: budget.minTradesTrain, foldId: r - 1,
+        }));
+      } catch (err) {
+        if (err instanceof GridTooLargeError) return finalize('INCONCLUSIVE', 'grid_too_large');
+        throw err;
+      }
+
+      // Ledger invariant: ONE member per allResults element (incl. rejected/zero-trade) — the
+      // top-N (`ranked`) is passed ONLY to the result-interpreter below, never gates the ledger.
+      for (const result of allResults) {
+        await this.writeStrategyMember({
+          experimentId, role: 'train', run: trainRun, params: result.point, oos: false,
+          foldId: r - 1, strategyBacktestRunId: result.strategyBacktestRunId,
+          tradeCount: result.tradeCount, bundleHash, taskId: input.taskId,
+        });
+      }
+
+      if (ranked.length === 0) return finalize('INCONCLUSIVE', 'sweep_failed');
+
+      const interpretation = await this.d.resultInterpreter.interpret({
+        topN: ranked, periodTo: T, roundsSoFar: r, maxRounds: budget.maxRounds,
+      });
+
+      if (interpretation.decision === 'select') {
+        const chosen = allResults.find((res) => res.paramsHash === interpretation.chosenParamsHash);
+        if (!chosen) return finalize('INCONCLUSIVE', 'sweep_failed');
+        selected = { point: chosen.point, foldId: r - 1 };
+        break;
+      }
+      if (interpretation.decision === 'stop') return finalize('INCONCLUSIVE', 'stop');
+      // extend
+      if (r >= budget.maxRounds) return finalize('INCONCLUSIVE', 'round_limit_reached');
+    }
+    if (!selected) return finalize('INCONCLUSIVE', 'round_limit_reached');
+
+    // --- On select: ONE holdout OOS run ---
+    const holdoutRun: PlatformRunConfig = {
+      ...input.runConfig, period: encodeHoldoutPeriod(T, input.datasetScope.period.to),
+    };
+    const holdoutOutcome = await this.d.strategyRunExecutor.execute({
+      experimentId, role: 'holdout', strategyBundle: input.strategyBundle, strategyProfileId: input.strategyProfileId,
+      run: holdoutRun, params: selected.point, metrics: [...input.metrics],
+    });
+    await this.writeStrategyMember({
+      experimentId, role: 'holdout', run: holdoutRun, params: selected.point, oos: true,
+      foldId: selected.foldId, strategyBacktestRunId: holdoutOutcome.runId,
+      tradeCount: holdoutOutcome.totalTrades, bundleHash, taskId: input.taskId,
+    });
+
+    if (holdoutOutcome.status !== 'completed' || !holdoutOutcome.metrics) {
+      return finalize('INCONCLUSIVE', 'inconclusive');
+    }
+
+    const result = evaluateStrategyBaseline({ holdout: holdoutOutcome.metrics, boundary });
+    const evaluation: ExperimentEvaluation = {
+      id: this.d.newId('expeval'), experimentId, evaluatorVersion: STRATEGY_BASELINE_EVALUATOR_VERSION,
+      rawScores: result.rawScores, flags: result.flags, verdict: result.verdict,
+      verdictReason: result.verdictReason, createdAt: this.d.now(),
+    };
+    await this.d.experiments.addEvaluation(evaluation);
+
+    const terminalReason = result.verdict === 'PAPER_CANDIDATE' ? 'paper_candidate'
+      : result.verdict === 'FAIL' ? 'holdout_failed'
+      : 'inconclusive';
+
+    await this.d.experiments.updateExperiment(experimentId, {
+      status: 'completed', verdict: result.verdict, verdictReason: terminalReason,
+      aggregateMetrics: { trainTrades: boundary.trainTrades, holdoutTrades: boundary.holdoutTrades, flags: result.flags },
+      completedAt: this.d.now(), updatedAt: this.d.now(),
+    });
+    await this.d.events.append({
+      id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.completed',
+      payload: { experimentId, verdict: result.verdict, verdictReason: terminalReason, experimentType: 'walk_forward_optimization' },
+      createdAt: this.d.now(),
+    });
+    return { experimentId, verdict: result.verdict, terminalReason };
+  }
+
+  /** WFO-only member writer (train ledger + the single holdout row); baseline's runStrategyMember is untouched. */
+  private async writeStrategyMember(args: {
+    experimentId: string; role: MemberRole; run: PlatformRunConfig;
+    params: Record<string, unknown>; oos: boolean; foldId: number;
+    strategyBacktestRunId: string; tradeCount?: number; bundleHash: string; taskId: string;
+  }): Promise<void> {
+    const paramsHash = computeStrategyParamsHash({ bundleHash: args.bundleHash, platformRun: args.run, params: args.params });
+    const memberId = this.d.newId('mem');
+    const member: ExperimentRunMember = {
+      id: memberId, experimentId: args.experimentId, role: args.role,
+      periodFrom: args.run.period.from, periodTo: args.run.period.to,
+      symbols: [...args.run.symbols], paramsHash, params: args.params, oos: args.oos, foldId: args.foldId,
+      bundleHash: args.bundleHash, strategyBacktestRunId: args.strategyBacktestRunId, backtestRunId: undefined,
+      tradeCount: args.tradeCount,
+      resultSummary: args.tradeCount !== undefined ? { totalTrades: args.tradeCount } : undefined,
+      createdAt: this.d.now(),
+    };
+    await this.d.experiments.addMember(member);
+    await this.d.events.append({
+      id: this.d.newId('evt'), taskId: args.taskId, type: 'experiment.member.completed',
+      payload: {
+        experimentId: args.experimentId, role: args.role, oos: args.oos, foldId: args.foldId,
+        tradeCount: args.tradeCount, strategyBacktestRunId: args.strategyBacktestRunId,
+        experimentType: 'walk_forward_optimization',
+      },
+      createdAt: this.d.now(),
+    });
   }
 }

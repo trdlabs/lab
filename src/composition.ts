@@ -89,6 +89,10 @@ import { randomUUID } from 'node:crypto';
 import { BacktesterExperimentRunExecutor } from './research/backtester-experiment-run-executor.ts';
 import { BacktesterStrategyExperimentRunExecutor } from './research/backtester-strategy-experiment-run-executor.ts';
 import { ExperimentService } from './research/experiment-service.ts';
+import { ParamGridRunner } from './research/param-grid-runner.ts';
+import { FakeGate1 } from './adapters/wfo/fake-gate1.ts';
+import { FakeSweepDesigner } from './adapters/wfo/fake-sweep-designer.ts';
+import { FakeResultInterpreter } from './adapters/wfo/fake-result-interpreter.ts';
 
 function buildAnalyst(rt: MastraRuntime): StrategyAnalystPort {
   const e = rt.agents.analyst;
@@ -283,6 +287,10 @@ export function composeRuntime() {
     ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
     now,
   });
+  // WFO agent adapters + ParamGridRunner: provisionally wired to the deterministic Fakes here;
+  // env-driven mastra/fake adapter selection (mirroring buildCritic/buildStrategyCritic) lands
+  // in a follow-up composition task — this keeps composeRuntime() constructible today.
+  const paramGridRunner = new ParamGridRunner({ strategyRunExecutor });
   const experimentService = new ExperimentService({
     experiments,
     runTrades,
@@ -291,6 +299,11 @@ export function composeRuntime() {
     newId: (p) => `${p}-${randomUUID()}`,
     now,
     events,
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner,
+    strategyBacktests,
   });
 
   const services: AppServices = {

@@ -30,13 +30,27 @@ import { InMemoryResearchExperimentRepository } from '../../src/adapters/reposit
 import { MockRunTradesAdapter } from '../../src/adapters/platform/mock-run-trades.adapter.ts';
 import { ExperimentService } from '../../src/research/experiment-service.ts';
 import { comparisonSummary } from '../../src/validation/__fixtures__/comparison-summary.ts';
+import { ParamGridRunner } from '../../src/research/param-grid-runner.ts';
+import { FakeGate1 } from '../../src/adapters/wfo/fake-gate1.ts';
+import { FakeSweepDesigner } from '../../src/adapters/wfo/fake-sweep-designer.ts';
+import { FakeResultInterpreter } from '../../src/adapters/wfo/fake-result-interpreter.ts';
+import type { StrategyExperimentRunExecutor } from '../../src/research/strategy-experiment-run-executor.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
   const experiments = new InMemoryResearchExperimentRepository();
   const runTrades = new MockRunTradesAdapter();
   const events = overrides.events ?? new InMemoryAgentEventRepository();
+  const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
   let _id = 0;
+  const strategyRunExecutor: StrategyExperimentRunExecutor = {
+    execute: async (req) => ({
+      status: 'completed' as const,
+      runId: `sr-${req.role}`,
+      platformRunId: 'plat-strategy-fake',
+      totalTrades: 90,
+    }),
+  };
   const experimentService = new ExperimentService({
     experiments: overrides.experiments ?? experiments,
     runTrades: overrides.runTrades ?? runTrades,
@@ -49,17 +63,15 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
         comparison: comparisonSummary('strong'),
       }),
     },
-    strategyRunExecutor: {
-      execute: async (req) => ({
-        status: 'completed' as const,
-        runId: `sr-${req.role}`,
-        platformRunId: 'plat-strategy-fake',
-        totalTrades: 90,
-      }),
-    },
+    strategyRunExecutor,
     newId: (p) => `${p}-${++_id}`,
     now: () => new Date().toISOString(),
     events,
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
+    strategyBacktests,
   });
   return {
     taskQueue: new InMemoryQueueAdapter(),
@@ -97,7 +109,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     runTrades,
     experimentService,
     strategyBuilder: new FakeStrategyBuilder(),
-    strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
+    strategyBacktests,
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

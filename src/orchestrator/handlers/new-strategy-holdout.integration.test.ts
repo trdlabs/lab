@@ -20,6 +20,11 @@ import type { ResearchExperiment, ExperimentRunMember } from '../../domain/resea
 import type { HypothesisProposal } from '../../domain/hypothesis.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchTask } from '../../domain/types.ts';
+import { ParamGridRunner } from '../../research/param-grid-runner.ts';
+import { FakeGate1 } from '../../adapters/wfo/fake-gate1.ts';
+import { FakeSweepDesigner } from '../../adapters/wfo/fake-sweep-designer.ts';
+import { FakeResultInterpreter } from '../../adapters/wfo/fake-result-interpreter.ts';
+import { InMemoryStrategyBacktestRunRepository } from '../../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -121,14 +126,20 @@ function buildSvc(
   const experiments = new InMemoryResearchExperimentRepository();
   const runTrades = new FakeRunTradesAdapter(tradesByRun);
   let counter = 0;
+  const strategyRunExecutor = { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } };
   const svc = new CapturingExperimentService({
     experiments,
     runTrades,
     runExecutor: new FakeExecutor(resultFor),
-    strategyRunExecutor: { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } },
+    strategyRunExecutor,
     newId: (p) => `${p}-${++counter}`,
     now: () => '2026-01-01T00:00:00.000Z',
     events: { append: async () => {}, listByTask: async () => [] },
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
+    strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
   });
   return { svc, experiments };
 }

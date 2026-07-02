@@ -7,6 +7,11 @@ import { comparisonSummary } from '../validation/__fixtures__/comparison-summary
 import { DEFAULT_HOLDOUT_POLICY, type MemberRole, type TradeRecord } from '../domain/research-experiment.ts';
 import type { ModuleBundle } from '../domain/module-bundle.ts';
 import type { Ref } from '../ports/research-platform.port.ts';
+import { ParamGridRunner } from './param-grid-runner.ts';
+import { FakeGate1 } from '../adapters/wfo/fake-gate1.ts';
+import { FakeSweepDesigner } from '../adapters/wfo/fake-sweep-designer.ts';
+import { FakeResultInterpreter } from '../adapters/wfo/fake-result-interpreter.ts';
+import { InMemoryStrategyBacktestRunRepository } from '../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
 
 const DAY = 86_400_000; const START = Date.parse('2026-01-01T00:00:00.000Z');
 function trades(n: number): TradeRecord[] {
@@ -34,11 +39,17 @@ function svc(resultFor: (role: MemberRole) => ExperimentRunResult, tradesByRun: 
   const executor = new FakeExecutor(resultFor);
   let i = 0;
   const emittedEvents: Array<{ id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }> = [];
+  const strategyRunExecutor = { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } };
   const service = new ExperimentService({
     experiments, runTrades: new FakeRunTradesAdapter(tradesByRun), runExecutor: executor,
-    strategyRunExecutor: { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } },
+    strategyRunExecutor,
     newId: (p) => `${p}-${++i}`, now: () => '2026-01-01T00:00:00.000Z',
     events: { append: async (e) => { emittedEvents.push(e); }, listByTask: async () => [] },
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
+    strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
   });
   return { service, experiments, executor, emittedEvents };
 }

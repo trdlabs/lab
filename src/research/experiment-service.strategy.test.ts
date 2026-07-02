@@ -10,6 +10,11 @@ import type { MemberRole, TradeRecord } from '../domain/research-experiment.ts';
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
 import { InMemoryResearchExperimentRepository } from '../adapters/repository/in-memory-research-experiment.repository.ts';
 import { FakeRunTradesAdapter } from '../adapters/platform/fake-run-trades.adapter.ts';
+import { ParamGridRunner } from './param-grid-runner.ts';
+import { FakeGate1 } from '../adapters/wfo/fake-gate1.ts';
+import { FakeSweepDesigner } from '../adapters/wfo/fake-sweep-designer.ts';
+import { FakeResultInterpreter } from '../adapters/wfo/fake-result-interpreter.ts';
+import { InMemoryStrategyBacktestRunRepository } from '../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -91,6 +96,11 @@ function buildSvc(
     newId: (p) => `${p}-${++counter}`,
     now: () => '2026-01-01T00:00:00.000Z',
     events: { append: async () => {}, listByTask: async () => [] },
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner: new ParamGridRunner({ strategyRunExecutor: executor }),
+    strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
   });
   return { svc, experiments, executor };
 }
@@ -164,14 +174,20 @@ describe('runStrategyBaselineValidation', () => {
     const experiments = new InMemoryResearchExperimentRepository();
     const runTrades = new FakeRunTradesAdapter({});
     let counter = 0;
+    const throwingExecutor = new ThrowingStrategyExecutor();
     const svc = new ExperimentService({
       experiments,
       runTrades,
       runExecutor: new NeverOverlayExecutor(),
-      strategyRunExecutor: new ThrowingStrategyExecutor(),
+      strategyRunExecutor: throwingExecutor,
       newId: (p) => `${p}-${++counter}`,
       now: () => '2026-01-01T00:00:00.000Z',
       events: { append: async () => {}, listByTask: async () => [] },
+      gate1: new FakeGate1(),
+      sweepDesigner: new FakeSweepDesigner(),
+      resultInterpreter: new FakeResultInterpreter(),
+      paramGridRunner: new ParamGridRunner({ strategyRunExecutor: throwingExecutor }),
+      strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
     });
 
     await expect(svc.runStrategyBaselineValidation(baseInput())).rejects.toThrow('engine unreachable');
