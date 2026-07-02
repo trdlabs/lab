@@ -38,4 +38,15 @@ describe('InMemoryResearchExperimentRepository', () => {
     expect(members[0]?.tradeCount).toBe(80);
     expect((await r.findById('exp1'))?.verdict).toBe('PAPER_CANDIDATE');
   });
+  it('round-trips parameterGrid on experiment and params/oos on member', async () => {
+    const repo = new InMemoryResearchExperimentRepository();
+    const exp = experiment({ id: 'exp2', experimentType: 'walk_forward_optimization', parameterGrid: { 'dump.minDropPct': [2, 5] } });
+    await repo.createExperiment(exp);
+    expect((await repo.findById(exp.id))?.parameterGrid).toEqual({ 'dump.minDropPct': [2, 5] });
+    await repo.addMember(member({ id: 'm3', experimentId: exp.id, role: 'train', params: { 'dump.minDropPct': 2 }, oos: false, paramsHash: 'h1' }));
+    await repo.addMember(member({ id: 'm4', experimentId: exp.id, role: 'holdout', params: { 'dump.minDropPct': 2 }, oos: true, paramsHash: 'h1' }));
+    const members = await repo.listMembers(exp.id);
+    expect(members.map((m) => m.oos)).toEqual([false, true]);
+    expect(members[0]?.params).toEqual({ 'dump.minDropPct': 2 });
+  });
 });

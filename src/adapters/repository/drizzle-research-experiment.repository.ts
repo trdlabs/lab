@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { researchExperiment, experimentRunMember, experimentEvaluation } from '../../db/schema.ts';
 import type {
-  ResearchExperiment, ExperimentRunMember, ExperimentEvaluation,
+  ResearchExperiment, ExperimentRunMember, ExperimentEvaluation, ParameterGrid,
 } from '../../domain/research-experiment.ts';
 import type { ResearchExperimentRepository } from '../../ports/research-experiment.repository.ts';
 
@@ -15,7 +15,9 @@ export function expToDomain(r: ExpRow): ResearchExperiment {
     id: r.id, experimentKey: r.experimentKey, experimentType: r.experimentType,
     strategyProfileId: r.strategyProfileId,
     hypothesisId: r.hypothesisId ?? undefined, buildId: r.buildId ?? undefined,
-    bundleHash: r.bundleHash ?? undefined, objective: r.objective ?? undefined,
+    bundleHash: r.bundleHash ?? undefined,
+    parameterGrid: (r.parameterGrid as ParameterGrid | null) ?? undefined,
+    objective: r.objective ?? undefined,
     datasetScope: r.datasetScope, holdoutPolicy: r.holdoutPolicy,
     holdoutBoundary: r.holdoutBoundary ?? undefined,
     status: r.status, verdict: r.verdict ?? undefined, verdictReason: r.verdictReason ?? undefined,
@@ -30,7 +32,10 @@ export function memToDomain(r: MemRow): ExperimentRunMember {
     strategyBacktestRunId: r.strategyBacktestRunId ?? undefined,
     role: r.role, foldId: r.foldId ?? undefined,
     periodFrom: r.periodFrom.toISOString(), periodTo: r.periodTo.toISOString(),
-    symbols: r.symbols, paramsHash: r.paramsHash, bundleHash: r.bundleHash,
+    symbols: r.symbols, paramsHash: r.paramsHash,
+    params: (r.params as Record<string, unknown> | null) ?? undefined,
+    oos: r.oos ?? undefined,
+    bundleHash: r.bundleHash,
     tradeCount: r.tradeCount ?? undefined, resultSummary: r.resultSummary ?? undefined,
     createdAt: r.createdAt.toISOString(),
   };
@@ -44,7 +49,9 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
     await this.db.insert(researchExperiment).values({
       id: e.id, experimentKey: e.experimentKey, experimentType: e.experimentType,
       strategyProfileId: e.strategyProfileId, hypothesisId: e.hypothesisId ?? null,
-      buildId: e.buildId ?? null, bundleHash: e.bundleHash ?? null, objective: e.objective ?? null,
+      buildId: e.buildId ?? null, bundleHash: e.bundleHash ?? null,
+      parameterGrid: e.parameterGrid ?? null,
+      objective: e.objective ?? null,
       datasetScope: e.datasetScope, holdoutPolicy: e.holdoutPolicy,
       holdoutBoundary: e.holdoutBoundary ?? null, status: e.status,
       verdict: e.verdict ?? null, verdictReason: e.verdictReason ?? null,
@@ -68,6 +75,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
     if (patch.verdictReason !== undefined) set.verdictReason = patch.verdictReason;
     if (patch.holdoutBoundary !== undefined) set.holdoutBoundary = patch.holdoutBoundary;
     if (patch.aggregateMetrics !== undefined) set.aggregateMetrics = patch.aggregateMetrics;
+    if (patch.parameterGrid !== undefined) set.parameterGrid = patch.parameterGrid;
     if (patch.completedAt !== undefined) set.completedAt = patch.completedAt ? new Date(patch.completedAt) : null;
     await this.db.update(researchExperiment).set(set).where(eq(researchExperiment.id, id));
   }
@@ -77,7 +85,9 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
       strategyBacktestRunId: m.strategyBacktestRunId ?? null,
       role: m.role, foldId: m.foldId ?? null,
       periodFrom: new Date(m.periodFrom), periodTo: new Date(m.periodTo),
-      symbols: m.symbols, paramsHash: m.paramsHash, bundleHash: m.bundleHash,
+      symbols: m.symbols, paramsHash: m.paramsHash,
+      params: m.params ?? null, oos: m.oos ?? null,
+      bundleHash: m.bundleHash,
       tradeCount: m.tradeCount ?? null, resultSummary: m.resultSummary ?? null,
       createdAt: new Date(m.createdAt),
     });

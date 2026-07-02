@@ -7,6 +7,8 @@ export type ExperimentType =
   | 'regression_suite'
   | 'strategy_baseline_validation';
 
+export type ParameterGrid = Record<string, unknown[]>;
+
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type MemberRole = 'sanity' | 'train' | 'holdout' | 'targeted' | 'regression';
 export type ExperimentVerdict = 'PASS' | 'FAIL' | 'MODIFY' | 'INCONCLUSIVE' | 'PAPER_CANDIDATE';
@@ -73,6 +75,7 @@ export interface ResearchExperiment {
   hypothesisId?: string;
   buildId?: string;
   bundleHash?: string;
+  parameterGrid?: ParameterGrid;
   objective?: string;
   datasetScope: DatasetScope;
   holdoutPolicy: HoldoutPolicy;
@@ -97,6 +100,8 @@ export interface ExperimentRunMember {
   periodTo: string;
   symbols: string[];
   paramsHash: string;
+  params?: Record<string, unknown>;
+  oos?: boolean;
   bundleHash: string;
   tradeCount?: number;
   resultSummary?: MemberResultSummary;
