@@ -12,6 +12,9 @@ import { createTurnInterpreterAgent, TURN_INTERPRETER_AGENT_ID } from './agents/
 import { createStrategyCriticAgent, STRATEGY_CRITIC_AGENT_ID } from './agents/strategy-critic.agent.ts';
 import { createStrategyRefinerAgent, STRATEGY_REFINER_AGENT_ID } from './agents/strategy-refiner.agent.ts';
 import { createStrategyCriticCombinedAgent, STRATEGY_CRITIC_COMBINED_AGENT_ID } from './agents/strategy-critic-combined.agent.ts';
+import { createGate1DecisionAgent, GATE1_DECISION_AGENT_ID } from './agents/gate1-decision.agent.ts';
+import { createSweepDesignerAgent, SWEEP_DESIGNER_AGENT_ID } from './agents/sweep-designer.agent.ts';
+import { createResultInterpreterAgent, RESULT_INTERPRETER_AGENT_ID } from './agents/result-interpreter.agent.ts';
 
 export interface MastraCompositionEnv extends ModelProviderEnv {
   STRATEGY_ANALYST_ADAPTER: 'fake' | 'mastra';
@@ -29,6 +32,12 @@ export interface MastraCompositionEnv extends ModelProviderEnv {
   STRATEGY_CRITIC_MODE: 'single' | 'two_stage';
   STRATEGY_CRITIC_MODEL: string;
   STRATEGY_REFINER_MODEL: string;
+  WFO_GATE1_ADAPTER: 'fake' | 'mastra';
+  WFO_GATE1_MODEL: string;
+  WFO_SWEEP_DESIGNER_ADAPTER: 'fake' | 'mastra';
+  WFO_SWEEP_DESIGNER_MODEL: string;
+  WFO_RESULT_INTERPRETER_ADAPTER: 'fake' | 'mastra';
+  WFO_RESULT_INTERPRETER_MODEL: string;
   PHOENIX_ENABLED: boolean;
   PHOENIX_COLLECTOR_ENDPOINT: string;
   PHOENIX_PROJECT_NAME: string;
@@ -50,6 +59,9 @@ export interface MastraRuntime {
     strategyCritic?: MastraAgentEntry;
     strategyRefiner?: MastraAgentEntry;
     strategyCriticCombined?: MastraAgentEntry;
+    gate1?: MastraAgentEntry;
+    sweepDesigner?: MastraAgentEntry;
+    resultInterpreter?: MastraAgentEntry;
   };
 }
 
@@ -113,6 +125,10 @@ export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
     }
   }
 
+  if (env.WFO_GATE1_ADAPTER === 'mastra') build(GATE1_DECISION_AGENT_ID, env.WFO_GATE1_MODEL, createGate1DecisionAgent);
+  if (env.WFO_SWEEP_DESIGNER_ADAPTER === 'mastra') build(SWEEP_DESIGNER_AGENT_ID, env.WFO_SWEEP_DESIGNER_MODEL, createSweepDesignerAgent);
+  if (env.WFO_RESULT_INTERPRETER_ADAPTER === 'mastra') build(RESULT_INTERPRETER_AGENT_ID, env.WFO_RESULT_INTERPRETER_MODEL, createResultInterpreterAgent);
+
   const observability = phoenixObservability(env);
   const mastra = new Mastra({
     agents: registry,
@@ -135,6 +151,9 @@ export function composeMastra(env: MastraCompositionEnv): MastraRuntime {
       strategyCritic: entry(STRATEGY_CRITIC_AGENT_ID),
       strategyRefiner: entry(STRATEGY_REFINER_AGENT_ID),
       strategyCriticCombined: entry(STRATEGY_CRITIC_COMBINED_AGENT_ID),
+      gate1: entry(GATE1_DECISION_AGENT_ID),
+      sweepDesigner: entry(SWEEP_DESIGNER_AGENT_ID),
+      resultInterpreter: entry(RESULT_INTERPRETER_AGENT_ID),
     },
   };
 }

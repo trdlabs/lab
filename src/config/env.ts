@@ -66,6 +66,18 @@ export interface Env {
   STRATEGY_CRITIC_MODEL: string;
   /** Model for the two_stage refiner agent; defaults to STRATEGY_CRITIC_MODEL when unset. */
   STRATEGY_REFINER_MODEL: string;
+  /** WFO Gate1 decision agent: 'fake' (default, key-free) or 'mastra' (real LLM). */
+  WFO_GATE1_ADAPTER: 'fake' | 'mastra';
+  /** Model for the WFO Gate1 decision agent. */
+  WFO_GATE1_MODEL: string;
+  /** WFO sweep-designer agent: 'fake' (default, key-free) or 'mastra' (real LLM). */
+  WFO_SWEEP_DESIGNER_ADAPTER: 'fake' | 'mastra';
+  /** Model for the WFO sweep-designer agent. */
+  WFO_SWEEP_DESIGNER_MODEL: string;
+  /** WFO result-interpreter agent: 'fake' (default, key-free) or 'mastra' (real LLM). */
+  WFO_RESULT_INTERPRETER_ADAPTER: 'fake' | 'mastra';
+  /** Model for the WFO result-interpreter agent. */
+  WFO_RESULT_INTERPRETER_MODEL: string;
   /** Feature flag: enable operator RAG retrieval (default: false). */
   OPERATOR_RAG_ENABLED: boolean;
   /** Embedding provider for operator strategy retrieval (default: 'openrouter'). */
@@ -200,6 +212,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     STRATEGY_CRITIC_MODE: source.STRATEGY_CRITIC_MODE === 'two_stage' ? 'two_stage' : 'single',
     STRATEGY_CRITIC_MODEL: strategyCriticModel,
     STRATEGY_REFINER_MODEL: source.STRATEGY_REFINER_MODEL || strategyCriticModel,
+    WFO_GATE1_ADAPTER: resolveAdapter(source.WFO_GATE1_ADAPTER),
+    WFO_GATE1_MODEL: source.WFO_GATE1_MODEL ?? 'anthropic/claude-sonnet-4-6',
+    WFO_SWEEP_DESIGNER_ADAPTER: resolveAdapter(source.WFO_SWEEP_DESIGNER_ADAPTER),
+    WFO_SWEEP_DESIGNER_MODEL: source.WFO_SWEEP_DESIGNER_MODEL ?? 'anthropic/claude-sonnet-4-6',
+    WFO_RESULT_INTERPRETER_ADAPTER: resolveAdapter(source.WFO_RESULT_INTERPRETER_ADAPTER),
+    WFO_RESULT_INTERPRETER_MODEL: source.WFO_RESULT_INTERPRETER_MODEL ?? 'anthropic/claude-sonnet-4-6',
     ...loadRagEnv(source),
   };
 }

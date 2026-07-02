@@ -88,11 +88,15 @@ import { PhoenixTraceReader } from './read-api/phoenix/phoenix-trace-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { BacktesterExperimentRunExecutor } from './research/backtester-experiment-run-executor.ts';
 import { BacktesterStrategyExperimentRunExecutor } from './research/backtester-strategy-experiment-run-executor.ts';
-import { ExperimentService } from './research/experiment-service.ts';
+import { ExperimentService, DEFAULT_WFO_BUDGET } from './research/experiment-service.ts';
 import { ParamGridRunner } from './research/param-grid-runner.ts';
 import { FakeGate1 } from './adapters/wfo/fake-gate1.ts';
+import { MastraGate1 } from './adapters/wfo/mastra-gate1.ts';
 import { FakeSweepDesigner } from './adapters/wfo/fake-sweep-designer.ts';
+import { MastraSweepDesigner } from './adapters/wfo/mastra-sweep-designer.ts';
 import { FakeResultInterpreter } from './adapters/wfo/fake-result-interpreter.ts';
+import { MastraResultInterpreter } from './adapters/wfo/mastra-result-interpreter.ts';
+import type { Gate1DecisionPort, SweepDesignerPort, ResultInterpreterPort } from './ports/wfo-agents.port.ts';
 
 function buildAnalyst(rt: MastraRuntime): StrategyAnalystPort {
   const e = rt.agents.analyst;
@@ -132,6 +136,27 @@ export function buildStrategyCritic(env: ReturnType<typeof loadEnv>, rt: MastraR
     return new FakeStrategyCritic('single');
   }
   return new FakeStrategyCritic(env.STRATEGY_CRITIC_MODE);
+}
+
+export function buildGate1(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): Gate1DecisionPort {
+  const e = rt.agents.gate1;
+  if (env.WFO_GATE1_ADAPTER === 'mastra' && e) return new MastraGate1(e.agent, e.label);
+  console.warn('[composition] WFO_GATE1_ADAPTER is not "mastra"; using FakeGate1');
+  return new FakeGate1();
+}
+
+export function buildSweepDesigner(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): SweepDesignerPort {
+  const e = rt.agents.sweepDesigner;
+  if (env.WFO_SWEEP_DESIGNER_ADAPTER === 'mastra' && e) return new MastraSweepDesigner(e.agent, e.label);
+  console.warn('[composition] WFO_SWEEP_DESIGNER_ADAPTER is not "mastra"; using FakeSweepDesigner');
+  return new FakeSweepDesigner();
+}
+
+export function buildResultInterpreter(env: ReturnType<typeof loadEnv>, rt: MastraRuntime): ResultInterpreterPort {
+  const e = rt.agents.resultInterpreter;
+  if (env.WFO_RESULT_INTERPRETER_ADAPTER === 'mastra' && e) return new MastraResultInterpreter(e.agent, e.label);
+  console.warn('[composition] WFO_RESULT_INTERPRETER_ADAPTER is not "mastra"; using FakeResultInterpreter');
+  return new FakeResultInterpreter();
 }
 
 function buildTurnInterpreter(rt: MastraRuntime): TurnInterpreterPort {
@@ -287,9 +312,7 @@ export function composeRuntime() {
     ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
     now,
   });
-  // WFO agent adapters + ParamGridRunner: provisionally wired to the deterministic Fakes here;
-  // env-driven mastra/fake adapter selection (mirroring buildCritic/buildStrategyCritic) lands
-  // in a follow-up composition task — this keeps composeRuntime() constructible today.
+  // WFO agent adapters: env-driven mastra/fake adapter selection, mirroring buildCritic/buildStrategyCritic.
   const paramGridRunner = new ParamGridRunner({ strategyRunExecutor });
   const experimentService = new ExperimentService({
     experiments,
@@ -299,11 +322,12 @@ export function composeRuntime() {
     newId: (p) => `${p}-${randomUUID()}`,
     now,
     events,
-    gate1: new FakeGate1(),
-    sweepDesigner: new FakeSweepDesigner(),
-    resultInterpreter: new FakeResultInterpreter(),
+    gate1: buildGate1(env, mastraRuntime),
+    sweepDesigner: buildSweepDesigner(env, mastraRuntime),
+    resultInterpreter: buildResultInterpreter(env, mastraRuntime),
     paramGridRunner,
     strategyBacktests,
+    wfoBudget: DEFAULT_WFO_BUDGET,
   });
 
   const services: AppServices = {
