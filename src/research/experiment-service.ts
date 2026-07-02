@@ -276,15 +276,18 @@ export class ExperimentService {
     // sanity-only cap (§6): a full-period-only baseline never reaches PAPER_CANDIDATE
     if (boundary.mode === 'none' || !boundary.t) return fail('INCONCLUSIVE', boundary.reason ?? 'insufficient');
 
-    // --- TRAIN [from, T) ---
+    // --- TRAIN [from, T) ∥ HOLDOUT [T, to] (both depend only on the boundary; run concurrently.
+    //     Checks stay in train-first order so failure reasons are deterministic.
+    //     Trade-off: when train fails, a holdout run was already submitted — one extra
+    //     backtester run on a failure path, absorbed by server-side dedup/coalescing.) ---
     const trainPeriod = encodeTrainPeriod(fullPeriod.from, boundary.t, input.runConfig.timeframe);
-    const train = await this.runStrategyMember(experimentId, 'train', input, { ...input.runConfig, period: trainPeriod });
+    const holdoutPeriod = encodeHoldoutPeriod(boundary.t, fullPeriod.to);
+    const [train, holdout] = await Promise.all([
+      this.runStrategyMember(experimentId, 'train', input, { ...input.runConfig, period: trainPeriod }),
+      this.runStrategyMember(experimentId, 'holdout', input, { ...input.runConfig, period: holdoutPeriod }),
+    ]);
     if (train.status === 'pending') return fail('INCONCLUSIVE', 'run_pending');
     if (train.status !== 'completed') return fail('INCONCLUSIVE', 'train_not_run');
-
-    // --- HOLDOUT [T, to] (period.from = T = no-leakage) ---
-    const holdoutPeriod = encodeHoldoutPeriod(boundary.t, fullPeriod.to);
-    const holdout = await this.runStrategyMember(experimentId, 'holdout', input, { ...input.runConfig, period: holdoutPeriod });
     if (holdout.status === 'pending') return fail('INCONCLUSIVE', 'run_pending');
     if (holdout.status !== 'completed' || !holdout.metrics) return fail('INCONCLUSIVE', 'holdout_not_run');
 
