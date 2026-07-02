@@ -100,6 +100,24 @@ describe('advanceChatPlan', () => {
     expect((await plans.findById('plan1'))?.status).toBe('failed');
   });
 
+  it('advances a strategy.baseline plan with a type-scoped dedupeKey and {strategyProfileId} payload', async () => {
+    const { base, strategyProfiles, plans, queue, researchTasks } = deps();
+    await strategyProfiles.create(profile());
+    await plans.create(plan({ nextTaskType: 'strategy.baseline' }));
+
+    await advanceChatPlan(onboardTask(), base);
+
+    const baselineEnvelopes = queue.queued.filter((e) => e.taskType === 'strategy.baseline');
+    expect(baselineEnvelopes).toHaveLength(1);
+    const created = await researchTasks.findByDedupeKey('chat_plan:plan1:strategy.baseline');
+    expect(created).toMatchObject({
+      taskType: 'strategy.baseline',
+      payload: { strategyProfileId: 'p1' },
+      dedupeKey: 'chat_plan:plan1:strategy.baseline',
+    });
+    expect((await plans.findById('plan1'))?.status).toBe('advanced');
+  });
+
   it('is a no-op for a completed task that has no pending plan', async () => {
     const { base, queue } = deps();
     await advanceChatPlan(onboardTask('unrelated'), base);

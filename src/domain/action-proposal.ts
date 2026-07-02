@@ -5,7 +5,7 @@ export type ActionProposalStatus = 'pending' | 'confirmed' | 'cancelled' | 'expi
 export type OperatorAction = 'strategy.analyze' | 'research.run_cycle' | 'hypothesis.build' | 'backtest.run';
 
 export interface ProposedChain {
-  nextTaskType: 'research.run_cycle';
+  nextTaskType: 'research.run_cycle' | 'strategy.baseline';
   resolveProfileByFingerprint: string;
 }
 
