@@ -276,4 +276,34 @@ describe('runStrategyBaselineValidation', () => {
     const exp = await experiments.findById(experimentId);
     expect(exp?.verdictReason).toBe('run_pending');
   });
+
+  it('verdict parity: train completed + holdout rejected ⇒ INCONCLUSIVE holdout_not_run', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+      return { status: 'rejected', runId: 'r-holdout', platformRunId: 'plat-holdout' };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('holdout_not_run');
+  });
+
+  it('verdict parity: train rejected + holdout rejected ⇒ INCONCLUSIVE train_not_run (train-first ordering wins)', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'rejected', runId: 'r-train', platformRunId: 'plat-train' };
+      return { status: 'rejected', runId: 'r-holdout', platformRunId: 'plat-holdout' };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('train_not_run');
+  });
 });

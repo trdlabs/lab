@@ -32,15 +32,16 @@ export function mapWithConcurrency<T, R>(
           }
         });
         results[i] = await p;
-        // Yield one more microtask turn before re-checking `failed`. When
-        // a sibling lane's item rejects in the SAME microtask drain as
-        // this lane's item resolves, this lane's post-await continuation
-        // is queued (via `p` resolving) strictly before the sibling's
-        // rejection observer above — so without this yield, `while
-        // (!failed)` below would read a stale `false` and this lane would
-        // wrongly claim one more item before the sibling's rejection has
-        // been observed. The extra tick lets any same-drain rejection
-        // observers run first.
+        // Yield one more microtask turn before re-checking `failed`. This closes the
+        // same-microtask-drain race: when a sibling lane's item rejects in the SAME
+        // microtask drain as this lane's item resolves, the rejection is already queued
+        // ahead of this lane's post-await continuation, so the extra tick lets that
+        // same-drain rejection observer run first and this lane sees the up-to-date
+        // `failed`. This is best-effort beyond same-drain, though: a rejection that
+        // settles later (a different drain) can still let one extra item start before
+        // `failed` is observed — operationally absorbed by idempotent resumeToken
+        // replays. See the pinning test 'fail-fast under concurrency: no new item
+        // starts after a rejection settles (limit=2)'.
         await Promise.resolve();
       } catch (err) {
         // Covers both a synchronous throw from `fn` and `p` rejecting.

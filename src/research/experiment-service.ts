@@ -279,7 +279,11 @@ export class ExperimentService {
     // --- TRAIN [from, T) ∥ HOLDOUT [T, to] (both depend only on the boundary; run concurrently.
     //     Checks stay in train-first order so failure reasons are deterministic.
     //     Trade-off: when train fails, a holdout run was already submitted — one extra
-    //     backtester run on a failure path, absorbed by server-side dedup/coalescing.) ---
+    //     backtester run on a failure path, absorbed by server-side dedup/coalescing.
+    //     A THROWN member error (transport) rejects the Promise.all and fails the task
+    //     (previously holdout was never submitted after a train failure); the surviving
+    //     in-flight member finishes in the background and its replay is idempotent via
+    //     experimentKey/resumeToken.) ---
     const trainPeriod = encodeTrainPeriod(fullPeriod.from, boundary.t, input.runConfig.timeframe);
     const holdoutPeriod = encodeHoldoutPeriod(boundary.t, fullPeriod.to);
     const [train, holdout] = await Promise.all([
