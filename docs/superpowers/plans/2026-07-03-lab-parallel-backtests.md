@@ -339,6 +339,13 @@ describe('BullMqQueueAdapter worker concurrency', () => {
     const opts = workerCtor.mock.calls[0]?.[2] as { concurrency?: number };
     expect(opts.concurrency).toBe(4);
   });
+
+  it('rejects a non-positive or non-integer workerConcurrency', () => {
+    expect(() => new BullMqQueueAdapter('redis://localhost:6379', 'research-tasks', { workerConcurrency: 0 }))
+      .toThrow(/positive integer/);
+    expect(() => new BullMqQueueAdapter('redis://localhost:6379', 'research-tasks', { workerConcurrency: 1.5 }))
+      .toThrow(/positive integer/);
+  });
 });
 ```
 
@@ -362,7 +369,11 @@ export class BullMqQueueAdapter implements TaskQueuePort {
   constructor(redisUrl: string, queueName = 'research-tasks', opts?: { workerConcurrency?: number }) {
     this.queueName = queueName;
     this.redisOpts = parseRedisUrl(redisUrl);
-    this.workerConcurrency = opts?.workerConcurrency ?? 1;
+    const workerConcurrency = opts?.workerConcurrency ?? 1;
+    if (!Number.isInteger(workerConcurrency) || workerConcurrency < 1) {
+      throw new Error(`BullMqQueueAdapter: workerConcurrency must be a positive integer, got ${workerConcurrency}`);
+    }
+    this.workerConcurrency = workerConcurrency;
     this.queue = new Queue<QueueEnvelope>(this.queueName, {
       connection: { ...this.redisOpts, maxRetriesPerRequest: null },
     });
@@ -477,7 +488,9 @@ Expected: PASS / clean. (`composition.wfo-agents.test.ts` exercises `composeRunt
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/config/env.ts src/config/env.test.ts src/composition.ts .env.example
+# .env.example if it exists; otherwise the README section edited in Step 5
+git add src/config/env.ts src/config/env.test.ts src/composition.ts
+if [ -f .env.example ]; then git add .env.example; else git add README.md; fi
 git commit -m "feat(config): RESEARCH_GRID_CONCURRENCY + LAB_QUEUE_CONCURRENCY knobs wired through composition"
 ```
 
@@ -492,6 +505,11 @@ git commit -m "feat(config): RESEARCH_GRID_CONCURRENCY + LAB_QUEUE_CONCURRENCY k
 **Interfaces:**
 - Consumes: existing private `runStrategyMember(experimentId, role, input, runConfig)`.
 - Produces: no signature changes; verdict/reason strings unchanged for every gate outcome.
+
+**Scope guard:** this task touches ONLY `runStrategyBaselineValidation`. The overlay/
+baseline-vs-variant path (`runWalkForwardOptimization` members, overlay experiment
+executors, any other lane in `experiment-service.ts`) stays byte-identical — out of
+scope for this PR.
 
 - [ ] **Step 1: Write the failing test**
 
