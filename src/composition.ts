@@ -15,6 +15,7 @@ import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cy
 import { hypothesisBuildHandler } from './orchestrator/handlers/hypothesis-build.handler.ts';
 import { backtestCompletedHandler } from './orchestrator/handlers/backtest-completed.handler.ts';
 import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
+import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
 import { buildBacktestCallbackUrl } from './config/backtest-callback-url.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
@@ -386,6 +387,7 @@ export function composeRuntime() {
   router.register('backtest.resume', backtestResumeHandler());
   router.register('backtest.completed', backtestCompletedHandler);
   router.register('strategy.baseline', strategyBaselineHandler);
+  router.register('strategy.wfo', strategyWfoHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),
