@@ -307,6 +307,7 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterSt
       seed: opts.run.seed,
       metrics: [...opts.metrics],
       correlationId: opts.correlationId,
+      ...(opts.params !== undefined && Object.keys(opts.params).length > 0 ? { params: opts.params } : {}),
       ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
       ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),
       ...(opts.callbackUrl !== undefined ? { callbackUrl: opts.callbackUrl } : {}),

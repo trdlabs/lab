@@ -243,6 +243,18 @@ describe('HttpBacktesterAdapter', () => {
     expect(fake.submitted?.executionProfileRef).toEqual({ id: 'exec', version: 'v1' });
   });
 
+  it('submitStrategyResearchRun puts non-empty opts.params into request.params (and omits when empty)', async () => {
+    const fake = new FakeClient();
+    await new HttpBacktesterAdapter(fake).submitStrategyResearchRun(strategyBundle, {
+      ...strategyOpts, params: { 'dump.minDropPct': 2.5, 'entry.fastBouncePct': 0.4 },
+    });
+    expect(fake.submitted?.params).toEqual({ 'dump.minDropPct': 2.5, 'entry.fastBouncePct': 0.4 });
+
+    const fake2 = new FakeClient();
+    await new HttpBacktesterAdapter(fake2).submitStrategyResearchRun(strategyBundle, { ...strategyOpts, params: {} });
+    expect(fake2.submitted && 'params' in fake2.submitted).toBe(false);
+  });
+
   it('maps an overlay result: runKind=baseline-vs-variant, comparison populated from metricDeltas', async () => {
     const fake = new FakeClient();
     fake.resultMode = 'overlay-summary';

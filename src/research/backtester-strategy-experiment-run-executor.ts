@@ -46,6 +46,7 @@ export class BacktesterStrategyExperimentRunExecutor implements StrategyExperime
       run: req.run,
       correlationId: req.role,
       metrics: req.metrics,
+      params: req.params,
       resumeToken,
       workflowId: req.experimentId,
       ...(this.d.callbackUrl !== undefined ? { callbackUrl: this.d.callbackUrl } : {}),

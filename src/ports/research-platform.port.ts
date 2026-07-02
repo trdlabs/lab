@@ -68,6 +68,8 @@ export interface SubmitStrategyResearchRunOptions {
   readonly correlationId: string;
   /** Non-empty subset of the overlay metric catalog; threaded from the caller. */
   readonly metrics: readonly string[];
+  /** request.params overrides merged over manifest.params by the engine (WFO sweep point). Omit/empty = manifest defaults. */
+  readonly params?: Record<string, unknown>;
   readonly resumeToken?: string;
   readonly workflowId?: string;
   /** When set, backtester/platform POST a CompletionEvent here on terminal transition. */
