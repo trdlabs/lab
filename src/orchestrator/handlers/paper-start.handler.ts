@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { WorkflowHandler, HandlerDeps } from '../workflow-router.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { PaperSubmission } from '../../domain/paper-submission.ts';
+import type { ResearchExperiment } from '../../domain/research-experiment.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { buildChampionSubmission } from '../../research/champion-evidence.ts';
@@ -27,11 +28,20 @@ async function ensureMonitorScheduled(
   services: HandlerDeps,
   experimentId: string,
   existing: PaperSubmission,
+  baseline: ResearchExperiment,
 ): Promise<void> {
-  const patch: Partial<Pick<PaperSubmission, 'monitorStatus' | 'observedTrades' | 'windowPolicy'>> = {};
+  const patch: Partial<Pick<PaperSubmission, 'monitorStatus' | 'observedTrades' | 'windowPolicy' | 'strategyName'>> = {};
   if (existing.monitorStatus === undefined) patch.monitorStatus = 'watching';
   if (existing.observedTrades === undefined) patch.observedTrades = 0;
   if (existing.windowPolicy === undefined) patch.windowPolicy = { ...services.paperWindowPolicy };
+  if (existing.strategyName === undefined) {
+    // Legacy pre-G4 ledger row: strategyName didn't exist when it was written. Reconstruct the
+    // bundle (same CAS path the fresh-submission flow uses) to backfill it — self-healing: once
+    // this patch lands, subsequent calls for this row skip the reconstruction entirely.
+    if (!baseline.bundleArtifactRef) throw new Error(`baseline experiment ${baseline.id} has no bundleArtifactRef — re-run strategy.baseline`);
+    const bundle = await reconstructStrategyBundle(services.artifacts, baseline.bundleArtifactRef);
+    patch.strategyName = bundle.manifest.id;
+  }
   if (Object.keys(patch).length > 0) {
     await services.paperSubmissions.updateMonitorState(experimentId, { ...patch, updatedAt: new Date().toISOString() });
   }
@@ -68,7 +78,7 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
   const existing = await services.paperSubmissions.findByExperimentId(experimentId);
   if (existing?.submissionStatus === 'submitted') {
     if (existing.monitorStatus === undefined || existing.monitorStatus === 'watching') {
-      await ensureMonitorScheduled(task, services, experimentId, existing);
+      await ensureMonitorScheduled(task, services, experimentId, existing, baseline);
       return;
     }
     await services.events.append(event(task.id, 'paper.already_submitted', { experimentId, candidateId: existing.candidateId ?? null }));

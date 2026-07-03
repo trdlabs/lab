@@ -84,13 +84,15 @@ interface MakeOpts {
   seedExisting?: 'submitted' | 'failed';
   /** Only applied when seedExisting === 'submitted'; omit to seed a row WITHOUT monitorStatus (retry-edge). */
   monitorStatus?: 'watching' | 'window_complete' | 'stalled';
+  /** Only applied when seedExisting === 'submitted'; omit to seed a row WITHOUT strategyName (pre-G4 legacy row). */
+  strategyName?: string;
 }
 
 async function make(opts: MakeOpts = {}): Promise<{
   services: AppServices;
   intakeCalls: SubmitProvenCandidateArgs[];
   events: { type: string; payload: Record<string, unknown> }[];
-  artifacts: { putHashes: string[] };
+  artifacts: { putHashes: string[]; getHashes: string[] };
   bundleHash: string;
   manifestId: string;
   queueCalls: { envelope: QueueEnvelope; opts?: { delayMs?: number } }[];
@@ -122,6 +124,13 @@ async function make(opts: MakeOpts = {}): Promise<{
     const ref = await originalPut(content, meta);
     putHashes.push(ref.content_hash);
     return ref;
+  };
+
+  const getHashes: string[] = [];
+  const originalGet = services.artifacts.get.bind(services.artifacts);
+  services.artifacts.get = async (ref) => {
+    getHashes.push(ref.content_hash);
+    return originalGet(ref);
   };
 
   const baselineBundleHash = opts.mismatchedBaselineHash ? 'sha256:mismatched' : bundle.bundleHash;
@@ -168,6 +177,7 @@ async function make(opts: MakeOpts = {}): Promise<{
       submissionStatus: opts.seedExisting,
       ...(opts.seedExisting === 'submitted' ? { candidateId: 'cand-prior', admissionStatus: 'admitted' } : { error: { category: 'validation_error', code: 'x', message: 'prior fail' } }),
       ...(opts.seedExisting === 'submitted' && opts.monitorStatus ? { monitorStatus: opts.monitorStatus } : {}),
+      ...(opts.seedExisting === 'submitted' && opts.strategyName ? { strategyName: opts.strategyName } : {}),
       idempotencyKey: 'wfo-champion:exp-wfo', bundleHash: bundle.bundleHash, createdAt: NOW, updatedAt: NOW,
     });
   }
@@ -186,7 +196,7 @@ async function make(opts: MakeOpts = {}): Promise<{
     return originalEnqueue(envelope, enqueueOpts);
   };
 
-  return { services, intakeCalls, events, artifacts: { putHashes }, bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id, queueCalls };
+  return { services, intakeCalls, events, artifacts: { putHashes, getHashes }, bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id, queueCalls };
 }
 
 describe('paperStartHandler', () => {
@@ -242,12 +252,31 @@ describe('paperStartHandler', () => {
     expect(queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor')).toHaveLength(0);
   });
 
-  it('retry-edge: already-submitted row without monitorStatus seeds monitor fields + enqueues paper.monitor, no duplicate submit', async () => {
-    const { services, intakeCalls, queueCalls } = await make({ seedExisting: 'submitted' });
+  it('retry-edge: already-submitted fully-seeded row (strategyName present) seeds monitor fields + enqueues paper.monitor, no duplicate submit, no bundle reconstruction', async () => {
+    const { services, intakeCalls, queueCalls, artifacts } = await make({ seedExisting: 'submitted', strategyName: 'already-set-strategy-name' });
     await paperStartHandler(taskOf(), services);
     expect(intakeCalls).toHaveLength(0);
     const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
-    expect(row).toMatchObject({ monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy });
+    expect(row).toMatchObject({
+      monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy,
+      strategyName: 'already-set-strategy-name',
+    });
+    expect(artifacts.getHashes).toHaveLength(0);
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
+  });
+
+  it('retry-edge: legacy already-submitted row without strategyName (pre-G4) backfills strategyName from the reconstructed bundle + seeds monitor fields + enqueues paper.monitor', async () => {
+    const { services, intakeCalls, queueCalls, artifacts, manifestId } = await make({ seedExisting: 'submitted' });
+    await paperStartHandler(taskOf(), services);
+    expect(intakeCalls).toHaveLength(0);
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row).toMatchObject({
+      strategyName: manifestId, monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy,
+    });
+    expect(artifacts.getHashes.length).toBeGreaterThan(0);
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
     expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
