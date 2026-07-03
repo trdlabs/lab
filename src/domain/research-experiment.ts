@@ -1,3 +1,5 @@
+import type { ArtifactRef } from './types.ts';
+
 export type ExperimentType =
   | 'new_strategy_validation'
   | 'paper_improvement'
@@ -75,6 +77,7 @@ export interface ResearchExperiment {
   hypothesisId?: string;
   buildId?: string;
   bundleHash?: string;
+  bundleArtifactRef?: ArtifactRef;
   parameterGrid?: ParameterGrid;
   objective?: string;
   datasetScope: DatasetScope;

@@ -14,11 +14,15 @@
  * Then: services.strategyBuilder.build({ spec, authoringDoc, profile }) → assembleStrategyBundle
  * → services.artifacts.put(...) (audit anchor, same shape as authorStrategyBundleHandler's
  * 'strategy_bundle' persist) → services.experimentService.runStrategyBaselineValidation({
- * strategyProfileId, strategyBundle, datasetScope, runConfig, metrics, taskId }) using
- * composeRuntime()'s services.defaultPlatformRun (ESPORTSUSDT:1h, 2026-06-12..19, seed 42 —
+ * strategyProfileId, strategyBundle, datasetScope, runConfig, metrics, taskId, bundleArtifactRef })
+ * using composeRuntime()'s services.defaultPlatformRun (ESPORTSUSDT:1h, 2026-06-12..19, seed 42 —
  * src/composition.ts) and the RESEARCH_RUN_METRICS 7-metric catalog (038 catalog:
  * pnl, sharpe, max_drawdown, win_rate, total_trades, profit_factor, top_trade_contribution_pct —
  * src/domain/platform-comparison.ts; the SDK's own METRIC_CATALOG is not publicly exported).
+ * The `bundleArtifactRef` returned by services.artifacts.put(...) is persisted on the
+ * research_experiment row (ResearchExperiment.bundleArtifactRef) so a later WFO run can
+ * reconstruct this EXACT bundle via src/research/reconstruct-strategy-bundle.ts instead of
+ * rebuilding it via the LLM builder (see scripts/run-strategy-wfo.mts).
  *
  * runStrategyBaselineValidation runs THREE platform backtests (sanity over the full period,
  * then train/holdout split from the sanity run's real trades) — expect multiple round trips to
@@ -160,9 +164,11 @@ try {
   );
 
   // ── 3) persist the bundle before submit (audit anchor; same shape as
-  //      authorStrategyBundleHandler's 'strategy_bundle' persist) ────────────────
+  //      authorStrategyBundleHandler's 'strategy_bundle' persist) — the returned ref is passed
+  //      into runStrategyBaselineValidation below so it lands on the research_experiment row,
+  //      letting scripts/run-strategy-wfo.mts reconstruct this EXACT bundle later ────────────
 
-  await services.artifacts.put(
+  const bundleArtifactRef = await services.artifacts.put(
     JSON.stringify({
       source: strategyBundle.source,
       manifest: strategyBundle.manifest,
@@ -200,6 +206,7 @@ try {
     runConfig,
     metrics: RESEARCH_RUN_METRICS,
     taskId,
+    bundleArtifactRef,
   });
 
   // eslint-disable-next-line no-console

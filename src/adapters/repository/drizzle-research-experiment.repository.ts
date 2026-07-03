@@ -16,6 +16,7 @@ export function expToDomain(r: ExpRow): ResearchExperiment {
     strategyProfileId: r.strategyProfileId,
     hypothesisId: r.hypothesisId ?? undefined, buildId: r.buildId ?? undefined,
     bundleHash: r.bundleHash ?? undefined,
+    bundleArtifactRef: r.bundleArtifactRef ?? undefined,
     parameterGrid: (r.parameterGrid as ParameterGrid | null) ?? undefined,
     objective: r.objective ?? undefined,
     datasetScope: r.datasetScope, holdoutPolicy: r.holdoutPolicy,
@@ -50,6 +51,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
       id: e.id, experimentKey: e.experimentKey, experimentType: e.experimentType,
       strategyProfileId: e.strategyProfileId, hypothesisId: e.hypothesisId ?? null,
       buildId: e.buildId ?? null, bundleHash: e.bundleHash ?? null,
+      bundleArtifactRef: e.bundleArtifactRef ?? null,
       parameterGrid: e.parameterGrid ?? null,
       objective: e.objective ?? null,
       datasetScope: e.datasetScope, holdoutPolicy: e.holdoutPolicy,
@@ -83,6 +85,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
     if (patch.holdoutBoundary !== undefined) set.holdoutBoundary = patch.holdoutBoundary;
     if (patch.aggregateMetrics !== undefined) set.aggregateMetrics = patch.aggregateMetrics;
     if (patch.parameterGrid !== undefined) set.parameterGrid = patch.parameterGrid;
+    if (patch.bundleArtifactRef !== undefined) set.bundleArtifactRef = patch.bundleArtifactRef;
     if (patch.completedAt !== undefined) set.completedAt = patch.completedAt ? new Date(patch.completedAt) : null;
     await this.db.update(researchExperiment).set(set).where(eq(researchExperiment.id, id));
   }

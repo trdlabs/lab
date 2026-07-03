@@ -308,6 +308,7 @@ export const researchExperiment = pgTable('research_experiment', {
   hypothesisId: text('hypothesis_id'),
   buildId: text('build_id'),
   bundleHash: text('bundle_hash'),
+  bundleArtifactRef: jsonb('bundle_artifact_ref').$type<ArtifactRef>(),
   objective: text('objective'),
   datasetScope: jsonb('dataset_scope').notNull().$type<DatasetScope>(),
   holdoutPolicy: jsonb('holdout_policy').notNull().$type<HoldoutPolicy>(),

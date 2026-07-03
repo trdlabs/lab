@@ -19,7 +19,9 @@ export interface ChainRunnerDeps {
 
 /**
  * Worker completion hook. Called ONLY after a task transitions to `completed`.
- * Advances the single MVP continuation (strategy.onboard -> research.run_cycle).
+ * Advances a chat-plan continuation off strategy.onboard: ordinary onboarding chains
+ * strategy.onboard -> strategy.baseline, an explicit research goal chains
+ * strategy.onboard -> research.run_cycle. plan.nextTaskType picks the branch.
  *
  * Best-effort: this function NEVER throws. The worker calls it AFTER the task is
  * already marked `completed`, so any propagated error would make the worker's catch
@@ -45,7 +47,9 @@ export async function advanceChatPlan(completedTask: ResearchTask, deps: ChainRu
       }
 
       // Deterministic dedupeKey: a worker retry returns the existing task instead of re-enqueuing.
-      const dedupeKey = `chat_plan:${plan.id}:research.run_cycle`;
+      // Type-scoped so the two possible chain continuations (strategy.baseline, research.run_cycle)
+      // never collide on the same key.
+      const dedupeKey = `chat_plan:${plan.id}:${plan.nextTaskType}`;
       const intake = await createAndEnqueueTask(
         {
           taskType: plan.nextTaskType,

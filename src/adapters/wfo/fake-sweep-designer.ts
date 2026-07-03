@@ -1,6 +1,7 @@
 import type { SweepDesignerPort, SweepInput } from '../../ports/wfo-agents.port.ts';
 import type { SweepDesignOutput } from '../../domain/wfo.ts';
 import { classifyEntryAffectingParams } from '../../domain/wfo.ts';
+import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
 
 function numericValue(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
@@ -9,8 +10,13 @@ function numericValue(value: unknown): number | undefined {
 export class FakeSweepDesigner implements SweepDesignerPort {
   readonly adapter = 'fake' as const;
   readonly model = 'fake';
+  readonly calls: SweepInput[] = [];
 
-  async design(input: SweepInput): Promise<SweepDesignOutput> {
+  async design(input: SweepInput, opts?: AgentCallOpts): Promise<SweepDesignOutput> {
+    this.calls.push(input);
+    if (opts?.onUsage) {
+      await opts.onUsage({ modelId: this.model, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    }
     let candidates = input.tunableParams;
     if (input.restrictToEntryParams) {
       const { entryAffecting } = classifyEntryAffectingParams(input.tunableParams);

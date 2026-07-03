@@ -14,6 +14,8 @@ import { strategyOnboardHandler } from './orchestrator/handlers/strategy-onboard
 import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cycle.handler.ts';
 import { hypothesisBuildHandler } from './orchestrator/handlers/hypothesis-build.handler.ts';
 import { backtestCompletedHandler } from './orchestrator/handlers/backtest-completed.handler.ts';
+import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
+import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
 import { buildBacktestCallbackUrl } from './config/backtest-callback-url.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
@@ -314,6 +316,7 @@ export function composeRuntime() {
   });
   // WFO agent adapters: env-driven mastra/fake adapter selection, mirroring buildCritic/buildStrategyCritic.
   const paramGridRunner = new ParamGridRunner({ strategyRunExecutor, concurrency: env.RESEARCH_GRID_CONCURRENCY });
+  const tokenUsage = new DrizzleTokenUsageRepository(db);
   const experimentService = new ExperimentService({
     experiments,
     runTrades,
@@ -328,6 +331,8 @@ export function composeRuntime() {
     paramGridRunner,
     strategyBacktests,
     wfoBudget: DEFAULT_WFO_BUDGET,
+    tokenUsage,
+    researchTaskTokenBudget: env.RESEARCH_TASK_TOKEN_BUDGET,
   });
 
   const services: AppServices = {
@@ -350,7 +355,7 @@ export function composeRuntime() {
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
     maxHypothesesPerCycle: env.MAX_HYPOTHESES_PER_CYCLE,
-    tokenUsage: new DrizzleTokenUsageRepository(db),
+    tokenUsage,
     modelPricing: new OpenRouterModelPricing(),
     researchTaskTokenBudget: env.RESEARCH_TASK_TOKEN_BUDGET,
     builder: buildBuilder(mastraRuntime),
@@ -381,6 +386,8 @@ export function composeRuntime() {
   router.register('hypothesis.build', hypothesisBuildHandler);
   router.register('backtest.resume', backtestResumeHandler());
   router.register('backtest.completed', backtestCompletedHandler);
+  router.register('strategy.baseline', strategyBaselineHandler);
+  router.register('strategy.wfo', strategyWfoHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),

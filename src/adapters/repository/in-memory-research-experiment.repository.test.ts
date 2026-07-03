@@ -49,6 +49,34 @@ describe('InMemoryResearchExperimentRepository', () => {
     expect(members.map((m) => m.oos)).toEqual([false, true]);
     expect(members[0]?.params).toEqual({ 'dump.minDropPct': 2 });
   });
+  it('round-trips bundleArtifactRef through create/findById', async () => {
+    const repo = new InMemoryResearchExperimentRepository();
+    const ref = {
+      artifact_id: 'art-1', uri: 'file:///tmp/a.json', content_hash: 'sha256:aa',
+      kind: 'strategy_bundle', size_bytes: 10, mime_type: 'application/json',
+      created_at: '2026-07-03T00:00:00.000Z', producer: 'test', metadata: {},
+    };
+    await repo.createExperiment(experiment({ id: 'exp-ref', experimentKey: 'k-ref', bundleArtifactRef: ref }));
+    const got = await repo.findById('exp-ref');
+    expect(got?.bundleArtifactRef).toEqual(ref);
+  });
+  it('round-trips bundleArtifactRef through updateExperiment (backfill path)', async () => {
+    const repo = new InMemoryResearchExperimentRepository();
+    const ref = {
+      artifact_id: 'art-1', uri: 'file:///tmp/a.json', content_hash: 'sha256:aa',
+      kind: 'strategy_bundle', size_bytes: 10, mime_type: 'application/json',
+      created_at: '2026-07-03T00:00:00.000Z', producer: 'test', metadata: {},
+    };
+    await repo.createExperiment(experiment({ id: 'exp-backfill', experimentKey: 'k-backfill' }));
+    expect((await repo.findById('exp-backfill'))?.bundleArtifactRef).toBeUndefined();
+
+    await repo.updateExperiment('exp-backfill', { bundleArtifactRef: ref, updatedAt: '2026-01-02T00:00:00.000Z' });
+
+    const got = await repo.findById('exp-backfill');
+    expect(got?.bundleArtifactRef).toEqual(ref);
+    expect(got?.updatedAt).toBe('2026-01-02T00:00:00.000Z');
+  });
+
   it('listByType returns only that type, ordered createdAt ASC then id ASC', async () => {
     const repo = new InMemoryResearchExperimentRepository();
     // insert out of createdAt order to prove the ORDER BY, not insertion order

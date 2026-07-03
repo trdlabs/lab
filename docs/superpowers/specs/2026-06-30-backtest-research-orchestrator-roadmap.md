@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Target repo:** trading-lab (research brain). office-панели → trading-office; опц. metadata → trading-backtester.
-**Status:** PLAN — согласован (3 решения + orchestrator-flow), готов к фазовой реализации.
+**Status:** IN PROGRESS — A/B.1/1-fold holdout/B2(1-fold WFO) отгружены (PR #119–#124); фиксация гапов и порядок доработки — §8 (2026-07-02).
 **Supersedes/merges:** `2026-06-28-wfa-research-experiment-design.md` (WFA-дизайн) + наша развязка research-потока (backtester PR #71) + идея pre-paper параметрического sweep.
 
 ---
@@ -204,7 +204,31 @@ paper-losses (ops-read forensics ops.4/ops.5)
 
 ---
 
-## 8. Открытые вопросы (на before-impl уточнение)
+## 8. Фиксация статуса и гапов — 2026-07-02 (gap-анализ полного конвейера)
+
+Сверка «код vs этот roadmap vs целевая двухцикловая система» (4 graph-агента по lab/platform/mock/sdk).
+
+### Отгружено (фазы → PR)
+
+- **Phase A + B.1 + 1-fold train/holdout** — PR #119 (registry, trade-based holdout, no-leakage) + #120 (baseline lane) + #121 (risk/exec refs).
+- **Phase B2 (WFO contour, 1-fold)** — PR #122/#123 (GATE1 → sweep-designer → grid × `request.params` → top-N → result-interpreter → OOS-verdict); Gate1 model-eval — PR #124.
+- **Цикл 2, генератор** — researcher два прохода 5+5 (loss_reduction + profit_improvement, headroom-ранжирование победителей), per-trade forensic (lifecycle + минутный контекст) — PR #107–#117.
+- **Критик** — HITL в чате + авто в воркере (PR #88/#91), но default OFF (`STRATEGY_PREFLIGHT_CRITIQUE=false`; demo = fake-адаптер).
+- **Evaluator** — baseline-relative детерминированная лестница (`evaluateBacktest`); retry FAIL/MODIFY с `cycleDepth+1` (cap 2) + токен-бюджет.
+
+### Гапы (порядок доработки — принят 2026-07-02)
+
+1. **G1 — Оркестрация baseline/WFO (ТЕКУЩИЙ СЛАЙС).** Baseline/WFO живут только в CLI (`scripts/run-strategy-baseline.mts`, `run-strategy-wfo.mts`), не зарегистрированы как task types (composition.ts: только onboard / run_cycle / hypothesis.build / backtest.resume / backtest.completed) → из чата недостижимы. **Самоблок WFO:** скрипт пересобирает бандл LLM-билдером → недетерминизм → `bundleHash ≠ baseline.bundleHash` → fail-fast. Fix: персистить `strategy_bundle` artifact-ref на experiment row и реконструировать бандл, не пересобирать. Сюда же: budget kill-switch wiring в WFO-контур.
+2. **G2 — Paper-мост (Phase D).** В lab «paper» = только лейбл `PAPER_CANDIDATE` (событие, тупик). Платформа готова целиком: intake 036 `POST /intake/paper-candidate` → smoke-gate 060 → `bot_bundle` → `materializeBot` → paper host 053/054 → ops-read (`/ops/candidates/{id}`, `/ops/runs?mode=paper`). SDK 0.9.0 (уже вендорен) даёт `submitPaperCandidate` + `createHttpIntakeTransport`, `source:'trading-lab'` зарезервирован. Нужен lab-порт (PaperIntakePort) + **champion-запись** победителя sweep (сейчас params живут только holdout-member'ом в ledger). mock-platform paper НЕ симулирует → тесты через fake transport.
+3. **G3 — Ревизии стратегии + merge гипотез.** Сейчас топология «звезда от baseline»: каждый оверлей ложится на исходный `strategy:${profile.id}`, merge/стекинга нет (0 вхождений), вердикт бэктеста не возвращается на `HypothesisProposal` (нет status-update), `activeOverlayRules` подаёт schema-validated (не backtest-proven). Нужна сущность «ревизия» (baseline v2 = baseline + принятые оверлеи), гипотезы N+1 — поверх ревизии. Отдельный дизайн.
+4. **G4 — Триггер Цикла 2 + адаптивная длительность.** §2.5-политика (trades/day → длина paper/бэктеста, компенсаторный paper для low-freq) не реализована: период = статический `defaultPlatformRun`, автозапуска `research.run_cycle` по завершении paper-окна нет. Backtest-period HITL — backlog.
+5. **G5 — Canary-comparison (§3, GATE CANARY)** — не начат.
+6. **G6 — Каналы + включение критика.** Telegram/crawler — enum-заглушки в `TASK_SOURCES`, кода нет. Критик включить после paid eval выбора модели.
+7. **G7 — Live-верификация + видимость.** Известный блокер живых прогонов: tradeCount=0 (long_oi детектит дамп, не эмитит вход — builder-faithfulness/1h-гранулярность). Phase E (office-панели экспериментов) не начата — вердикты видны только в БД/консоли. После каждого слайса — сквозной живой прогон.
+
+---
+
+## 9. Открытые вопросы (на before-impl уточнение)
 
 - Оптимизатор внутри train-окна WFO: полная сетка vs coarse-to-fine? (старт — полная сетка top-N, позже coarse-to-fine для экономии прогонов).
 - Source OHLCV для RegimeLabeler: mock `/historical/rows` (demo, без creds) vs platform.

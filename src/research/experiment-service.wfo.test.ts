@@ -8,10 +8,15 @@ import { BacktesterStrategyExperimentRunExecutor } from './backtester-strategy-e
 import { FakeGate1 } from '../adapters/wfo/fake-gate1.ts';
 import { FakeSweepDesigner } from '../adapters/wfo/fake-sweep-designer.ts';
 import { FakeResultInterpreter } from '../adapters/wfo/fake-result-interpreter.ts';
-import type { ResultInterpreterPort, InterpretInput, SweepDesignerPort, SweepInput } from '../ports/wfo-agents.port.ts';
+import type {
+  ResultInterpreterPort, InterpretInput, SweepDesignerPort, SweepInput, Gate1DecisionPort,
+} from '../ports/wfo-agents.port.ts';
 import type { ResultInterpretOutput, SweepDesignOutput } from '../domain/wfo.ts';
+import type { AgentCallOpts } from '../ports/agent-call-opts.ts';
+import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
 import { InMemoryResearchExperimentRepository } from '../adapters/repository/in-memory-research-experiment.repository.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
+import { InMemoryTokenUsageRepository } from '../adapters/repository/in-memory-token-usage.repository.ts';
 import { FakeRunTradesAdapter } from '../adapters/platform/fake-run-trades.adapter.ts';
 import type {
   ResearchPlatformPort, ResearchCapabilityDescriptor, ListDatasetsFilter, ListDatasetsResult,
@@ -149,6 +154,26 @@ class BadSweepDesigner implements SweepDesignerPort {
   }
 }
 
+/**
+ * SweepDesignerPort wrapper that delegates to a real FakeSweepDesigner but also invokes a
+ * caller-supplied `bump` side effect on every call — used to simulate a token-usage bump that
+ * lands in the correlationId's cumulative counter WITHOUT going through opts.onUsage (the
+ * budget-gate test drives `tokenUsage.get` off a plain closure variable, not the repository).
+ */
+class BumpingSweepDesigner implements SweepDesignerPort {
+  readonly adapter = 'fake' as const;
+  readonly model = 'fake';
+  readonly calls: SweepInput[] = [];
+  private readonly inner = new FakeSweepDesigner();
+  private readonly bump: () => void;
+  constructor(bump: () => void) { this.bump = bump; }
+  async design(input: SweepInput, opts?: AgentCallOpts): Promise<SweepDesignOutput> {
+    this.calls.push(input);
+    this.bump();
+    return this.inner.design(input, opts);
+  }
+}
+
 async function seedBaseline(opts: {
   experiments: InMemoryResearchExperimentRepository;
   strategyBacktests: InMemoryStrategyBacktestRunRepository;
@@ -219,7 +244,10 @@ function buildSvc(opts: {
   resultFor: ResultForFn;
   resultInterpreter?: ResultInterpreterPort;
   sweepDesigner?: SweepDesignerPort;
+  gate1?: Gate1DecisionPort;
   wfoBudget?: Partial<WfoBudget>;
+  tokenUsage?: Pick<TokenUsageRepository, 'get'>;
+  researchTaskTokenBudget?: number;
 }): { svc: ExperimentService; experiments: InMemoryResearchExperimentRepository; strategyBacktests: InMemoryStrategyBacktestRunRepository } {
   const experiments = new InMemoryResearchExperimentRepository();
   const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
@@ -237,12 +265,14 @@ function buildSvc(opts: {
     newId: (p) => `${p}-${++counter}`,
     now: () => NOW,
     events: { append: async () => {}, listByTask: async () => [] },
-    gate1: new FakeGate1(),
+    gate1: opts.gate1 ?? new FakeGate1(),
     sweepDesigner: opts.sweepDesigner ?? new FakeSweepDesigner(),
     resultInterpreter: opts.resultInterpreter ?? new FakeResultInterpreter(),
     paramGridRunner,
     strategyBacktests,
     wfoBudget: { ...DEFAULT_WFO_BUDGET, ...opts.wfoBudget },
+    tokenUsage: opts.tokenUsage,
+    researchTaskTokenBudget: opts.researchTaskTokenBudget,
   });
   return { svc, experiments, strategyBacktests };
 }
@@ -252,6 +282,7 @@ function baseInput(baselineExperimentId: string, params: StrategyParameter[], ov
     baselineExperimentId, strategyBundle: bundle(), profile: profile(params),
     strategyProfileId: 'p1', datasetScope: DATASET_SCOPE, runConfig: RUN_CONFIG,
     metrics: ['netPnlUsd', 'profitFactor', 'sharpe'], taskId: 'wfo-task',
+    correlationId: 'test-corr',
     ...over,
   };
 }
@@ -474,5 +505,102 @@ describe('runWalkForwardOptimization', () => {
     });
 
     await expect(svc.runWalkForwardOptimization(input)).rejects.toThrow(/bundle mismatch/);
+  });
+
+  it('stops with budget_exhausted before GATE1 when the correlation budget is spent', async () => {
+    const gate1 = new FakeGate1();
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5 }),
+      gate1,
+      tokenUsage: { get: async () => 1_000_000 },
+      researchTaskTokenBudget: 500_000,
+    });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM], { correlationId: 'corr-1' });
+
+    const { verdict, terminalReason } = await svc.runWalkForwardOptimization(input);
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    expect(terminalReason).toBe('budget_exhausted');
+    expect(gate1.calls).toHaveLength(0);
+  });
+
+  it('stops the round loop between rounds when the budget runs out mid-experiment', async () => {
+    let cumulative = 0;
+    const sweepDesigner = new BumpingSweepDesigner(() => { cumulative = 200; });
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5 }),
+      sweepDesigner,
+      resultInterpreter: new AlwaysExtendInterpreter(),
+      tokenUsage: { get: async () => cumulative },
+      researchTaskTokenBudget: 100,
+    });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM], { correlationId: 'corr-2' });
+
+    // round 1 runs (sweepDesigner bumps cumulative past the budget); before round 2's
+    // sweepDesigner call the gate trips and the loop stops without a second design call.
+    const { terminalReason } = await svc.runWalkForwardOptimization(input);
+
+    expect(terminalReason).toBe('budget_exhausted');
+    expect(sweepDesigner.calls).toHaveLength(1);
+  });
+
+  it('budget gate reads the same correlationId that onUsage writes (key-consistency regression)', async () => {
+    // Regression guard: the WFO budget gate MUST check the same correlationId that agentOpts.onUsage
+    // charges usage against — through a REAL InMemoryTokenUsageRepository, not a closure variable
+    // standing in for it (see the "stops the round loop..." test above, which intentionally drives
+    // tokenUsage.get off a plain `cumulative` closure — the anti-pattern this test proves is absent
+    // from the real write→read path). FakeGate1/FakeSweepDesigner/FakeResultInterpreter all invoke
+    // opts?.onUsage(...) when given (see fake-gate1.ts/fake-sweep-designer.ts), but as test doubles
+    // that never call a real LLM they report a fixed zero-token AgentCallUsage payload. To exercise
+    // the repository write path end-to-end we mirror src/orchestrator/make-on-usage.ts's shape
+    // (onUsage -> tokenUsage.add(correlationId, tokens)) but attribute a representative per-call
+    // token cost, since forwarding the fakes' literal zero would never trip the budget.
+    const tokenUsageRepo = new InMemoryTokenUsageRepository();
+    const correlationId = 'corr-key';
+    const agentOpts: AgentCallOpts = {
+      onUsage: async () => { await tokenUsageRepo.add(correlationId, 300); },
+    };
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5 }),
+      resultInterpreter: new AlwaysExtendInterpreter(), // forces round 2 so the mid-loop gate is reached
+      tokenUsage: tokenUsageRepo,
+      researchTaskTokenBudget: 500, // survives GATE1 (300) but round 1's GATE1+sweepDesigner usage (600) trips it
+    });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM], { correlationId, agentOpts });
+
+    const { terminalReason } = await svc.runWalkForwardOptimization(input);
+
+    expect(terminalReason).toBe('budget_exhausted');
+    // Proves the gate's read (tokenUsage.get(correlationId)) actually observed the tokens
+    // onUsage wrote (tokenUsage.add(correlationId, ...)) under the identical key — no shortcut.
+    expect(await tokenUsageRepo.get(correlationId)).toBeGreaterThan(0);
+  });
+
+  it('forwards agentOpts to gate1/sweepDesigner/resultInterpreter calls', async () => {
+    const seen: string[] = [];
+    const agentOpts: AgentCallOpts = { onUsage: async () => { seen.push('usage'); } };
+    const { svc, experiments, strategyBacktests } = buildSvc({ resultFor: () => ({ totalTrades: 5 }) });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM], { correlationId: 'corr-3', agentOpts });
+
+    await svc.runWalkForwardOptimization(input);
+
+    // gate1.decide + sweepDesigner.design + resultInterpreter.interpret each report usage.
+    expect(seen.length).toBeGreaterThanOrEqual(2);
   });
 });

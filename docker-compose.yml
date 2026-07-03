@@ -116,6 +116,8 @@ services:
       STRATEGY_CRITIC_MODE: ${STRATEGY_CRITIC_MODE:-single}
       STRATEGY_CRITIC_MODEL: ${STRATEGY_CRITIC_MODEL:-openrouter/x-ai/grok-4.3}
       STRATEGY_REFINER_MODEL: ${STRATEGY_REFINER_MODEL:-}
+      # Research task token budget configuration
+      RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -198,6 +200,8 @@ services:
       STRATEGY_CRITIC_MODE: ${STRATEGY_CRITIC_MODE:-single}
       STRATEGY_CRITIC_MODEL: ${STRATEGY_CRITIC_MODEL:-openrouter/x-ai/grok-4.3}
       STRATEGY_REFINER_MODEL: ${STRATEGY_REFINER_MODEL:-}
+      # Research task token budget configuration
+      RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}
     depends_on:
       postgres:
         condition: service_healthy

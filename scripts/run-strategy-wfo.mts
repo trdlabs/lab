@@ -1,9 +1,9 @@
 /**
- * One-shot trigger: rebuild the strategy bundle for an EXISTING baseline experiment and run
- * `ExperimentService.runWalkForwardOptimization` (the 1-fold WFO decision contour: GATE1 →
- * LLM-designed sweep round(s) → ParamGridRunner → result-interpreter select/extend/stop → one
- * OOS holdout run → evaluateStrategyBaseline verdict) against a REAL backtester. Prints
- * `{ experimentId, verdict, terminalReason }` plus each member's
+ * One-shot trigger: reconstruct the EXACT strategy bundle an EXISTING baseline experiment
+ * validated and run `ExperimentService.runWalkForwardOptimization` (the 1-fold WFO decision
+ * contour: GATE1 → LLM-designed sweep round(s) → ParamGridRunner → result-interpreter
+ * select/extend/stop → one OOS holdout run → evaluateStrategyBaseline verdict) against a REAL
+ * backtester. Prints `{ experimentId, verdict, terminalReason }` plus each member's
  * `{ role, oos, params, tradeCount, strategyBacktestRunId }`.
  *
  * The baseline experiment (`BASELINE_EXPERIMENT_ID`) must already exist and be a completed
@@ -12,34 +12,29 @@
  * script does NOT re-run the baseline; it reads it (baseline metrics, holdout boundary source,
  * datasetScope) and starts the WFO round loop from there.
  *
- * KNOWN LIMITATION (bundle-hash mismatch): step 3 below REBUILDS the strategy bundle via the
- * non-deterministic LLM builder (services.strategyBuilder.build) rather than reusing the exact
- * bundle the baseline validated — so the rebuilt bundle's hash will essentially never equal
- * `baseline.bundleHash`. `ExperimentService.runWalkForwardOptimization` now fails fast on that
- * mismatch (WFO must optimize the SAME bundle the baseline validated, or its train-window
- * metrics / no-leakage boundary describe a different bundle than the one being optimized) — this
- * script pre-flights the same check right after building the bundle (step 3) so it fails with a
- * clear, script-level error before ever calling runWalkForwardOptimization. The proper fix is a
- * follow-up: persist the baseline's `strategy_bundle` artifact ref on the ResearchExperiment row
- * and reconstruct the bundle from it here via the ref-based `artifacts` port (`put` → ref,
- * `get(ref)` → bytes) instead of rebuilding — scripts/run-strategy-baseline.mts currently calls
- * `services.artifacts.put(...)` for its own 'strategy_bundle' persist but discards the returned
- * ref, so that plumbing does not exist yet. NOT attempted here.
+ * BUNDLE RECONSTRUCTION: this script reconstructs the exact baseline bundle from
+ * `research_experiment.bundle_artifact_ref` (persisted by run-strategy-baseline.mts) via
+ * `reconstructStrategyBundle(services.artifacts, baseline.bundleArtifactRef)`
+ * (src/research/reconstruct-strategy-bundle.ts) — it never rebuilds the bundle via the LLM
+ * builder, so there is no bundle-hash mismatch to guard against. If the baseline row has no
+ * `bundleArtifactRef` (e.g. it predates this script's ref-based version), this script throws an
+ * actionable error naming the fix (re-run run-strategy-baseline.mts).
  *
  * Loads the strategy profile the SAME way as `BASELINE_EXPERIMENT_ID`'s baseline experiment:
  *   STRATEGY_PROFILE_ID env (if set) → services.strategyProfiles.findById(id)
  *   else → services.strategyProfiles.findById(baseline.strategyProfileId)
  *
- * Then: services.strategyBuilder.build({ spec, authoringDoc, profile }) → assembleStrategyBundle
- * → services.artifacts.put(...) (audit anchor, same shape as run-strategy-baseline.mts's
- * 'strategy_bundle' persist) → services.experimentService.runWalkForwardOptimization({
- * baselineExperimentId, strategyBundle, profile, strategyProfileId, datasetScope, runConfig,
- * metrics, taskId }) using the baseline experiment's OWN datasetScope (datasetId / symbols /
- * timeframe / period) plus services.defaultPlatformRun.seed (the datasetScope persisted on a
- * ResearchExperiment row carries no `seed` field — mirrors run-strategy-baseline.mts's
- * defaultPlatformRun-sourced runConfig) and the RESEARCH_RUN_METRICS 7-metric catalog (038
- * catalog: pnl, sharpe, max_drawdown, win_rate, total_trades, profit_factor,
- * top_trade_contribution_pct — src/domain/platform-comparison.ts).
+ * Then: reconstructStrategyBundle(services.artifacts, baseline.bundleArtifactRef) →
+ * services.experimentService.runWalkForwardOptimization({ baselineExperimentId, strategyBundle,
+ * profile, strategyProfileId, datasetScope, runConfig, metrics, taskId, correlationId }) using
+ * the baseline experiment's OWN datasetScope (datasetId / symbols / timeframe / period) plus
+ * services.defaultPlatformRun.seed (the datasetScope persisted on a ResearchExperiment row
+ * carries no `seed` field — mirrors run-strategy-baseline.mts's defaultPlatformRun-sourced
+ * runConfig) and the RESEARCH_RUN_METRICS 7-metric catalog (038 catalog: pnl, sharpe,
+ * max_drawdown, win_rate, total_trades, profit_factor, top_trade_contribution_pct —
+ * src/domain/platform-comparison.ts). `correlationId` is set to the script's generated `taskId`
+ * (`run-strategy-wfo-${randomUUID()}`), which doubles as the cumulative token-budget key for
+ * this WFO run (ExperimentService.budgetExhausted).
  *
  * NOTE (tsc-invisible semantic contract): `datasetScope` carries `period`; `runConfig` is
  * `Omit<PlatformRunConfig, 'period'>` and must NOT carry it — the WFO round loop derives its own
@@ -71,9 +66,6 @@
  *   BACKTESTER_API_TOKEN   — optional bearer token for the backtester (default: '').
  *   PLATFORM_RUN_MAX_POLLS / PLATFORM_RUN_POLL_DELAY_MS — poll budget per platform run
  *                              (defaults 30 / 2000ms; loadEnv, src/config/env.ts).
- *   BUILDER_ADAPTER=mastra          — REQUIRED. composeRuntime's buildStrategyBuilder() silently
- *                              falls back to FakeStrategyBuilder (a template bundle, not a real
- *                              LLM build) for any other value.
  *   WFO_GATE1_ADAPTER=mastra              — REQUIRED. Otherwise composeRuntime wires FakeGate1
  *                              (rule-based) and this would not be a real GATE1 decision.
  *   WFO_SWEEP_DESIGNER_ADAPTER=mastra     — REQUIRED. Otherwise composeRuntime wires
@@ -81,12 +73,25 @@
  *   WFO_RESULT_INTERPRETER_ADAPTER=mastra — REQUIRED. Otherwise composeRuntime wires
  *                              FakeResultInterpreter (rule-based).
  *   MODEL_PROVIDER            — anthropic | openai | openrouter (validated below; loadEnv
- *                              silently defaults to 'anthropic' on garbage input).
+ *                              silently defaults to 'anthropic' on garbage input). STILL REQUIRED
+ *                              here even though this script no longer rebuilds the strategy
+ *                              bundle: composeMastra(env) (src/mastra/compose-mastra.ts) builds
+ *                              the three WFO agents (gate1/sweepDesigner/resultInterpreter)
+ *                              eagerly inside composeRuntime() whenever their WFO_*_ADAPTER is
+ *                              'mastra', via resolveLanguageModel(env, roleModelId)
+ *                              (src/adapters/llm/model-provider.ts) — which falls back to
+ *                              env.MODEL_PROVIDER for any WFO_*_MODEL value without an explicit
+ *                              "anthropic/" | "openai/" | "openrouter/" prefix override. The
+ *                              WFO_*_MODEL defaults below do carry an explicit "anthropic/"
+ *                              prefix, so MODEL_PROVIDER is inert for an unconfigured run, but a
+ *                              caller who overrides e.g. WFO_GATE1_MODEL to a bare model id
+ *                              depends on it — kept validated so garbage input fails loudly
+ *                              instead of loadEnv's silent 'anthropic' default.
  *   ANTHROPIC_API_KEY /
  *   OPENAI_API_KEY /
- *   OPENROUTER_API_KEY        — key matching the selected MODEL_PROVIDER.
- *   BUILDER_MODEL              — model id for the strategy builder
- *                              (default: anthropic/claude-sonnet-4-6 — src/config/env.ts).
+ *   OPENROUTER_API_KEY        — key matching the selected MODEL_PROVIDER (or a WFO_*_MODEL's
+ *                              explicit prefix override); resolveLanguageModel throws if the
+ *                              matching key is absent.
  *   WFO_GATE1_MODEL / WFO_SWEEP_DESIGNER_MODEL / WFO_RESULT_INTERPRETER_MODEL — model ids for the
  *                              three WFO agents (src/config/env.ts defaults).
  *   BASELINE_EXPERIMENT_ID     — REQUIRED. id of an existing completed strategy_baseline_validation
@@ -105,10 +110,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { composeRuntime } from '../src/composition.ts';
-import { assembleStrategyBundle } from '../src/domain/strategy-bundle.ts';
+import { reconstructStrategyBundle } from '../src/research/reconstruct-strategy-bundle.ts';
 import { RESEARCH_RUN_METRICS } from '../src/domain/platform-comparison.ts';
 import { MODEL_PROVIDERS } from '../src/adapters/llm/model-provider.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
 import type { DatasetScope } from '../src/domain/research-experiment.ts';
 import type { PlatformRunConfig } from '../src/ports/research-platform.port.ts';
 
@@ -121,13 +125,6 @@ if (!rawProvider) {
 if (!(MODEL_PROVIDERS as readonly string[]).includes(rawProvider)) {
   throw new Error(
     `MODEL_PROVIDER="${rawProvider}" is not valid; expected one of: ${MODEL_PROVIDERS.join(' | ')}`,
-  );
-}
-
-if (process.env['BUILDER_ADAPTER'] !== 'mastra') {
-  throw new Error(
-    'BUILDER_ADAPTER=mastra is required — otherwise composeRuntime wires FakeStrategyBuilder '
-    + '(a template bundle) and this would not be a real build.',
   );
 }
 
@@ -192,51 +189,22 @@ try {
 
   process.stderr.write(`[run-wfo] profile id=${profile.id} fingerprint=${profile.sourceFingerprint}\n`);
 
-  // ── 3) build the strategy bundle via the composed builder (real LLM; BUILDER_ADAPTER=mastra) ──
+  // ── 3) reconstruct the EXACT strategy bundle the baseline validated ─────────────────────────
+  //      (research_experiment.bundle_artifact_ref, persisted by run-strategy-baseline.mts) —
+  //      no LLM rebuild, no bundle-hash mismatch possible.
 
-  const authoringDoc = getAuthoringDoc('strategy');
-  process.stderr.write(
-    `[run-wfo] strategyBuilder.build() adapter=${services.strategyBuilder.adapter} `
-    + `model=${services.strategyBuilder.model}...\n`,
-  );
-  const out = await services.strategyBuilder.build({
-    spec: { description: `wfo sweep for baseline experiment ${baseline.id}` },
-    authoringDoc,
-    profile,
-  });
-  const strategyBundle = await assembleStrategyBundle(out);
-  process.stderr.write(
-    `[run-wfo] bundle id=${strategyBundle.manifest.id} hash=${strategyBundle.bundleHash}\n`,
-  );
-
-  // ── 3b) PRE-FLIGHT bundle-hash guard (see KNOWN LIMITATION in the file header) ──────────────
-  //      Fail fast with a script-level, actionable error BEFORE calling runWalkForwardOptimization
-  //      (which now also guards this, but with less context on WHY a rebuilt bundle can't match).
-  if (strategyBundle.bundleHash !== baseline.bundleHash) {
+  if (!baseline.bundleArtifactRef) {
     throw new Error(
-      `run-strategy-wfo: rebuilt bundle hash (${strategyBundle.bundleHash}) does not match baseline `
-      + `experiment bundleHash (${baseline.bundleHash}, baselineExperimentId=${baselineExperimentId}). `
-      + 'This script rebuilds the strategy bundle via the non-deterministic LLM builder '
-      + '(services.strategyBuilder.build), so its hash will essentially never match the bundle the '
-      + 'baseline validated. WFO must optimize the exact bundle the baseline validated — see the '
-      + 'KNOWN LIMITATION note in this file\'s header for the proper follow-up fix (persist + '
-      + 'reconstruct the baseline\'s strategy_bundle artifact ref instead of rebuilding).',
+      `baseline experiment ${baselineExperimentId} has no bundleArtifactRef — re-run `
+      + 'scripts/run-strategy-baseline.mts (post-G1 version) to persist the bundle ref.',
     );
   }
-
-  // ── 4) persist the bundle before submit (audit anchor; same shape as
-  //      run-strategy-baseline.mts's 'strategy_bundle' persist) ────────────────
-
-  await services.artifacts.put(
-    JSON.stringify({
-      source: strategyBundle.source,
-      manifest: strategyBundle.manifest,
-      bundleHash: strategyBundle.bundleHash,
-    }),
-    { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'run-strategy-wfo' },
+  const strategyBundle = await reconstructStrategyBundle(services.artifacts, baseline.bundleArtifactRef);
+  process.stderr.write(
+    `[run-wfo] reconstructed bundle id=${strategyBundle.manifest.id} hash=${strategyBundle.bundleHash}\n`,
   );
 
-  // ── 5) run the WFO decision contour against the real backtester ────────────────
+  // ── 4) run the WFO decision contour against the real backtester ────────────────
 
   const datasetScope: DatasetScope = {
     datasetId: baseline.datasetScope.datasetId,
@@ -268,13 +236,14 @@ try {
     runConfig,
     metrics: RESEARCH_RUN_METRICS,
     taskId,
+    correlationId: taskId,
     ...(entrySignalEvidence !== undefined ? { entrySignalEvidence } : {}),
   });
 
   // eslint-disable-next-line no-console
   console.log(JSON.stringify({ experimentId, verdict, terminalReason }));
 
-  // ── 6) read back member ledger rows ─────────────────────────────────────────
+  // ── 5) read back member ledger rows ─────────────────────────────────────────
 
   const members = await services.experiments.listMembers(experimentId);
   for (const m of members) {

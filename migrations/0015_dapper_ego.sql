@@ -1,0 +1,1 @@
+ALTER TABLE "research_experiment" ADD COLUMN "bundle_artifact_ref" jsonb;

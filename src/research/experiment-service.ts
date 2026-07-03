@@ -27,6 +27,10 @@ import type { GridPoint } from './param-grid.ts';
 import { GridTooLargeError } from './param-grid.ts';
 import type { GridResult, RankedPoint } from './top-n-prefilter.ts';
 import { stableStringify } from '../orchestrator/handlers/backtest-support.ts';
+import type { ArtifactRef } from '../domain/types.ts';
+import type { AgentCallOpts } from '../ports/agent-call-opts.ts';
+import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
+import { withinTokenBudget } from '../orchestrator/token-budget.ts';
 
 export interface WfoBudget {
   maxRounds: number;
@@ -51,6 +55,8 @@ export interface ExperimentServiceDeps {
   paramGridRunner: ParamGridRunner;
   strategyBacktests: StrategyBacktestRunRepository;
   wfoBudget?: WfoBudget;
+  tokenUsage?: Pick<TokenUsageRepository, 'get'>;
+  researchTaskTokenBudget?: number;
 }
 
 /** Merges a newly-designed round grid into the running union (dedupes values per key by stable-stringify identity). */
@@ -78,6 +84,7 @@ export interface RunStrategyBaselineValidationInput {
   holdoutPolicy?: HoldoutPolicy;
   objective?: string;
   taskId: string;
+  bundleArtifactRef?: ArtifactRef;
 }
 
 export interface RunNewStrategyValidationInput {
@@ -104,6 +111,8 @@ export interface RunWfoInput {
   metrics: readonly string[];
   entrySignalEvidence?: boolean;        // GATE1 evidence flag for a 0-trade baseline; defaults false
   taskId: string;
+  correlationId: string;
+  agentOpts?: AgentCallOpts;
 }
 
 export class ExperimentService {
@@ -229,7 +238,15 @@ export class ExperimentService {
       datasetScope: input.datasetScope, holdoutPolicy: policy,
     });
     const existing = await this.d.experiments.findByKey(experimentKey);
-    if (existing && existing.status === 'completed') return { experimentId: existing.id, verdict: existing.verdict ?? 'INCONCLUSIVE' };
+    if (existing && existing.status === 'completed') {
+      if (!existing.bundleArtifactRef && input.bundleArtifactRef) {
+        await this.d.experiments.updateExperiment(existing.id, {
+          bundleArtifactRef: input.bundleArtifactRef,
+          updatedAt: this.d.now(),
+        });
+      }
+      return { experimentId: existing.id, verdict: existing.verdict ?? 'INCONCLUSIVE' };
+    }
 
     const now = this.d.now();
     const experimentId = existing?.id ?? this.d.newId('exp');
@@ -240,6 +257,7 @@ export class ExperimentService {
         bundleHash: input.strategyBundle.bundleHash, objective: input.objective,
         datasetScope: input.datasetScope, holdoutPolicy: policy, status: 'running',
         createdAt: now, updatedAt: now,
+        ...(input.bundleArtifactRef !== undefined ? { bundleArtifactRef: input.bundleArtifactRef } : {}),
       };
       await this.d.experiments.createExperiment(exp);
       await this.d.events.append({
@@ -436,12 +454,17 @@ export class ExperimentService {
       return { experimentId, verdict, terminalReason };
     };
 
+    // --- Budget gate (BEFORE GATE1 — a spent correlation never even reaches the first LLM call) ---
+    if (await this.budgetExhausted(input.correlationId)) {
+      return finalize('INCONCLUSIVE', 'budget_exhausted');
+    }
+
     // --- GATE1 ---
     const { entryAffecting } = classifyEntryAffectingParams(input.profile.profile.parameters);
     const hasEntrySignalEvidence = baselineMetrics.totalTrades > 0 || input.entrySignalEvidence === true;
     const gate1Decision = await this.d.gate1.decide({
       profile: input.profile, baselineMetrics, entryAffecting, hasEntrySignalEvidence,
-    });
+    }, input.agentOpts);
     if (gate1Decision.decision === 'stop_not_worth' || gate1Decision.decision === 'stop_insufficient_evidence') {
       return finalize('INCONCLUSIVE', gate1Decision.decision);
     }
@@ -455,14 +478,22 @@ export class ExperimentService {
     // --- Round loop ---
     let unionGrid: ParameterGrid = existing?.parameterGrid ? { ...existing.parameterGrid } : {};
     let selected: { point: GridPoint; foldId: number } | undefined;
+    let budgetExhaustedMidLoop = false;
 
     for (let r = 1; r <= budget.maxRounds; r += 1) {
+      // Budget gate at the TOP of every round — before the next sweepDesigner (LLM) call. A run
+      // already 'select'-ed out of the loop never reaches here (the loop already broke), so the
+      // post-loop holdout backtest below is unaffected — it is not an LLM call.
+      if (await this.budgetExhausted(input.correlationId)) {
+        budgetExhaustedMidLoop = true;
+        break;
+      }
       const tunableParams = input.profile.profile.parameters.filter((p) => p.tunable);
       const restrictToEntryParams = gate1Decision.decision === 'allow_exploratory_sweep';
       const sweep = await this.d.sweepDesigner.design({
         profile: input.profile, baselineTrainSummary: baselineMetrics, tunableParams,
         restrictToEntryParams, periodTo: T, maxPoints: budget.maxPointsPerRound,
-      });
+      }, input.agentOpts);
 
       const gridValidation = validateSweepGrid(sweep.grid, {
         tunableParamNames: tunableParams.map((p) => p.name), restrictToEntryParams, entryAffecting,
@@ -503,7 +534,7 @@ export class ExperimentService {
 
       const interpretation = await this.d.resultInterpreter.interpret({
         topN: ranked, periodTo: T, roundsSoFar: r, maxRounds: budget.maxRounds,
-      });
+      }, input.agentOpts);
 
       if (interpretation.decision === 'select') {
         const chosen = ranked.find((res) => res.paramsHash === interpretation.chosenParamsHash);
@@ -515,7 +546,9 @@ export class ExperimentService {
       // extend
       if (r >= budget.maxRounds) return finalize('INCONCLUSIVE', 'round_limit_reached');
     }
-    if (!selected) return finalize('INCONCLUSIVE', 'round_limit_reached');
+    if (!selected) {
+      return finalize('INCONCLUSIVE', budgetExhaustedMidLoop ? 'budget_exhausted' : 'round_limit_reached');
+    }
 
     // --- On select: ONE holdout OOS run ---
     const holdoutRun: PlatformRunConfig = {
@@ -558,6 +591,17 @@ export class ExperimentService {
       createdAt: this.d.now(),
     });
     return { experimentId, verdict: result.verdict, terminalReason };
+  }
+
+  /**
+   * Persisted-counter budget gate for the WFO agent lane: true once the correlation's cumulative
+   * token spend has reached (or exceeds) the research-task budget. Absent tokenUsage/budget deps
+   * (backward-compat default) means unlimited — never trips.
+   */
+  private async budgetExhausted(correlationId: string): Promise<boolean> {
+    if (!this.d.tokenUsage || this.d.researchTaskTokenBudget === undefined) return false;
+    const cumulative = await this.d.tokenUsage.get(correlationId);
+    return !withinTokenBudget(cumulative, this.d.researchTaskTokenBudget);
   }
 
   /** WFO-only member writer (train ledger + the single holdout row); baseline's runStrategyMember is untouched. */

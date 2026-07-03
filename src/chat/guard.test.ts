@@ -143,7 +143,7 @@ describe('planChatAction', () => {
     expect(d.kind === 'respond' && d.response.kind).toBe('needs_clarification');
   });
 
-  it('strategy subject (goal undefined) -> propose_task, action=strategy.analyze, no chain', async () => {
+  it('strategy subject (goal undefined) -> propose_task, action=strategy.analyze, chains strategy.baseline', async () => {
     const { plan } = args();
     const d = await planChatAction(turn({ subject: 'strategy', confidence: 0.9, strategyText: 'go long on oi' }), plan);
     expect(d.kind).toBe('propose_task');
@@ -151,18 +151,30 @@ describe('planChatAction', () => {
       expect(d.action).toBe('strategy.analyze');
       expect(d.taskType).toBe('strategy.onboard');
       expect(d.payload).toEqual({ kind: 'manual_description', content: 'go long on oi' });
-      expect(d.chain).toBeUndefined();
+      expect(d.chain).toMatchObject({ nextTaskType: 'strategy.baseline' });
     }
   });
 
-  it('strategy subject goal=analyze -> propose_task action=strategy.analyze, no chain', async () => {
+  it('strategy subject goal=analyze -> propose_task action=strategy.analyze, chains strategy.baseline', async () => {
     const { plan } = args();
     const d = await planChatAction(turn({ subject: 'strategy', goal: 'analyze', confidence: 0.9, strategyText: 'go long on oi' }), plan);
     expect(d.kind).toBe('propose_task');
     if (d.kind === 'propose_task') {
       expect(d.action).toBe('strategy.analyze');
-      expect(d.chain).toBeUndefined();
+      expect(d.chain).toMatchObject({ nextTaskType: 'strategy.baseline' });
     }
+  });
+
+  it('ordinary strategy onboarding chains strategy.baseline after confirm', async () => {
+    const { plan } = args();
+    const d = await planChatAction(turn({ subject: 'strategy', goal: undefined, confidence: 0.9, strategyText: 'buy dips' }), plan);
+    expect(d).toMatchObject({ kind: 'propose_task', taskType: 'strategy.onboard', chain: { nextTaskType: 'strategy.baseline' } });
+  });
+
+  it('explicit research goal still chains research.run_cycle', async () => {
+    const { plan } = args();
+    const d = await planChatAction(turn({ subject: 'strategy', goal: 'research', confidence: 0.9, strategyText: 'buy dips' }), plan);
+    expect(d).toMatchObject({ chain: { nextTaskType: 'research.run_cycle' } });
   });
 
   it('strategy subject falls back to the raw message when strategyText is absent', async () => {

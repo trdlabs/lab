@@ -400,6 +400,38 @@ describe('handleChatMessage — confirmation consumption (second turn)', () => {
     expect(after?.pendingInteraction).toBeUndefined();
   });
 
+  it('confirming an ORDINARY onboarding proposal creates the ChatPlan and plans strategy.baseline next', async () => {
+    const base = deps();
+    const captured: { type: string; payload: Record<string, unknown> }[] = [];
+    const spyEvents = {
+      append: async (e: { type: string; payload: Record<string, unknown> }) => { captured.push({ type: e.type, payload: e.payload }); },
+      listByTask: async () => [],
+    };
+    const d = { ...base.d, events: spyEvents as unknown as ChatHandlerDeps['events'] };
+    const { queue, sessions, plans } = base;
+
+    const r = await handleChatMessage({ message: strategyMsg, session: session(), source: 'web' }, d);
+    expect(r.kind).toBe('assistant_message');
+    const savedSession = await sessions.get('s1');
+    // No ChatPlan and no pendingPlanId until the operator confirms.
+    expect(savedSession?.pendingPlanId).toBeUndefined();
+    expect(captured.some((e) => e.type === 'chat.plan.created')).toBe(false);
+
+    const confirmed = await handleChatMessage({ message: 'да', session: savedSession!, source: 'web' }, d);
+    expect(confirmed.kind).toBe('task_created');
+    if (confirmed.kind !== 'task_created') return;
+    expect(confirmed.plannedNextStep?.taskType).toBe('strategy.baseline');
+    expect(confirmed.plannedNextStep?.after).toBe('strategy.onboard');
+    expect(queue.queued).toHaveLength(1);
+    // The chain ChatPlan now exists, keyed on the just-created onboard task.
+    const plan = await plans.findPendingByAfterTaskId(confirmed.taskId);
+    expect(plan).not.toBeNull();
+    expect(plan?.nextTaskType).toBe('strategy.baseline');
+    const after = await sessions.get('s1');
+    expect(after?.pendingPlanId).toBeTruthy();
+    expect(after?.pendingInteraction).toBeUndefined();
+  });
+
   it('emits chat.proposal.created (turn 1) -> chat.proposal.confirmed -> chat.task_created (turn 2) in order', async () => {
     const base = deps();
     const captured: { type: string; payload: Record<string, unknown> }[] = [];

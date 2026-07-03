@@ -1,12 +1,18 @@
 import type { Gate1DecisionPort } from '../../ports/wfo-agents.port.ts';
 import type { Gate1Input } from '../../ports/wfo-agents.port.ts';
 import type { Gate1Output } from '../../domain/wfo.ts';
+import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
 
 export class FakeGate1 implements Gate1DecisionPort {
   readonly adapter = 'fake' as const;
   readonly model = 'fake';
+  readonly calls: Gate1Input[] = [];
 
-  async decide(input: Gate1Input): Promise<Gate1Output> {
+  async decide(input: Gate1Input, opts?: AgentCallOpts): Promise<Gate1Output> {
+    this.calls.push(input);
+    if (opts?.onUsage) {
+      await opts.onUsage({ modelId: this.model, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    }
     if (input.baselineMetrics.totalTrades >= 1) {
       return { decision: 'improve', reason: 'Baseline has trades — improvement round is worth running.' };
     }

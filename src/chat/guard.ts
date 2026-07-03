@@ -31,7 +31,7 @@ export function parseTurn(raw: unknown): ParseResult {
 }
 
 export interface ChainSpec {
-  nextTaskType: 'research.run_cycle';
+  nextTaskType: 'research.run_cycle' | 'strategy.baseline';
   resolveProfileByFingerprint: string;
 }
 
@@ -62,9 +62,10 @@ function buildOnboardDecision(sid: string, userGoal: string, text: string, withR
   if (v.status === 'invalid') {
     return { kind: 'respond', response: needsClarification(sid, 'Не удалось разобрать текст стратегии.', v.issues.map((i) => i.path)) };
   }
-  const chain: ChainSpec | undefined = withResearch
-    ? { nextTaskType: 'research.run_cycle', resolveProfileByFingerprint: sourceFingerprint(kind, text) }
-    : undefined;
+  const chain: ChainSpec = {
+    nextTaskType: withResearch ? 'research.run_cycle' : 'strategy.baseline',
+    resolveProfileByFingerprint: sourceFingerprint(kind, text),
+  };
   const action: OperatorAction = withResearch ? 'research.run_cycle' : 'strategy.analyze';
   return { kind: 'propose_task', action, taskType: 'strategy.onboard', payload: v.data, chain, userGoal };
 }
