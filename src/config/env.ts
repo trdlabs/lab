@@ -21,6 +21,10 @@ export interface Env {
   PLATFORM_RUN_MAX_POLLS: number;
   PLATFORM_RUN_POLL_DELAY_MS: number;
   TRADING_PLATFORM_BASELINE_VERSION: string;
+  /** Max in-flight grid points per WFO round (lab self-limit; backtester has no ingress backpressure yet). */
+  RESEARCH_GRID_CONCURRENCY: number;
+  /** BullMQ worker concurrency — research tasks processed in parallel per lab process. */
+  LAB_QUEUE_CONCURRENCY: number;
   STRATEGY_ANALYST_ADAPTER: 'fake' | 'mastra';
   STRATEGY_ANALYST_MODEL: string;
   ANTHROPIC_API_KEY?: string;
@@ -171,6 +175,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PLATFORM_RUN_MAX_POLLS: parsePositiveInt(source.PLATFORM_RUN_MAX_POLLS, 30),
     PLATFORM_RUN_POLL_DELAY_MS: parsePositiveInt(source.PLATFORM_RUN_POLL_DELAY_MS, 2000),
     TRADING_PLATFORM_BASELINE_VERSION: source.TRADING_PLATFORM_BASELINE_VERSION ?? 'v1',
+    RESEARCH_GRID_CONCURRENCY: parsePositiveInt(source.RESEARCH_GRID_CONCURRENCY, 4),
+    LAB_QUEUE_CONCURRENCY: parsePositiveInt(source.LAB_QUEUE_CONCURRENCY, 1),
     STRATEGY_ANALYST_ADAPTER: resolveAdapter(source.STRATEGY_ANALYST_ADAPTER),
     STRATEGY_ANALYST_MODEL: source.STRATEGY_ANALYST_MODEL ?? 'openrouter/openai/gpt-5.5',
     ANTHROPIC_API_KEY: source.ANTHROPIC_API_KEY,

@@ -1,6 +1,7 @@
 import { expandGrid } from './param-grid.ts';
 import { rankTopN } from './top-n-prefilter.ts';
 import { computeStrategyParamsHash } from './strategy-run-identity.ts';
+import { mapWithConcurrency } from './map-with-concurrency.ts';
 import type { GridResult, RankedPoint } from './top-n-prefilter.ts';
 import type { StrategyExperimentRunExecutor } from './strategy-experiment-run-executor.ts';
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
@@ -9,6 +10,9 @@ import type { ParameterGrid } from '../domain/research-experiment.ts';
 
 export interface ParamGridRunnerDeps {
   strategyRunExecutor: StrategyExperimentRunExecutor;
+  /** Max grid points in flight. Default 1 (serial); production wires
+   *  RESEARCH_GRID_CONCURRENCY from env via composition.ts. */
+  concurrency?: number;
 }
 
 export interface RunGridInput {
@@ -40,9 +44,8 @@ export class ParamGridRunner {
 
   async runGrid(input: RunGridInput): Promise<GridRunOutput> {
     const points = expandGrid(input.grid, input.maxPoints);
-    const allResults: GridResult[] = [];
 
-    for (const point of points) {
+    const allResults = await mapWithConcurrency(points, this.d.concurrency ?? 1, async (point) => {
       const outcome = await this.d.strategyRunExecutor.execute({
         experimentId: input.experimentId,
         role: 'train',
@@ -66,9 +69,8 @@ export class ParamGridRunner {
         strategyBacktestRunId: outcome.runId,
         ...(outcome.status === 'completed' ? { metrics: outcome.metrics, tradeCount: outcome.totalTrades } : {}),
       };
-
-      allResults.push(result);
-    }
+      return result;
+    });
 
     const ranked = rankTopN(allResults, { n: input.topN, minTradesTrain: input.minTradesTrain });
     const rejected = allResults.filter((r) => r.status !== 'completed').length;

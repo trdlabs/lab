@@ -197,4 +197,113 @@ describe('runStrategyBaselineValidation', () => {
     const members = await experiments.listMembers('exp-1');
     expect(members).toHaveLength(0);
   });
+
+  it('submits train and holdout concurrently after the boundary resolves', async () => {
+    const entered: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    class TimedStrategyExecutor implements StrategyExperimentRunExecutor {
+      async execute(req: StrategyExperimentRunRequest): Promise<StrategyExperimentRunResult> {
+        entered.push(req.role);
+        if (req.role === 'train' || req.role === 'holdout') {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          inFlight--;
+        }
+        if (req.role === 'holdout') {
+          return { status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout', totalTrades: 30, metrics: viableHoldoutMetrics() };
+        }
+        if (req.role === 'train') {
+          return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+        }
+        return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      }
+    }
+
+    const experiments = new InMemoryResearchExperimentRepository();
+    const runTrades = new FakeRunTradesAdapter({ 'plat-sanity': trades(90) });
+    const executor = new TimedStrategyExecutor();
+    let counter = 0;
+    const svc = new ExperimentService({
+      experiments,
+      runTrades,
+      runExecutor: new NeverOverlayExecutor(),
+      strategyRunExecutor: executor,
+      newId: (p) => `${p}-${++counter}`,
+      now: () => '2026-01-01T00:00:00.000Z',
+      events: { append: async () => {}, listByTask: async () => [] },
+      gate1: new FakeGate1(),
+      sweepDesigner: new FakeSweepDesigner(),
+      resultInterpreter: new FakeResultInterpreter(),
+      paramGridRunner: new ParamGridRunner({ strategyRunExecutor: executor }),
+      strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
+    });
+
+    await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(entered).toEqual(expect.arrayContaining(['sanity', 'train', 'holdout']));
+    expect(maxInFlight).toBe(2); // train and holdout overlapped
+  });
+
+  it('verdict parity: train fails ⇒ INCONCLUSIVE train_not_run even though holdout completed', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'rejected', runId: 'r-train', platformRunId: 'plat-train' };
+      return { status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout', totalTrades: 30, metrics: viableHoldoutMetrics() };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('train_not_run');
+  });
+
+  it('verdict parity: train pending ⇒ INCONCLUSIVE run_pending (checked before holdout outcome)', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'pending', runId: 'r-train', platformRunId: 'plat-train' };
+      return { status: 'rejected', runId: 'r-holdout', platformRunId: 'plat-holdout' };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('run_pending');
+  });
+
+  it('verdict parity: train completed + holdout rejected ⇒ INCONCLUSIVE holdout_not_run', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+      return { status: 'rejected', runId: 'r-holdout', platformRunId: 'plat-holdout' };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('holdout_not_run');
+  });
+
+  it('verdict parity: train rejected + holdout rejected ⇒ INCONCLUSIVE train_not_run (train-first ordering wins)', async () => {
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      if (role === 'train') return { status: 'rejected', runId: 'r-train', platformRunId: 'plat-train' };
+      return { status: 'rejected', runId: 'r-holdout', platformRunId: 'plat-holdout' };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    const { experimentId, verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('INCONCLUSIVE');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('train_not_run');
+  });
 });
