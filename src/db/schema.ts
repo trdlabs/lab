@@ -15,6 +15,7 @@ import type { PendingOperatorInteraction } from '../ports/chat-session.repositor
 import type { EvidenceRef, StrategyRetrievalMetadata } from '../domain/strategy-retrieval.ts';
 import type { ExperimentType, ExperimentStatus, MemberRole, ExperimentVerdict, DatasetScope, HoldoutPolicy, HoldoutBoundary, MemberResultSummary, ExperimentFlags } from '../domain/research-experiment.ts';
 import type { PaperSubmissionStatus } from '../domain/paper-submission.ts';
+import type { RevisionStatus, DroppedHypothesis } from '../domain/strategy-revision.ts';
 
 // Postgres tsvector has no first-class Drizzle column type. This customType lets us
 // DECLARE the column so drizzle-kit tracks it; the GENERATED ALWAYS expression that
@@ -352,6 +353,27 @@ export const paperSubmission = pgTable('paper_submission', {
 }, (t) => ({
   experimentUq: uniqueIndex('paper_submission_experiment_uq').on(t.experimentId),
   idempotencyUq: uniqueIndex('paper_submission_idempotency_uq').on(t.idempotencyKey),
+}));
+
+export const strategyRevision = pgTable('strategy_revision', {
+  id: text('id').primaryKey(),
+  strategyProfileId: text('strategy_profile_id').notNull(),
+  version: integer('version').notNull(),
+  baseRevisionId: text('base_revision_id'),
+  hypothesisIds: jsonb('hypothesis_ids').notNull().$type<string[]>(),
+  dropped: jsonb('dropped').$type<DroppedHypothesis[]>(),
+  mergedRuleSet: jsonb('merged_rule_set').notNull().$type<Record<string, unknown>>(),
+  bundleArtifactRef: jsonb('bundle_artifact_ref').$type<ArtifactRef>(),
+  bundleHash: text('bundle_hash'),
+  comboBacktestRunId: text('combo_backtest_run_id'),
+  status: text('status').notNull().$type<RevisionStatus>(),
+  metrics: jsonb('metrics').$type<Record<string, unknown>>(),
+  verdictReason: text('verdict_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  profileVersionUq: uniqueIndex('strategy_revision_profile_version_uq').on(t.strategyProfileId, t.version),
+  profileStatusIdx: index('strategy_revision_profile_status_idx').on(t.strategyProfileId, t.status),
 }));
 
 export const experimentRunMember = pgTable('experiment_run_member', {

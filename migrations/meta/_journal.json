@@ -127,6 +127,13 @@
       "when": 1783079156578,
       "tag": "0017_pretty_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783094102856,
+      "tag": "0018_sloppy_millenium_guard",
+      "breakpoints": true
     }
   ]
 }
