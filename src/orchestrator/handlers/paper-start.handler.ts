@@ -1,16 +1,49 @@
 // src/orchestrator/handlers/paper-start.handler.ts
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { WorkflowHandler } from '../workflow-router.ts';
+import type { WorkflowHandler, HandlerDeps } from '../workflow-router.ts';
+import type { ResearchTask } from '../../domain/types.ts';
+import type { PaperSubmission } from '../../domain/paper-submission.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { buildChampionSubmission } from '../../research/champion-evidence.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import { event } from './backtest-support.ts';
 
 export const PaperStartPayloadSchema = z.object({
   experimentId: z.string().min(1),
   baselineExperimentId: z.string().min(1),
 });
+
+/**
+ * Retry-edge guard: an already-submitted champion whose ledger row has no live monitor yet
+ * (undefined monitorStatus — e.g. a pre-G4 row — or still 'watching'). Seeds the monitor fields
+ * cheaply computable here via `updateMonitorState` (defined-fields-only patch — NEVER a second
+ * upsert, per upsertByExperimentId's full-replace semantics) and (re)schedules paper.monitor at
+ * attempt 0; the task's dedupeKey makes re-running this safe (intake dedup).
+ */
+async function ensureMonitorScheduled(
+  task: ResearchTask,
+  services: HandlerDeps,
+  experimentId: string,
+  existing: PaperSubmission,
+): Promise<void> {
+  const patch: Partial<Pick<PaperSubmission, 'monitorStatus' | 'observedTrades' | 'windowPolicy'>> = {};
+  if (existing.monitorStatus === undefined) patch.monitorStatus = 'watching';
+  if (existing.observedTrades === undefined) patch.observedTrades = 0;
+  if (existing.windowPolicy === undefined) patch.windowPolicy = { ...services.paperWindowPolicy };
+  if (Object.keys(patch).length > 0) {
+    await services.paperSubmissions.updateMonitorState(experimentId, { ...patch, updatedAt: new Date().toISOString() });
+  }
+  await createAndEnqueueTask(
+    {
+      taskType: 'paper.monitor', source: task.source, payload: { experimentId },
+      correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:0`,
+      delayMs: services.paperMonitorPollMs,
+    },
+    { repo: services.researchTasks, queue: services.taskQueue },
+  );
+}
 
 export const paperStartHandler: WorkflowHandler = async (task, services) => {
   const parsed = validateWithSchema(PaperStartPayloadSchema, task.payload);
@@ -34,6 +67,10 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
   }
   const existing = await services.paperSubmissions.findByExperimentId(experimentId);
   if (existing?.submissionStatus === 'submitted') {
+    if (existing.monitorStatus === undefined || existing.monitorStatus === 'watching') {
+      await ensureMonitorScheduled(task, services, experimentId, existing);
+      return;
+    }
     await services.events.append(event(task.id, 'paper.already_submitted', { experimentId, candidateId: existing.candidateId ?? null }));
     return;
   }
@@ -72,6 +109,7 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
 
   if (res.ok) {
     const rejected = res.admissionStatus === 'rejected';
+    const admitted = res.admissionStatus === 'admitted';
     await services.paperSubmissions.upsertByExperimentId({
       id: randomUUID(), experimentId, strategyProfileId: wfo.strategyProfileId,
       submissionStatus: rejected ? 'rejected' : 'submitted',
@@ -79,12 +117,28 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
       admissionReasonCode: res.admissionReasonCode ?? undefined,
       idempotencyKey: args.idempotencyKey, bundleHash: bundle.bundleHash,
       ...(wfoHoldout.params ? { params: wfoHoldout.params } : {}),
+      ...(admitted ? {
+        strategyName: args.identity.strategyName,
+        monitorStatus: 'watching' as const,
+        observedTrades: 0,
+        windowPolicy: { ...services.paperWindowPolicy },
+      } : {}),
       createdAt: now, updatedAt: now,
     });
     await services.events.append(event(task.id, 'paper.candidate_submitted', {
       experimentId, candidateId: res.candidateId, admissionStatus: res.admissionStatus, idempotentReplay: res.idempotentReplay,
     }));
     if (rejected) await services.events.append(event(task.id, 'paper.candidate_rejected', { experimentId, candidateId: res.candidateId, reasonCode: res.admissionReasonCode }));
+    if (admitted) {
+      await createAndEnqueueTask(
+        {
+          taskType: 'paper.monitor', source: task.source, payload: { experimentId },
+          correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:0`,
+          delayMs: services.paperMonitorPollMs,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
+    }
     return;
   }
   if (res.error.category === 'internal_error') {

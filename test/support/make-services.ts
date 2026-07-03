@@ -118,6 +118,8 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
     paperIntake: DISABLED_PAPER_INTAKE,
     paperSubmissions: new InMemoryPaperSubmissionRepository(),
+    paperWindowPolicy: { minTrades: 30, lowConfidenceThreshold: 15, minDays: 3, maxDays: 30, maxWaitDays: 7 },
+    paperMonitorPollMs: 21600000,
     ...overrides,
   };
 }

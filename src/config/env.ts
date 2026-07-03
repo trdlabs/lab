@@ -122,6 +122,8 @@ export interface Env {
   PAPER_WINDOW_MAX_DAYS: number;
   /** Max days the paper monitor waits before treating a run as unresponsive (default: 7). */
   PAPER_MONITOR_MAX_WAIT_DAYS: number;
+  /** Delay (ms) between paper.monitor self-reschedule polls (default: 21600000 — 6 hours). */
+  PAPER_MONITOR_POLL_MS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -239,6 +241,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PAPER_WINDOW_MIN_DAYS: parsePositiveInt(source.PAPER_WINDOW_MIN_DAYS, 3),
     PAPER_WINDOW_MAX_DAYS: parsePositiveInt(source.PAPER_WINDOW_MAX_DAYS, 30),
     PAPER_MONITOR_MAX_WAIT_DAYS: parsePositiveInt(source.PAPER_MONITOR_MAX_WAIT_DAYS, 7),
+    PAPER_MONITOR_POLL_MS: parsePositiveInt(source.PAPER_MONITOR_POLL_MS, 21600000),
     ...loadRagEnv(source),
   };
 }

@@ -51,6 +51,7 @@ import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
 import { DrizzlePaperSubmissionRepository } from './adapters/repository/drizzle-paper-submission.repository.ts';
+import { type PaperWindowPolicy, validatePaperWindowPolicy } from './domain/paper-window.ts';
 import { selectPaperIntake } from './adapters/platform/paper-intake.port.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
@@ -279,6 +280,15 @@ export function composeRuntime() {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   if (!env.REDIS_URL) throw new Error('REDIS_URL is required');
 
+  const paperWindowPolicy: PaperWindowPolicy = {
+    minTrades: env.PAPER_WINDOW_MIN_TRADES,
+    lowConfidenceThreshold: env.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD,
+    minDays: env.PAPER_WINDOW_MIN_DAYS,
+    maxDays: env.PAPER_WINDOW_MAX_DAYS,
+    maxWaitDays: env.PAPER_MONITOR_MAX_WAIT_DAYS,
+  };
+  validatePaperWindowPolicy(paperWindowPolicy);
+
   const mastraRuntime = composeMastra(env);
 
   const { db, pool } = createDbClient(env.DATABASE_URL);
@@ -383,6 +393,8 @@ export function composeRuntime() {
     strategyBacktests,
     paperIntake: selectPaperIntake(process.env),
     paperSubmissions: new DrizzlePaperSubmissionRepository(db),
+    paperWindowPolicy,
+    paperMonitorPollMs: env.PAPER_MONITOR_POLL_MS,
   };
 
   const router = new WorkflowRouter();
