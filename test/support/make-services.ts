@@ -17,6 +17,7 @@ import { FakeStrategyBuilder } from '../../src/adapters/builder/fake-strategy-bu
 import { InMemoryHypothesisBuildRepository } from '../../src/adapters/repository/in-memory-hypothesis-build.repository.ts';
 import { InMemoryBacktestRunRepository } from '../../src/adapters/repository/in-memory-backtest-run.repository.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../../src/adapters/repository/in-memory-strategy-backtest-run.repository.ts';
+import { InMemoryStrategyRevisionRepository } from '../../src/adapters/repository/in-memory-strategy-revision.repository.ts';
 import { InMemoryEvaluationRepository } from '../../src/adapters/repository/in-memory-evaluation.repository.ts';
 import { DEFAULT_EVALUATOR_THRESHOLDS } from '../../src/validation/evaluator.ts';
 import { InMemoryChatSessionRepository } from '../../src/adapters/repository/in-memory-chat-session.repository.ts';
@@ -45,6 +46,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
   const runTrades = new MockRunTradesAdapter();
   const events = overrides.events ?? new InMemoryAgentEventRepository();
   const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
+  const revisions = overrides.revisions ?? new InMemoryStrategyRevisionRepository();
   let _id = 0;
   const strategyRunExecutor: StrategyExperimentRunExecutor = {
     execute: async (req) => ({
@@ -75,6 +77,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     resultInterpreter: new FakeResultInterpreter(),
     paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
     strategyBacktests,
+    revisions,
   });
   return {
     taskQueue: new InMemoryQueueAdapter(),
@@ -113,6 +116,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     experimentService,
     strategyBuilder: new FakeStrategyBuilder(),
     strategyBacktests,
+    revisions,
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

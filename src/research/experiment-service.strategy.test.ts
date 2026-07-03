@@ -15,6 +15,10 @@ import { FakeGate1 } from '../adapters/wfo/fake-gate1.ts';
 import { FakeSweepDesigner } from '../adapters/wfo/fake-sweep-designer.ts';
 import { FakeResultInterpreter } from '../adapters/wfo/fake-result-interpreter.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
+import { InMemoryStrategyRevisionRepository } from '../adapters/repository/in-memory-strategy-revision.repository.ts';
+import type { StrategyRevisionRepository } from '../ports/strategy-revision.repository.ts';
+import type { AgentEvent, AgentEventRepository } from '../ports/agent-event.repository.ts';
+import type { StrategyBacktestRun } from '../domain/strategy-backtest-run.ts';
 import type { ArtifactRef } from '../domain/types.ts';
 
 // ---------------------------------------------------------------------------
@@ -112,6 +116,52 @@ function buildSvc(
     strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
   });
   return { svc, experiments, executor };
+}
+
+function seededStrategyBacktestRun(id: string, metrics: ReturnType<typeof viableHoldoutMetrics>): StrategyBacktestRun {
+  return {
+    id, strategyProfileId: 'p1', strategyBundleId: 'sb-1', bundleHash: 'sha256:bundle', paramsHash: '',
+    runKind: 'strategy_baseline', platformRunId: `plat-${id}`, correlationId: 'c1', params: {},
+    status: 'completed', metrics, platformRun: null, artifactRefs: [],
+    platformContractVersion: '1', sdkContractVersion: '1', backend: 'research_platform',
+    submittedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T00:00:00.000Z',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+async function buildSvcWithRevisions(
+  resultFor: (role: MemberRole) => StrategyExperimentRunResult,
+  tradesByRun: Record<string, TradeRecord[]>,
+  opts: { seedStrategyBacktests?: StrategyBacktestRun[]; events?: AgentEventRepository } = {},
+): Promise<{
+  svc: ExperimentService; experiments: InMemoryResearchExperimentRepository; executor: FakeStrategyExecutor;
+  revisions: InMemoryStrategyRevisionRepository; strategyBacktests: InMemoryStrategyBacktestRunRepository;
+}> {
+  const experiments = new InMemoryResearchExperimentRepository();
+  const runTrades = new FakeRunTradesAdapter(tradesByRun);
+  const executor = new FakeStrategyExecutor(resultFor);
+  const revisions = new InMemoryStrategyRevisionRepository();
+  const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
+  for (const row of opts.seedStrategyBacktests ?? []) {
+    await strategyBacktests.createSubmitted(row);
+  }
+  let counter = 0;
+  const svc = new ExperimentService({
+    experiments,
+    runTrades,
+    runExecutor: new NeverOverlayExecutor(),
+    strategyRunExecutor: executor,
+    newId: (p) => `${p}-${++counter}`,
+    now: () => '2026-01-01T00:00:00.000Z',
+    events: opts.events ?? { append: async () => {}, listByTask: async () => [] },
+    gate1: new FakeGate1(),
+    sweepDesigner: new FakeSweepDesigner(),
+    resultInterpreter: new FakeResultInterpreter(),
+    paramGridRunner: new ParamGridRunner({ strategyRunExecutor: executor }),
+    strategyBacktests,
+    revisions,
+  });
+  return { svc, experiments, executor, revisions, strategyBacktests };
 }
 
 // ---------------------------------------------------------------------------
@@ -364,5 +414,104 @@ describe('runStrategyBaselineValidation', () => {
     expect(verdict).toBe('INCONCLUSIVE');
     const exp = await experiments.findById(experimentId);
     expect(exp?.verdictReason).toBe('train_not_run');
+  });
+});
+
+describe('runStrategyBaselineValidation — bootstrap strategy_revision v1', () => {
+  const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+    if (role === 'holdout') {
+      return { status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout', totalTrades: 30, metrics: viableHoldoutMetrics() };
+    }
+    if (role === 'train') {
+      return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+    }
+    return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+  };
+
+  it('creates an accepted v1 revision from the holdout run once the baseline completes', async () => {
+    const holdoutMetrics = viableHoldoutMetrics();
+    const { svc, revisions } = await buildSvcWithRevisions(resultFor, { 'plat-sanity': trades(90) }, {
+      seedStrategyBacktests: [seededStrategyBacktestRun('r-holdout', holdoutMetrics)],
+    });
+    const ref = testArtifactRef();
+
+    const { verdict } = await svc.runStrategyBaselineValidation(baseInput({ bundleArtifactRef: ref }));
+    expect(verdict).toBe('PAPER_CANDIDATE');
+
+    const v1 = await revisions.findLatestAccepted('p1');
+    expect(v1).not.toBeNull();
+    expect(v1?.version).toBe(1);
+    expect(v1?.status).toBe('accepted');
+    expect(v1?.baseRevisionId).toBeUndefined();
+    expect(v1?.hypothesisIds).toEqual([]);
+    expect(v1?.mergedRuleSet).toEqual({ order: [], rules: [] });
+    expect(v1?.bundleArtifactRef).toEqual(ref);
+    expect(v1?.bundleHash).toBe('sha256:bundle');
+    expect(v1?.comboBacktestRunId).toBe('r-holdout');
+    expect(v1?.metrics).toEqual(holdoutMetrics);
+  });
+
+  it('is idempotent: a second baseline completion for the same profile leaves exactly one v1', async () => {
+    const { svc, revisions } = await buildSvcWithRevisions(resultFor, { 'plat-sanity': trades(90) }, {
+      seedStrategyBacktests: [seededStrategyBacktestRun('r-holdout', viableHoldoutMetrics())],
+    });
+
+    await svc.runStrategyBaselineValidation(baseInput());
+    expect((await revisions.listByProfile('p1'))).toHaveLength(1);
+
+    // A second, distinct baseline experiment for the SAME profile (different bundle ⇒ different
+    // experimentKey ⇒ bypasses the experiment-level dedup and re-reaches the finalize tail).
+    const secondBundle: AssembledStrategyBundle = { ...strategyBundle(), bundleHash: 'sha256:bundle-2' };
+    await svc.runStrategyBaselineValidation(baseInput({ strategyBundle: secondBundle }));
+
+    const all = await revisions.listByProfile('p1');
+    expect(all).toHaveLength(1);
+    expect(all[0]!.version).toBe(1);
+    expect(all[0]!.bundleHash).toBe('sha256:bundle'); // first run's v1 was NOT overwritten
+  });
+
+  it('does not throw and creates no revision when the revisions dep is absent', async () => {
+    // buildSvc() (unlike buildSvcWithRevisions) never wires a `revisions` dep — this is the
+    // production shape before this dep is threaded through composition, and must stay a no-op.
+    const { svc } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+
+    await expect(svc.runStrategyBaselineValidation(baseInput())).resolves.toMatchObject({ verdict: 'PAPER_CANDIDATE' });
+  });
+
+  it('bootstrap failure is fail-soft: emits revision.bootstrap_failed and leaves the baseline verdict intact', async () => {
+    const events: AgentEvent[] = [];
+    const throwingRevisions: StrategyRevisionRepository = {
+      create: async () => { throw new Error('revisions store unavailable'); },
+      findById: async () => null,
+      findLatestAccepted: async () => null,
+      updateStatus: async () => {},
+      listByProfile: async () => [],
+    };
+    const experiments = new InMemoryResearchExperimentRepository();
+    const runTrades = new FakeRunTradesAdapter({ 'plat-sanity': trades(90) });
+    const executor = new FakeStrategyExecutor(resultFor);
+    let counter = 0;
+    const svc = new ExperimentService({
+      experiments,
+      runTrades,
+      runExecutor: new NeverOverlayExecutor(),
+      strategyRunExecutor: executor,
+      newId: (p) => `${p}-${++counter}`,
+      now: () => '2026-01-01T00:00:00.000Z',
+      events: { append: async (e) => { events.push(e); }, listByTask: async () => [] },
+      gate1: new FakeGate1(),
+      sweepDesigner: new FakeSweepDesigner(),
+      resultInterpreter: new FakeResultInterpreter(),
+      paramGridRunner: new ParamGridRunner({ strategyRunExecutor: executor }),
+      strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
+      revisions: throwingRevisions,
+    });
+
+    const { verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('PAPER_CANDIDATE'); // baseline verdict unaffected by the bootstrap failure
+    const bootstrapFailed = events.find((e) => e.type === 'revision.bootstrap_failed');
+    expect(bootstrapFailed).toBeDefined();
+    expect(bootstrapFailed?.payload.strategyProfileId).toBe('p1');
   });
 });

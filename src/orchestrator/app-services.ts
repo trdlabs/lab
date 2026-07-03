@@ -31,6 +31,7 @@ import type { RunTradesPort } from '../ports/run-trades.port.ts';
 import type { ExperimentService } from '../research/experiment-service.ts';
 import type { StrategyBuilder } from '../ports/strategy-builder.port.ts';
 import type { StrategyBacktestRunRepository } from '../ports/strategy-backtest-run.repository.ts';
+import type { StrategyRevisionRepository } from '../ports/strategy-revision.repository.ts';
 import type { PaperIntakePort } from '../adapters/platform/paper-intake.port.ts';
 import type { PaperSubmissionRepository } from '../ports/paper-submission.repository.ts';
 import type { PaperWindowPolicy } from '../domain/paper-window.ts';
@@ -94,6 +95,8 @@ export interface AppServices {
   experimentService: ExperimentService;
   strategyBuilder: StrategyBuilder;
   strategyBacktests: StrategyBacktestRunRepository;
+  /** Strategy revisions ledger (slice G3); threaded through composition for revision.build (task-9+). */
+  revisions: StrategyRevisionRepository;
   /** #127 platform paper-intake — proven-champion submission. */
   paperIntake: PaperIntakePort;
   paperSubmissions: PaperSubmissionRepository;

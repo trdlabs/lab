@@ -52,6 +52,7 @@ import type { StrategyBuilder } from './ports/strategy-builder.port.ts';
 import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-hypothesis-build.repository.ts';
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
+import { DrizzleStrategyRevisionRepository } from './adapters/repository/drizzle-strategy-revision.repository.ts';
 import { DrizzlePaperSubmissionRepository } from './adapters/repository/drizzle-paper-submission.repository.ts';
 import { type PaperWindowPolicy, validatePaperWindowPolicy } from './domain/paper-window.ts';
 import { selectPaperIntake } from './adapters/platform/paper-intake.port.ts';
@@ -334,6 +335,7 @@ export function composeRuntime() {
   // WFO agent adapters: env-driven mastra/fake adapter selection, mirroring buildCritic/buildStrategyCritic.
   const paramGridRunner = new ParamGridRunner({ strategyRunExecutor, concurrency: env.RESEARCH_GRID_CONCURRENCY });
   const tokenUsage = new DrizzleTokenUsageRepository(db);
+  const revisions = new DrizzleStrategyRevisionRepository(db);
   const experimentService = new ExperimentService({
     experiments,
     runTrades,
@@ -350,6 +352,7 @@ export function composeRuntime() {
     wfoBudget: DEFAULT_WFO_BUDGET,
     tokenUsage,
     researchTaskTokenBudget: env.RESEARCH_TASK_TOKEN_BUDGET,
+    revisions,
   });
 
   const services: AppServices = {
@@ -395,6 +398,7 @@ export function composeRuntime() {
     experimentService,
     strategyBuilder: buildStrategyBuilder(env),
     strategyBacktests,
+    revisions,
     paperIntake: selectPaperIntake(process.env),
     paperSubmissions: new DrizzlePaperSubmissionRepository(db),
     paperWindowPolicy,

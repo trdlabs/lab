@@ -23,6 +23,8 @@ import { classifyEntryAffectingParams, validateSweepGrid } from '../domain/wfo.t
 import type { Gate1DecisionPort, SweepDesignerPort, ResultInterpreterPort } from '../ports/wfo-agents.port.ts';
 import type { ParamGridRunner } from './param-grid-runner.ts';
 import type { StrategyBacktestRunRepository } from '../ports/strategy-backtest-run.repository.ts';
+import type { StrategyRevisionRepository } from '../ports/strategy-revision.repository.ts';
+import type { StrategyRevision } from '../domain/strategy-revision.ts';
 import type { GridPoint } from './param-grid.ts';
 import { GridTooLargeError } from './param-grid.ts';
 import type { GridResult, RankedPoint } from './top-n-prefilter.ts';
@@ -57,6 +59,8 @@ export interface ExperimentServiceDeps {
   wfoBudget?: WfoBudget;
   tokenUsage?: Pick<TokenUsageRepository, 'get'>;
   researchTaskTokenBudget?: number;
+  /** Optional — absent means the strategy_revision v1 bootstrap tail is a no-op (task-8 wiring). */
+  revisions?: StrategyRevisionRepository;
 }
 
 /** Merges a newly-designed round grid into the running union (dedupes values per key by stable-stringify identity). */
@@ -278,6 +282,7 @@ export class ExperimentService {
         payload: { experimentId, verdict, verdictReason: reason, experimentType: 'strategy_baseline_validation' },
         createdAt: this.d.now(),
       });
+      await this.bootstrapRevisionV1(input, experimentId);
       return { experimentId, verdict };
     };
 
@@ -331,7 +336,49 @@ export class ExperimentService {
       payload: { experimentId, verdict: result.verdict, verdictReason: result.verdictReason, experimentType: 'strategy_baseline_validation' },
       createdAt: this.d.now(),
     });
+    await this.bootstrapRevisionV1(input, experimentId);
     return { experimentId, verdict: result.verdict };
+  }
+
+  /**
+   * Bootstraps `strategy_revision` v1 from a just-finalized G1 baseline experiment (spec §1):
+   * no-op when the `revisions` dep is absent, when the profile already has an accepted revision
+   * (idempotent — UNIQUE(profileId, version) is the backstop), or when no member run exists yet
+   * to anchor comboBacktestRunId on. Fail-soft: any error emits `revision.bootstrap_failed` and
+   * is swallowed — the baseline verdict this runs after must never be affected.
+   */
+  private async bootstrapRevisionV1(input: RunStrategyBaselineValidationInput, experimentId: string): Promise<void> {
+    if (!this.d.revisions) return;
+    try {
+      const existing = await this.d.revisions.findLatestAccepted(input.strategyProfileId);
+      if (existing) return;
+
+      const members = await this.d.experiments.listMembers(experimentId);
+      const comboMember = members.find((m) => m.role === 'holdout') ?? members.find((m) => m.role === 'sanity');
+      const comboBacktestRunId = comboMember?.strategyBacktestRunId;
+      if (!comboBacktestRunId) return;
+
+      const run = await this.d.strategyBacktests.findById(comboBacktestRunId);
+      const now = this.d.now();
+      const revision: StrategyRevision = {
+        id: this.d.newId('rev'), strategyProfileId: input.strategyProfileId, version: 1,
+        hypothesisIds: [], mergedRuleSet: { order: [], rules: [] }, status: 'accepted',
+        bundleHash: input.strategyBundle.bundleHash, comboBacktestRunId,
+        ...(input.bundleArtifactRef !== undefined ? { bundleArtifactRef: input.bundleArtifactRef } : {}),
+        ...(run?.metrics ? { metrics: run.metrics as unknown as Record<string, unknown> } : {}),
+        createdAt: now, updatedAt: now,
+      };
+      await this.d.revisions.create(revision);
+    } catch (err) {
+      await this.d.events.append({
+        id: this.d.newId('evt'), taskId: input.taskId, type: 'revision.bootstrap_failed',
+        payload: {
+          strategyProfileId: input.strategyProfileId, experimentId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        createdAt: this.d.now(),
+      });
+    }
   }
 
   private async runStrategyMember(
