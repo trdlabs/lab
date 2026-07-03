@@ -329,4 +329,45 @@ describe('composeRevisionBundle', () => {
     result.included.push('mutated');
     expect(result.mergedRuleSet.order).toEqual(['h1']);
   });
+
+  // Hardening: positional theses slots (null-preserving, no silent mis-pairing).
+  it('mergedRuleSet.theses preserves positional slots for missing entries (non-trailing gap)', () => {
+    const overlays: OverlayModuleInput[] = [
+      { hypothesisId: 'h1', source: VETO_OVERLAY },
+      { hypothesisId: 'h2', source: VETO_OVERLAY },
+      { hypothesisId: 'h3', source: VETO_OVERLAY },
+    ];
+    const ruleActions = { h1: ruleAction(), h2: ruleAction(), h3: ruleAction() };
+    const result = composeRevisionBundle({
+      baseSource: BASE_SOURCE,
+      baseManifestMeta: BASE_MANIFEST_META,
+      overlays,
+      ruleActions,
+      revisionVersion: 1,
+      theses: { h1: 'thesis1', h3: 'thesis3' }, // h2 is missing (non-trailing gap)
+    });
+    expect(result.mergedRuleSet.order).toEqual(['h1', 'h2', 'h3']);
+    expect(result.mergedRuleSet.rules).toHaveLength(3);
+    // Positional slot: [thesis1, null, thesis3] not [thesis1, thesis3]
+    expect(result.mergedRuleSet.theses).toEqual(['thesis1', null, 'thesis3']);
+  });
+
+  it('mergedRuleSet.theses is omitted when all entries are null', () => {
+    const overlays: OverlayModuleInput[] = [
+      { hypothesisId: 'h1', source: VETO_OVERLAY },
+      { hypothesisId: 'h2', source: VETO_OVERLAY },
+    ];
+    const ruleActions = { h1: ruleAction(), h2: ruleAction() };
+    const result = composeRevisionBundle({
+      baseSource: BASE_SOURCE,
+      baseManifestMeta: BASE_MANIFEST_META,
+      overlays,
+      ruleActions,
+      revisionVersion: 1,
+      theses: {}, // all missing
+    });
+    expect(result.mergedRuleSet.order).toEqual(['h1', 'h2']);
+    expect(result.mergedRuleSet.rules).toHaveLength(2);
+    expect(result.mergedRuleSet).not.toHaveProperty('theses');
+  });
 });

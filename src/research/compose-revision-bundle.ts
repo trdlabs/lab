@@ -262,16 +262,18 @@ export function composeRevisionBundle(args: ComposeRevisionBundleArgs): ComposeR
     }
     return rule;
   });
-  const theses = args.theses
-    ? included.map((id) => args.theses![id]).filter((t): t is string => typeof t === 'string')
+  const thesesArray: (string | null)[] | undefined = args.theses
+    ? included.map((id) => args.theses![id] ?? null)
     : undefined;
+  // Keep theses only if at least one entry is non-null (preserve positional slots via null).
+  const theses = thesesArray && thesesArray.some((t) => t !== null) ? thesesArray : undefined;
 
   const mergedRuleSet: Record<string, unknown> = {
     // Defensive copy: `included` is returned on ComposeResult too, and callers must not be able
     // to mutate mergedRuleSet.order by mutating result.included (or vice versa).
     order: [...included],
     rules,
-    ...(theses && theses.length > 0 ? { theses } : {}),
+    ...(theses ? { theses } : {}),
   };
 
   return {
