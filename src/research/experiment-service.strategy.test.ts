@@ -514,4 +514,29 @@ describe('runStrategyBaselineValidation — bootstrap strategy_revision v1', () 
     expect(bootstrapFailed).toBeDefined();
     expect(bootstrapFailed?.payload.strategyProfileId).toBe('p1');
   });
+
+  it('early-FAIL sanity-failed path: bootstraps v1 with sanity member comboBacktestRunId when revisions dep present', async () => {
+    const sanityMetrics = viableHoldoutMetrics();
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      // sanity yields zero trades → early fail (FAIL, sanity_failed)
+      if (role === 'sanity') return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 0 };
+      // train/holdout never run on this path
+      throw new Error('should not be called');
+    };
+    const { svc, revisions } = await buildSvcWithRevisions(resultFor, {}, {
+      seedStrategyBacktests: [seededStrategyBacktestRun('r-sanity', sanityMetrics)],
+    });
+
+    const { verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('FAIL');
+    
+    // Verify v1 was bootstrapped from the sanity run (no holdout member exists on this path)
+    const v1 = await revisions.findLatestAccepted('p1');
+    expect(v1).not.toBeNull();
+    expect(v1?.version).toBe(1);
+    expect(v1?.status).toBe('accepted');
+    expect(v1?.comboBacktestRunId).toBe('r-sanity');
+    expect(v1?.metrics).toEqual(sanityMetrics);
+  });
 });

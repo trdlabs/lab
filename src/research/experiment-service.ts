@@ -370,14 +370,18 @@ export class ExperimentService {
       };
       await this.d.revisions.create(revision);
     } catch (err) {
-      await this.d.events.append({
-        id: this.d.newId('evt'), taskId: input.taskId, type: 'revision.bootstrap_failed',
-        payload: {
-          strategyProfileId: input.strategyProfileId, experimentId,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        createdAt: this.d.now(),
-      });
+      try {
+        await this.d.events.append({
+          id: this.d.newId('evt'), taskId: input.taskId, type: 'revision.bootstrap_failed',
+          payload: {
+            strategyProfileId: input.strategyProfileId, experimentId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          createdAt: this.d.now(),
+        });
+      } catch {
+        /* swallow event append failure — baseline verdict must not be affected */
+      }
     }
   }
 
