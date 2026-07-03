@@ -37,6 +37,10 @@ describe('runBuilderProofLoop', () => {
     });
     expect(outcome.proven).toBe(true);
     expect(outcome.attempts).toBe(1);
+    // G2: proven несёт собранный бандл для paper-intake.
+    expect(outcome.bundle).toBeDefined();
+    expect(typeof outcome.bundle?.bundleHash).toBe('string');
+    expect(outcome.bundle?.source.length).toBeGreaterThan(0);
   });
 
   it('divergence → parity-feedback → proven на 2-й попытке', async () => {
