@@ -16,6 +16,7 @@ import { hypothesisBuildHandler } from './orchestrator/handlers/hypothesis-build
 import { backtestCompletedHandler } from './orchestrator/handlers/backtest-completed.handler.ts';
 import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
 import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
+import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
 import { buildBacktestCallbackUrl } from './config/backtest-callback-url.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
@@ -49,6 +50,8 @@ import type { StrategyBuilder } from './ports/strategy-builder.port.ts';
 import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-hypothesis-build.repository.ts';
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
+import { DrizzlePaperSubmissionRepository } from './adapters/repository/drizzle-paper-submission.repository.ts';
+import { selectPaperIntake } from './adapters/platform/paper-intake.port.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
 import { composeMastra } from './mastra/compose-mastra.ts';
@@ -378,6 +381,8 @@ export function composeRuntime() {
     experimentService,
     strategyBuilder: buildStrategyBuilder(env),
     strategyBacktests,
+    paperIntake: selectPaperIntake(process.env),
+    paperSubmissions: new DrizzlePaperSubmissionRepository(db),
   };
 
   const router = new WorkflowRouter();
@@ -388,6 +393,7 @@ export function composeRuntime() {
   router.register('backtest.completed', backtestCompletedHandler);
   router.register('strategy.baseline', strategyBaselineHandler);
   router.register('strategy.wfo', strategyWfoHandler);
+  router.register('paper.start', paperStartHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),

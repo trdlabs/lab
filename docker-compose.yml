@@ -118,6 +118,9 @@ services:
       STRATEGY_REFINER_MODEL: ${STRATEGY_REFINER_MODEL:-}
       # Research task token budget configuration
       RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}
+      # Platform paper-intake (feature 036/066). Unset URL = paper bridge disabled (kill-switch).
+      LAB_PAPER_INTAKE_URL: ${LAB_PAPER_INTAKE_URL:-}
+      LAB_PAPER_INTAKE_TOKEN: ${LAB_PAPER_INTAKE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,6 +205,9 @@ services:
       STRATEGY_REFINER_MODEL: ${STRATEGY_REFINER_MODEL:-}
       # Research task token budget configuration
       RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}
+      # Platform paper-intake (feature 036/066). Unset URL = paper bridge disabled (kill-switch).
+      LAB_PAPER_INTAKE_URL: ${LAB_PAPER_INTAKE_URL:-}
+      LAB_PAPER_INTAKE_TOKEN: ${LAB_PAPER_INTAKE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

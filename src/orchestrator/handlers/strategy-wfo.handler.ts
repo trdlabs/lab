@@ -5,6 +5,7 @@ import { validateWithSchema } from '../../validation/validator.ts';
 import { RESEARCH_RUN_METRICS } from '../../domain/platform-comparison.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import { event } from './backtest-support.ts';
 
 export const StrategyWfoPayloadSchema = z.object({ baselineExperimentId: z.string().min(1) });
@@ -45,4 +46,17 @@ export const strategyWfoHandler: WorkflowHandler = async (task, services) => {
   await services.events.append(event(task.id, 'strategy.wfo.completed', {
     baselineExperimentId, experimentId, verdict, terminalReason,
   }));
+
+  if (verdict === 'PAPER_CANDIDATE') {
+    await createAndEnqueueTask(
+      {
+        taskType: 'paper.start',
+        source: task.source,
+        payload: { experimentId, baselineExperimentId },
+        correlationId: task.correlationId,
+        dedupeKey: `paper.start:${experimentId}`,
+      },
+      { repo: services.researchTasks, queue: services.taskQueue },
+    );
+  }
 };

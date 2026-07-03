@@ -7,6 +7,7 @@ import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchExperiment } from '../../domain/research-experiment.ts';
 import type { RunWfoInput } from '../../research/experiment-service.ts';
+import type { ExperimentVerdict } from '../../domain/research-experiment.ts';
 import { FakeStrategyBuilder } from '../../adapters/builder/fake-strategy-builder.ts';
 import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
 
@@ -39,10 +40,12 @@ function datasetScope() {
 
 async function makeFakeServices(opts: {
   baselineExperiment: 'withRef' | 'withoutRef';
+  wfoResult?: { experimentId: string; verdict: ExperimentVerdict; terminalReason: string };
 }): Promise<{
   services: AppServices;
   wfoCalls: RunWfoInput[];
   persistedBundleHash: string;
+  queued: AppServices['taskQueue'] extends { queued: infer Q } ? Q : never;
 }> {
   const services = makeServices();
   await services.strategyProfiles.create(profile());
@@ -68,12 +71,18 @@ async function makeFakeServices(opts: {
   await services.experiments.createExperiment(baseline);
 
   const wfoCalls: RunWfoInput[] = [];
+  const wfoResult = opts.wfoResult ?? { experimentId: 'exp-wfo-1', verdict: 'PAPER_CANDIDATE' as const, terminalReason: 'paper_candidate' };
   vi.spyOn(services.experimentService, 'runWalkForwardOptimization').mockImplementation(async (input) => {
     wfoCalls.push(input);
-    return { experimentId: 'exp-wfo-1', verdict: 'PAPER_CANDIDATE' as const, terminalReason: 'paper_candidate' };
+    return wfoResult;
   });
 
-  return { services, wfoCalls, persistedBundleHash: bundle.bundleHash };
+  return {
+    services,
+    wfoCalls,
+    persistedBundleHash: bundle.bundleHash,
+    queued: (services.taskQueue as unknown as { queued: unknown[] }).queued as never,
+  };
 }
 
 describe('strategyWfoHandler', () => {
@@ -111,5 +120,35 @@ describe('strategyWfoHandler', () => {
   it('rejects an invalid payload', async () => {
     const { services } = await makeFakeServices({ baselineExperiment: 'withRef' });
     await expect(strategyWfoHandler(taskOf({}), services)).rejects.toThrow(/invalid strategy\.wfo payload/);
+  });
+
+  it('enqueues paper.start with baselineExperimentId when verdict is PAPER_CANDIDATE', async () => {
+    const { services, queued } = await makeFakeServices({
+      baselineExperiment: 'withRef',
+      wfoResult: { experimentId: 'exp-wfo', verdict: 'PAPER_CANDIDATE', terminalReason: 'paper_candidate' },
+    });
+
+    await strategyWfoHandler(taskOf({ baselineExperimentId: 'exp-base' }), services);
+
+    expect(queued as unknown[]).toContainEqual(expect.objectContaining({
+      taskType: 'paper.start',
+      correlationId: taskOf({}).correlationId,
+      dedupeKey: 'paper.start:exp-wfo',
+    }));
+
+    const queuedTask = await services.researchTasks.findByDedupeKey('paper.start:exp-wfo');
+    expect(queuedTask?.payload).toEqual({ experimentId: 'exp-wfo', baselineExperimentId: 'exp-base' });
+    expect(queuedTask?.correlationId).toBe(taskOf({}).correlationId);
+  });
+
+  it('does not enqueue paper.start for non-PAPER_CANDIDATE verdicts', async () => {
+    const { services, queued } = await makeFakeServices({
+      baselineExperiment: 'withRef',
+      wfoResult: { experimentId: 'exp-wfo', verdict: 'INCONCLUSIVE', terminalReason: 'budget_exhausted' },
+    });
+
+    await strategyWfoHandler(taskOf({ baselineExperimentId: 'exp-base' }), services);
+
+    expect((queued as { taskType: string }[]).filter((t) => t.taskType === 'paper.start')).toHaveLength(0);
   });
 });

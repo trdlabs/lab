@@ -14,6 +14,7 @@ import type { ActionProposalStatus, ProposedTaskSnapshot, OperatorAction } from 
 import type { PendingOperatorInteraction } from '../ports/chat-session.repository.ts';
 import type { EvidenceRef, StrategyRetrievalMetadata } from '../domain/strategy-retrieval.ts';
 import type { ExperimentType, ExperimentStatus, MemberRole, ExperimentVerdict, DatasetScope, HoldoutPolicy, HoldoutBoundary, MemberResultSummary, ExperimentFlags } from '../domain/research-experiment.ts';
+import type { PaperSubmissionStatus } from '../domain/paper-submission.ts';
 
 // Postgres tsvector has no first-class Drizzle column type. This customType lets us
 // DECLARE the column so drizzle-kit tracks it; the GENERATED ALWAYS expression that
@@ -325,6 +326,25 @@ export const researchExperiment = pgTable('research_experiment', {
   keyUq: uniqueIndex('research_experiment_key_uq').on(t.experimentKey),
   profileIdx: index('research_experiment_profile_idx').on(t.strategyProfileId),
   statusIdx: index('research_experiment_status_idx').on(t.status),
+}));
+
+export const paperSubmission = pgTable('paper_submission', {
+  id: text('id').primaryKey(),
+  experimentId: text('experiment_id').notNull(),
+  strategyProfileId: text('strategy_profile_id').notNull(),
+  submissionStatus: text('submission_status').notNull().$type<PaperSubmissionStatus>(),
+  candidateId: text('candidate_id'),
+  admissionStatus: text('admission_status'),
+  admissionReasonCode: text('admission_reason_code'),
+  error: jsonb('error').$type<Record<string, unknown>>(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  bundleHash: text('bundle_hash').notNull(),
+  params: jsonb('params').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  experimentUq: uniqueIndex('paper_submission_experiment_uq').on(t.experimentId),
+  idempotencyUq: uniqueIndex('paper_submission_idempotency_uq').on(t.idempotencyKey),
 }));
 
 export const experimentRunMember = pgTable('experiment_run_member', {

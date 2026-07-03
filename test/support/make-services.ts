@@ -35,6 +35,8 @@ import { FakeGate1 } from '../../src/adapters/wfo/fake-gate1.ts';
 import { FakeSweepDesigner } from '../../src/adapters/wfo/fake-sweep-designer.ts';
 import { FakeResultInterpreter } from '../../src/adapters/wfo/fake-result-interpreter.ts';
 import type { StrategyExperimentRunExecutor } from '../../src/research/strategy-experiment-run-executor.ts';
+import { InMemoryPaperSubmissionRepository } from '../../src/adapters/repository/in-memory-paper-submission.repository.ts';
+import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.port.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -114,6 +116,18 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',
     defaultPlatformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
+    paperIntake: DISABLED_PAPER_INTAKE,
+    paperSubmissions: new InMemoryPaperSubmissionRepository(),
     ...overrides,
   };
 }
+
+// Base happy-path default: disabled (no LAB_PAPER_INTAKE_URL analogue in tests); tests that
+// exercise submission opt in via the `paperIntake` override (see selectPaperIntake's real shape).
+const DISABLED_PAPER_INTAKE: PaperIntakePort = {
+  enabled: false,
+  submitProvenCandidate: async () => ({
+    ok: false,
+    error: { category: 'validation_error', code: 'paper_intake_disabled', message: 'disabled in test fixture' },
+  }),
+};
