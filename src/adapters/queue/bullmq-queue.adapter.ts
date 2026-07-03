@@ -33,11 +33,17 @@ export class BullMqQueueAdapter implements TaskQueuePort {
   private readonly queue: Queue<QueueEnvelope>;
   private readonly queueName: string;
   private readonly redisOpts: ReturnType<typeof parseRedisUrl>;
+  private readonly workerConcurrency: number;
   private worker?: Worker<QueueEnvelope>;
 
-  constructor(redisUrl: string, queueName = 'research-tasks') {
+  constructor(redisUrl: string, queueName = 'research-tasks', opts?: { workerConcurrency?: number }) {
     this.queueName = queueName;
     this.redisOpts = parseRedisUrl(redisUrl);
+    const workerConcurrency = opts?.workerConcurrency ?? 1;
+    if (!Number.isInteger(workerConcurrency) || workerConcurrency < 1) {
+      throw new Error(`BullMqQueueAdapter: workerConcurrency must be a positive integer, got ${workerConcurrency}`);
+    }
+    this.workerConcurrency = workerConcurrency;
     this.queue = new Queue<QueueEnvelope>(this.queueName, {
       connection: { ...this.redisOpts, maxRetriesPerRequest: null },
     });
@@ -59,7 +65,7 @@ export class BullMqQueueAdapter implements TaskQueuePort {
     this.worker = new Worker<QueueEnvelope>(
       this.queueName,
       async (job) => { await handler(job.data); },
-      { connection: { ...this.redisOpts, maxRetriesPerRequest: null } },
+      { connection: { ...this.redisOpts, maxRetriesPerRequest: null }, concurrency: this.workerConcurrency },
     );
   }
 

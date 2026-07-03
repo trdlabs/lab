@@ -132,17 +132,22 @@ describe('loadEnv — SP-7.2b backtest backend', () => {
     expect(e.PLATFORM_RUN_MAX_POLLS).toBe(30);
     expect(e.PLATFORM_RUN_POLL_DELAY_MS).toBe(2000);
     expect(e.TRADING_PLATFORM_BASELINE_VERSION).toBe('v1');
+    expect(e.RESEARCH_GRID_CONCURRENCY).toBe(4);
+    expect(e.LAB_QUEUE_CONCURRENCY).toBe(1);
   });
 
   it('reads research_platform + overrides', () => {
     const e = loadEnv({
       BACKTEST_BACKEND: 'research_platform', PLATFORM_RUN_MAX_POLLS: '5',
       PLATFORM_RUN_POLL_DELAY_MS: '100', TRADING_PLATFORM_BASELINE_VERSION: 'v3',
+      RESEARCH_GRID_CONCURRENCY: '2', LAB_QUEUE_CONCURRENCY: '3',
     } as NodeJS.ProcessEnv);
     expect(e.BACKTEST_BACKEND).toBe('research_platform');
     expect(e.PLATFORM_RUN_MAX_POLLS).toBe(5);
     expect(e.PLATFORM_RUN_POLL_DELAY_MS).toBe(100);
     expect(e.TRADING_PLATFORM_BASELINE_VERSION).toBe('v3');
+    expect(e.RESEARCH_GRID_CONCURRENCY).toBe(2);
+    expect(e.LAB_QUEUE_CONCURRENCY).toBe(3);
   });
 
   it('falls back to research_platform for an unknown backend value', () => {

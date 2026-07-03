@@ -279,7 +279,7 @@ export function composeRuntime() {
   const mastraRuntime = composeMastra(env);
 
   const { db, pool } = createDbClient(env.DATABASE_URL);
-  const queue = new BullMqQueueAdapter(env.REDIS_URL);
+  const queue = new BullMqQueueAdapter(env.REDIS_URL, 'research-tasks', { workerConcurrency: env.LAB_QUEUE_CONCURRENCY });
 
   const hypotheses = new DrizzleHypothesisProposalRepository(db);
   const strategyProfiles = new DrizzleStrategyProfileRepository(db);
@@ -315,7 +315,7 @@ export function composeRuntime() {
     now,
   });
   // WFO agent adapters: env-driven mastra/fake adapter selection, mirroring buildCritic/buildStrategyCritic.
-  const paramGridRunner = new ParamGridRunner({ strategyRunExecutor });
+  const paramGridRunner = new ParamGridRunner({ strategyRunExecutor, concurrency: env.RESEARCH_GRID_CONCURRENCY });
   const tokenUsage = new DrizzleTokenUsageRepository(db);
   const experimentService = new ExperimentService({
     experiments,
