@@ -197,7 +197,7 @@ export const strategyBacktestRun = pgTable('strategy_backtest_run', {
   strategyBundleId: text('strategy_bundle_id').notNull(),
   bundleHash: text('bundle_hash').notNull(),
   paramsHash: text('params_hash').notNull(),
-  runKind: text('run_kind').$type<'strategy_baseline'>().notNull(),
+  runKind: text('run_kind').$type<'strategy_baseline' | 'revision_combo'>().notNull(),
   platformRunId: text('platform_run_id').notNull(),
   correlationId: text('correlation_id').notNull(),
   taskId: text('task_id'),
