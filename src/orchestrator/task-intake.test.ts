@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createAndEnqueueTask } from './task-intake.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
 import { InMemoryQueueAdapter } from '../adapters/queue/in-memory-queue.adapter.ts';
+import type { QueueEnvelope } from '../domain/types.ts';
 
 function setup() {
   const repo = new InMemoryResearchTaskRepository();
@@ -41,5 +42,37 @@ describe('createAndEnqueueTask', () => {
     );
     expect(queue.queued[0]!.correlationId).toBe('corr-9');
     expect((await repo.findById(r.taskId))?.correlationId).toBe('corr-9');
+  });
+
+  it('passes delayMs through to queue.enqueue opts', async () => {
+    const calls: Array<{ envelope: QueueEnvelope; opts?: { delayMs?: number } }> = [];
+    const queue = {
+      enqueue: async (envelope: QueueEnvelope, opts?: { delayMs?: number }) => {
+        calls.push({ envelope, opts });
+      },
+      process: () => {},
+      close: async () => {},
+    };
+    await createAndEnqueueTask(
+      { taskType: 'paper.monitor', source: 'platform', payload: {}, delayMs: 5000 },
+      { repo: new InMemoryResearchTaskRepository(), queue },
+    );
+    expect(calls[0]?.opts).toEqual({ delayMs: 5000 });
+  });
+
+  it('omits opts when delayMs is not set (existing behavior)', async () => {
+    const calls: Array<{ envelope: QueueEnvelope; opts?: { delayMs?: number } }> = [];
+    const queue = {
+      enqueue: async (envelope: QueueEnvelope, opts?: { delayMs?: number }) => {
+        calls.push({ envelope, opts });
+      },
+      process: () => {},
+      close: async () => {},
+    };
+    await createAndEnqueueTask(
+      { taskType: 'paper.monitor', source: 'platform', payload: {} },
+      { repo: new InMemoryResearchTaskRepository(), queue },
+    );
+    expect(calls[0]?.opts).toBeUndefined();
   });
 });

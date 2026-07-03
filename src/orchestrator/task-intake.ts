@@ -9,6 +9,8 @@ export interface TaskIntakeInput {
   payload: Record<string, unknown>;
   correlationId?: string;
   dedupeKey?: string;
+  /** BullMQ delayed job; in-memory adapter ignores it (test-time immediacy). */
+  delayMs?: number;
 }
 
 export interface TaskIntakeDeps {
@@ -57,7 +59,7 @@ export async function createAndEnqueueTask(
     attempt: 1,
     dedupeKey: task.dedupeKey,
   };
-  await deps.queue.enqueue(envelope);
+  await deps.queue.enqueue(envelope, input.delayMs !== undefined ? { delayMs: input.delayMs } : undefined);
 
   return { taskId: task.id, status: task.status, deduped: false };
 }
