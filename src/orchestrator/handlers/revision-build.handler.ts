@@ -149,7 +149,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   if (parsed.status === 'invalid') {
     throw new Error(`invalid revision.build payload: ${JSON.stringify(parsed.issues)}`);
   }
-  const { strategyProfileId } = parsed.data;
+  const { strategyProfileId, correlationId } = parsed.data;
 
   // --- Step 1: ensure an accepted revision exists (bootstrap-backfill if not) ---
   let accepted = await services.revisions.findLatestAccepted(strategyProfileId);
@@ -162,7 +162,21 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   }
 
   // --- Step 2: collect eligible hypotheses, score-ordered, capped ---
-  const proposals = await services.hypotheses.listByStrategyProfile(strategyProfileId);
+  // Cycle-scope: listByStrategyProfile sweeps EVERY proxy_passed/proxy_paper_candidate
+  // hypothesis of the profile, including ones from other (foreign/old) active research cycles —
+  // that breaks the spec's batch invariant ("hypotheses of a cycle -> one candidate revision")
+  // via cross-cycle contamination. Scope down to hypotheses whose hypothesis.build task row
+  // (created by research-run-cycle.handler.ts, payload.hypothesisId) lives in THIS triggering
+  // correlationId chain — the same chain backtest-completed.handler.ts waited on to go terminal
+  // before enqueueing this revision.build.
+  const cycleTasks = await services.researchTasks.listByCorrelationAndTypes(correlationId, ['hypothesis.build']);
+  const cycleHypothesisIds = new Set(
+    cycleTasks
+      .map((t) => t.payload.hypothesisId)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  const proposals = (await services.hypotheses.listByStrategyProfile(strategyProfileId))
+    .filter((p) => cycleHypothesisIds.has(p.id));
   const eligible = sortEligible(proposals).slice(0, services.revisionBatchMax);
   if (eligible.length === 0) {
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'no_eligible_hypotheses' }));
@@ -207,6 +221,12 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     dropped.push({ hypothesisId: u.hypothesisId, reason: 'unsupported_module_shape', detail: u.detail });
   }
   if (compose.included.length === 0) {
+    // follow-up: with cycle-scoping (Step 2), an unsupported-only cycle leaves its hypotheses
+    // stuck in proxy_* here — they will NOT be swept by a future cycle's scoped build, since that
+    // future build only looks at ITS OWN correlationId's hypothesis.build tasks. A future slice
+    // should either transition these hypotheses to a terminal dropped_* status here, or record a
+    // rejected revision row referencing them, so they don't accumulate as orphaned proxy_*
+    // forever. Deliberately not implemented in this fix — user-acknowledged trade-off.
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'nothing_composable' }));
     return;
   }

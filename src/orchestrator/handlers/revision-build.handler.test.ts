@@ -128,6 +128,16 @@ function makeFakeExecutor(opts: {
   return { executor, calls };
 }
 
+/** Seeds the hypothesis.build task row that a real research.run_cycle would have created for this
+ * hypothesis (see research-run-cycle.handler.ts ~line 435) — the cycle-scoping filter in
+ * revisionBuildHandler keys off this row's correlationId + payload.hypothesisId. */
+async function seedHypothesisBuildTask(services: AppServices, hypothesisId: string, correlationId: string): Promise<void> {
+  await services.researchTasks.create({
+    id: `build-task-${hypothesisId}`, taskType: 'hypothesis.build', source: 'operator', correlationId,
+    status: 'completed', payload: { hypothesisId }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  });
+}
+
 async function seedBuild(services: AppServices, hypothesisId: string, source: string): Promise<void> {
   const manifest = moduleManifest(`${hypothesisId}-ov`);
   const bundle: ModuleBundle = {
@@ -171,6 +181,10 @@ async function setup(opts: {
   candidateResults?: Array<{ status: 'completed' | 'pending' | 'rejected'; metrics?: BacktestMetricBlock }>;
   seedExistingBaselineRun?: boolean;
   revisionBatchMax?: number;
+  /** Per-hypothesis override for the correlationId of its seeded hypothesis.build task row.
+   * Defaults to 'corr-1' (matching every test's triggering task()) — override to simulate a
+   * hypothesis whose build happened in a different (foreign) research cycle. */
+  hypothesisCorrelationIds?: Record<string, string>;
 } = {}): Promise<Setup> {
   const { executor, calls } = makeFakeExecutor({ comparison: opts.comparison, candidateResults: opts.candidateResults });
   const services = makeServices({
@@ -185,6 +199,12 @@ async function setup(opts: {
     await services.hypotheses.create(p);
     const source = opts.overlaySources?.[p.id] ?? functionalOverlaySource();
     await seedBuild(services, p.id, source);
+    // Cycle-scoping fix (Finding: revision.build is not cycle-scoped): revisionBuildHandler now
+    // filters listByStrategyProfile results down to hypotheses with a hypothesis.build task row
+    // in the triggering correlationId. Every pre-existing test in this file triggers with
+    // correlationId 'corr-1' (see task()), so seeding each hypothesis's task row at 'corr-1' by
+    // default keeps them all in-cycle and unaffected by the fix — deliberate, documented here.
+    await seedHypothesisBuildTask(services, p.id, opts.hypothesisCorrelationIds?.[p.id] ?? 'corr-1');
   }
 
   if (opts.seedExistingBaselineRun) {
@@ -525,5 +545,43 @@ describe('revisionBuildHandler', () => {
     // No version-2 revision row exists — the guarded create() never durably succeeded.
     const revisions = await services.revisions.listByProfile('p1');
     expect(revisions.find((r) => r.version === 2)).toBeUndefined();
+  });
+
+  // Regression (Important finding): revision.build was not cycle-scoped — it swept ALL
+  // proxy_passed/proxy_paper_candidate hypotheses of the profile via listByStrategyProfile,
+  // including ones built under a DIFFERENT (foreign/old) research cycle's correlationId. That
+  // breaks the spec's batch invariant ("hypotheses of a cycle -> one candidate revision"): a
+  // foreign-cycle hypothesis could get silently merged into a revision it has nothing to do
+  // with. The fix scopes eligibility to hypotheses whose hypothesis.build task row lives in the
+  // triggering correlationId chain (services.researchTasks.listByCorrelationAndTypes).
+  it('cycle-scoping: only the in-cycle hypothesis (hypothesis.build task in the triggering correlationId) is eligible; a foreign-cycle hypothesis is left untouched', async () => {
+    const inCycle = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 500, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const foreign = proposal('h2', { ruleAction: ruleAction('long', 'tighten_stop', { pct: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h2' } });
+    const { services } = await setup({
+      hypotheses: [inCycle, foreign],
+      // h1's build happened in the triggering cycle ('corr-1'); h2's build happened under a
+      // different, unrelated research cycle ('corr-OLD-CYCLE') — same strategy profile, but not
+      // part of THIS batch.
+      hypothesisCorrelationIds: { h1: 'corr-1', h2: 'corr-OLD-CYCLE' },
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+    expect(v2!.hypothesisIds).toEqual(['h1']);
+
+    const inCycleAfter = await services.hypotheses.findById('h1');
+    expect(inCycleAfter?.status).toBe('merged');
+
+    // The foreign-cycle hypothesis must be completely untouched: not merged, not dropped, not
+    // referenced by the candidate/accepted revision at all — it never entered this batch.
+    const foreignAfter = await services.hypotheses.findById('h2');
+    expect(foreignAfter?.status).toBe('proxy_passed');
+    expect(v2!.hypothesisIds).not.toContain('h2');
+    expect((v2!.dropped ?? []).map((d) => d.hypothesisId)).not.toContain('h2');
   });
 });
