@@ -33,4 +33,47 @@ describe('InMemoryPaperSubmissionRepository', () => {
     const repo = new InMemoryPaperSubmissionRepository();
     expect(await repo.findByExperimentId('nope')).toBeNull();
   });
+
+  it('round-trips the seven monitor fields through upsert+find', async () => {
+    const repo = new InMemoryPaperSubmissionRepository();
+    await repo.upsertByExperimentId(row({
+      strategyName: 'long_oi', paperRunId: 'run-1', runStartedAtMs: 1_720_000_000_000,
+      monitorStatus: 'watching', observedTrades: 3,
+      windowPolicy: { minTrades: 5, maxWindowMs: 86_400_000 }, lowConfidence: true,
+    }));
+    expect(await repo.findByExperimentId('exp-1')).toEqual(row({
+      strategyName: 'long_oi', paperRunId: 'run-1', runStartedAtMs: 1_720_000_000_000,
+      monitorStatus: 'watching', observedTrades: 3,
+      windowPolicy: { minTrades: 5, maxWindowMs: 86_400_000 }, lowConfidence: true,
+    }));
+  });
+
+  it('updateMonitorState patches only named fields, leaving others untouched', async () => {
+    const repo = new InMemoryPaperSubmissionRepository();
+    await repo.upsertByExperimentId(row({
+      strategyName: 'long_oi', paperRunId: 'run-1', runStartedAtMs: 1_720_000_000_000,
+      monitorStatus: 'watching', observedTrades: 3,
+      windowPolicy: { minTrades: 5 }, lowConfidence: false,
+    }));
+    await repo.updateMonitorState('exp-1', { observedTrades: 4, updatedAt: '2026-07-05T00:00:00.000Z' });
+    const got = await repo.findByExperimentId('exp-1');
+    expect(got?.observedTrades).toBe(4);
+    expect(got?.updatedAt).toBe('2026-07-05T00:00:00.000Z');
+    // untouched fields
+    expect(got?.strategyName).toBe('long_oi');
+    expect(got?.paperRunId).toBe('run-1');
+    expect(got?.runStartedAtMs).toBe(1_720_000_000_000);
+    expect(got?.monitorStatus).toBe('watching');
+    expect(got?.windowPolicy).toEqual({ minTrades: 5 });
+    expect(got?.lowConfidence).toBe(false);
+    // core (non-monitor) fields untouched too
+    expect(got?.submissionStatus).toBe('submitted');
+    expect(got?.id).toBe('ps-1');
+  });
+
+  it('updateMonitorState throws with the experimentId in the message for an unknown experimentId', async () => {
+    const repo = new InMemoryPaperSubmissionRepository();
+    await expect(repo.updateMonitorState('nope', { updatedAt: '2026-07-05T00:00:00.000Z' }))
+      .rejects.toThrow(/nope/);
+  });
 });

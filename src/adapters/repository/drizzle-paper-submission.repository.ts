@@ -18,6 +18,13 @@ export function paperSubmissionToDomain(r: PaperSubmissionRow): PaperSubmission 
     idempotencyKey: r.idempotencyKey, bundleHash: r.bundleHash,
     params: (r.params as Record<string, unknown> | null) ?? undefined,
     createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
+    strategyName: r.strategyName ?? undefined,
+    paperRunId: r.paperRunId ?? undefined,
+    runStartedAtMs: r.runStartedAtMs ?? undefined,
+    monitorStatus: (r.monitorStatus as PaperSubmission['monitorStatus']) ?? undefined,
+    observedTrades: r.observedTrades ?? undefined,
+    windowPolicy: (r.windowPolicy as Record<string, unknown> | null) ?? undefined,
+    lowConfidence: r.lowConfidence ?? undefined,
   };
 }
 
@@ -36,6 +43,13 @@ export class DrizzlePaperSubmissionRepository implements PaperSubmissionReposito
       idempotencyKey: s.idempotencyKey, bundleHash: s.bundleHash,
       params: s.params ?? null,
       createdAt: new Date(s.createdAt), updatedAt: new Date(s.updatedAt),
+      strategyName: s.strategyName ?? null,
+      paperRunId: s.paperRunId ?? null,
+      runStartedAtMs: s.runStartedAtMs ?? null,
+      monitorStatus: s.monitorStatus ?? null,
+      observedTrades: s.observedTrades ?? null,
+      windowPolicy: s.windowPolicy ?? null,
+      lowConfidence: s.lowConfidence ?? null,
     };
     await this.db.insert(paperSubmission).values(values).onConflictDoUpdate({
       target: paperSubmission.experimentId,
@@ -50,6 +64,13 @@ export class DrizzlePaperSubmissionRepository implements PaperSubmissionReposito
         bundleHash: values.bundleHash,
         params: values.params,
         updatedAt: values.updatedAt,
+        strategyName: values.strategyName,
+        paperRunId: values.paperRunId,
+        runStartedAtMs: values.runStartedAtMs,
+        monitorStatus: values.monitorStatus,
+        observedTrades: values.observedTrades,
+        windowPolicy: values.windowPolicy,
+        lowConfidence: values.lowConfidence,
       },
     });
   }
@@ -57,5 +78,20 @@ export class DrizzlePaperSubmissionRepository implements PaperSubmissionReposito
   async findByExperimentId(experimentId: string): Promise<PaperSubmission | null> {
     const rows = await this.db.select().from(paperSubmission).where(eq(paperSubmission.experimentId, experimentId)).limit(1);
     return rows[0] ? paperSubmissionToDomain(rows[0]) : null;
+  }
+
+  async updateMonitorState(experimentId: string, patch: Partial<Pick<PaperSubmission,
+    'strategyName' | 'paperRunId' | 'runStartedAtMs' | 'monitorStatus' | 'observedTrades' | 'windowPolicy' | 'lowConfidence'>> & { updatedAt: string }): Promise<void> {
+    const set: Record<string, unknown> = { updatedAt: new Date(patch.updatedAt) };
+    if (patch.strategyName !== undefined) set.strategyName = patch.strategyName;
+    if (patch.paperRunId !== undefined) set.paperRunId = patch.paperRunId;
+    if (patch.runStartedAtMs !== undefined) set.runStartedAtMs = patch.runStartedAtMs;
+    if (patch.monitorStatus !== undefined) set.monitorStatus = patch.monitorStatus;
+    if (patch.observedTrades !== undefined) set.observedTrades = patch.observedTrades;
+    if (patch.windowPolicy !== undefined) set.windowPolicy = patch.windowPolicy;
+    if (patch.lowConfidence !== undefined) set.lowConfidence = patch.lowConfidence;
+
+    const result = await this.db.update(paperSubmission).set(set).where(eq(paperSubmission.experimentId, experimentId)).returning({ id: paperSubmission.id });
+    if (result.length === 0) throw new Error(`paper submission not found for experimentId: ${experimentId}`);
   }
 }

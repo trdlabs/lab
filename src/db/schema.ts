@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision, vector, customType } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision, vector, customType, bigint } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
 import type { BacktestRunStatus } from '../domain/backtest-run.ts';
@@ -342,6 +342,13 @@ export const paperSubmission = pgTable('paper_submission', {
   params: jsonb('params').$type<Record<string, unknown>>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  strategyName: text('strategy_name'),
+  paperRunId: text('paper_run_id'),
+  runStartedAtMs: bigint('run_started_at_ms', { mode: 'number' }),
+  monitorStatus: text('monitor_status'),
+  observedTrades: integer('observed_trades'),
+  windowPolicy: jsonb('window_policy').$type<Record<string, unknown>>(),
+  lowConfidence: boolean('low_confidence'),
 }, (t) => ({
   experimentUq: uniqueIndex('paper_submission_experiment_uq').on(t.experimentId),
   idempotencyUq: uniqueIndex('paper_submission_idempotency_uq').on(t.idempotencyKey),
