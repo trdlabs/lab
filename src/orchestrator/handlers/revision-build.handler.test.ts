@@ -481,4 +481,49 @@ describe('revisionBuildHandler', () => {
       revisionBuildHandler(task({ strategyProfileId: '' }), services),
     ).rejects.toThrow('invalid revision.build payload');
   });
+
+  // Regression (Finding 2): a racing revision.build for the same profile can hit the
+  // UNIQUE(strategyProfileId, version) constraint inside revisions.create(). Hypothesis-status
+  // writes staged by the merge-conflict/unsupported-shape drop steps must NOT be committed unless
+  // that create() call actually succeeds — otherwise those hypotheses are stranded in a dropped_*
+  // status with no revision row anywhere explaining why.
+  it('revisions.create throwing (version collision): no hypothesis status changed, revision.skipped concurrent_revision, handler does not throw', async () => {
+    const winner = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 500, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const loser = proposal('h3', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 5 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 100, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h3' } });
+    const { services } = await setup({
+      hypotheses: [winner, loser],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+    });
+
+    // Simulate a racing revision.build that already created version 2 for this profile: the
+    // guarded create() call below must throw.
+    let createCalls = 0;
+    services.revisions.create = async () => {
+      createCalls++;
+      throw new Error('strategy revision already exists for strategyProfileId p1 version 2');
+    };
+
+    await expect(
+      revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services),
+    ).resolves.toBeUndefined();
+
+    expect(createCalls).toBeGreaterThan(0);
+
+    // The merge-conflict loser (and the winner) must be untouched — no dropped_merge_conflict,
+    // no merged; whatever their pre-handler status was.
+    const winnerAfter = await services.hypotheses.findById('h1');
+    const loserAfter = await services.hypotheses.findById('h3');
+    expect(winnerAfter?.status).toBe('proxy_passed');
+    expect(loserAfter?.status).toBe('proxy_passed');
+
+    const events = await services.events.listByTask('task-rev-build');
+    const skip = events.find((e) => e.type === 'revision.skipped');
+    expect(skip?.payload).toMatchObject({ reason: 'concurrent_revision' });
+    expect(events.map((e) => e.type)).not.toContain('revision.hypothesis_dropped');
+    expect(events.map((e) => e.type)).not.toContain('revision.candidate_built');
+
+    // No version-2 revision row exists — the guarded create() never durably succeeded.
+    const revisions = await services.revisions.listByProfile('p1');
+    expect(revisions.find((r) => r.version === 2)).toBeUndefined();
+  });
 });

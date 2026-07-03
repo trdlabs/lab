@@ -383,5 +383,59 @@ describe('backtestCompletedHandler', () => {
       expect(types).toContain('revision.build_trigger_failed');
       expect(types).toContain('backtest.result_ready'); // the task's own outcome is unaffected
     });
+
+    // Regression (Finding 1): a FAIL/MODIFY decision enqueues a same-correlationId retry
+    // (research.run_cycle) BEFORE the trigger's query runs. The trigger must see that retry as a
+    // non-terminal task in the chain and must NOT fire revision.build for it — otherwise the
+    // retried cycle's hypotheses never get a revision pass, and the dedupeKey is burned early.
+    it('last finisher decides FAIL within retry budget: retry is enqueued AND revision.build is NOT enqueued', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      const sibling: ResearchTask = {
+        id: 'task-sibling', taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'completed', payload: {}, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await s.researchTasks.create(sibling);
+
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'FAIL', reasons: ['no_improvement_over_baseline'], cycleDepth: 0 }),
+        s,
+      );
+
+      // The retry (created inside enqueueResearchRetry, which runs before the trigger block in
+      // this same handler invocation) IS visible to listByCorrelationAndTypes by the time the
+      // trigger's query runs.
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(1);
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+    });
+
+    it('once the retried cycle itself turns terminal, a later backtest.completed fires revision.build exactly once', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+
+      const firstTask = task({ ...BASE_PAYLOAD, decision: 'FAIL', reasons: ['no_improvement_over_baseline'], cycleDepth: 0 });
+      // Register the finisher itself as completed up front (mirrors the 'two concurrent
+      // last-finishing' test above) so the SECOND invocation's trigger query can see it as terminal.
+      await s.researchTasks.create({ ...firstTask, status: 'completed' });
+
+      await backtestCompletedHandler(firstTask, s);
+
+      const retryEnqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
+      expect(retryEnqueued).toHaveLength(1);
+      // Still no revision.build — the retry chain is not terminal yet.
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+
+      // Simulate the retried research.run_cycle running to completion.
+      await s.researchTasks.updateStatus(retryEnqueued[0]!.taskId, 'completed');
+
+      // The retried cycle's own backtest.completed fires next and decides PASS (terminal, no
+      // further retry) — this is now the last finisher, and the whole chain is terminal.
+      const secondTask = task({ ...BASE_PAYLOAD, decision: 'PASS', cycleDepth: 1 });
+      secondTask.id = 'task-bt-completed-2';
+      await backtestCompletedHandler(secondTask, s);
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+    });
   });
 });

@@ -5,7 +5,7 @@ import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
-import type { HypothesisProposal, RuleAction } from '../../domain/hypothesis.ts';
+import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { sortEligible } from '../../research/hypothesis-score.ts';
 import { detectConflicts } from '../../research/rule-conflict.ts';
@@ -170,24 +170,26 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   }
 
   // --- Step 3: conflict detection ---
+  // Hypothesis-status writes (dropped_merge_conflict / dropped_unsupported_shape) computed in
+  // steps 3, 4 and 6 are STAGED, not applied yet — applying them here, before the candidate
+  // revision row exists, would strand hypotheses in a dropped_* status with no revision row
+  // explaining it if revisions.create() below hits a UNIQUE(strategyProfileId, version) race
+  // (concurrent revision.build for the same profile). They are flushed only once the row is
+  // durably created (Step 7); their revision.hypothesis_dropped events move with them —
+  // deliberately, so the ledger never records a drop that didn't actually happen.
   const { kept, conflicts } = detectConflicts(eligible);
   const dropped: DroppedHypothesis[] = [];
+  const pendingStatusWrites: Array<{ hypothesisId: string; status: HypothesisStatus }> = [];
   for (const c of conflicts) {
-    await services.hypotheses.updateStatus(c.loserId, 'dropped_merge_conflict');
+    pendingStatusWrites.push({ hypothesisId: c.loserId, status: 'dropped_merge_conflict' });
     dropped.push({ hypothesisId: c.loserId, reason: 'merge_conflict_dropped', detail: c.detail });
-    await services.events.append(event(task.id, 'revision.hypothesis_dropped', {
-      hypothesisId: c.loserId, reason: 'merge_conflict_dropped', detail: c.detail,
-    }));
   }
 
   // --- Step 4: load each surviving hypothesis's overlay module source ---
   const { overlays, ruleActions, theses, loadDropped } = await loadOverlayInputs(services, kept);
   for (const d of loadDropped) {
-    await services.hypotheses.updateStatus(d.hypothesisId, 'dropped_unsupported_shape');
+    pendingStatusWrites.push({ hypothesisId: d.hypothesisId, status: 'dropped_unsupported_shape' });
     dropped.push(d);
-    await services.events.append(event(task.id, 'revision.hypothesis_dropped', {
-      hypothesisId: d.hypothesisId, reason: d.reason, detail: d.detail,
-    }));
   }
 
   // --- Step 5: base bundle = accepted revision's composed bundle ---
@@ -201,11 +203,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     overlays, ruleActions, revisionVersion: version, theses,
   });
   for (const u of compose.unsupported) {
-    await services.hypotheses.updateStatus(u.hypothesisId, 'dropped_unsupported_shape');
+    pendingStatusWrites.push({ hypothesisId: u.hypothesisId, status: 'dropped_unsupported_shape' });
     dropped.push({ hypothesisId: u.hypothesisId, reason: 'unsupported_module_shape', detail: u.detail });
-    await services.events.append(event(task.id, 'revision.hypothesis_dropped', {
-      hypothesisId: u.hypothesisId, reason: 'unsupported_module_shape', detail: u.detail,
-    }));
   }
   if (compose.included.length === 0) {
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'nothing_composable' }));
@@ -230,7 +229,30 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     bundleArtifactRef, bundleHash: assembled.bundleHash, status: 'candidate',
     createdAt: now(), updatedAt: now(),
   };
-  await services.revisions.create(revision);
+  // Guarded: create() can throw on a UNIQUE(strategyProfileId, version) race with a concurrent
+  // revision.build. If it does, the candidate row never existed, so none of the staged
+  // hypothesis-status writes above may be committed either — bail out untouched instead of
+  // stranding those hypotheses in a dropped_* status nothing explains.
+  try {
+    await services.revisions.create(revision);
+  } catch (err) {
+    await services.events.append(event(task.id, 'revision.skipped', {
+      strategyProfileId, reason: 'concurrent_revision', detail: errMsg(err),
+    }));
+    return;
+  }
+
+  // The row now durably exists — safe to commit the staged hypothesis-status writes and their
+  // revision.hypothesis_dropped events (see the Step 3 comment for why these were deferred).
+  for (const w of pendingStatusWrites) {
+    await services.hypotheses.updateStatus(w.hypothesisId, w.status);
+  }
+  for (const d of dropped) {
+    await services.events.append(event(task.id, 'revision.hypothesis_dropped', {
+      hypothesisId: d.hypothesisId, reason: d.reason, detail: d.detail,
+    }));
+  }
+
   await services.events.append(event(task.id, 'revision.candidate_built', {
     revisionId, version, included: compose.included, dropped,
   }));

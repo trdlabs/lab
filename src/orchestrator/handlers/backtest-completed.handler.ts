@@ -187,12 +187,18 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     backtestRunId,
   }));
 
-  // Cycle-completion trigger (fail-soft): once every hypothesis.build/backtest.completed task in this
-  // correlation chain (except this one) is terminal, batch the cycle's proxy-passed hypotheses into a
-  // revision.build candidate. dedupeKey absorbs duplicate enqueues from concurrent last-finishers.
+  // Cycle-completion trigger (fail-soft): once every hypothesis.build/backtest.completed/
+  // research.run_cycle task in this correlation chain (except this one) is terminal, batch the
+  // cycle's proxy-passed hypotheses into a revision.build candidate. research.run_cycle is
+  // included so a same-correlationId retry enqueued above (see enqueueResearchRetry, which runs
+  // earlier in this same handler invocation and is therefore already visible here) blocks the
+  // trigger until the ENTIRE chain — including retry cycles — is terminal. Without it, the trigger
+  // fired immediately on the last finisher that decided FAIL/MODIFY, before the retried cycle's
+  // hypotheses ever got a revision pass, burning the dedupeKey early. dedupeKey absorbs duplicate
+  // enqueues from concurrent last-finishers.
   try {
     const chainTasks = await services.researchTasks.listByCorrelationAndTypes(
-      task.correlationId, ['hypothesis.build', 'backtest.completed'],
+      task.correlationId, ['hypothesis.build', 'backtest.completed', 'research.run_cycle'],
     );
     const others = chainTasks.filter((t) => t.id !== task.id);
     const allTerminal = others.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'rejected');
