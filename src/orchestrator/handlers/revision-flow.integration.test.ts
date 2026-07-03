@@ -183,6 +183,15 @@ describe('revision-flow integration (Task 10): revision.build -> activeOverlayRu
     for (const p of [h1, h2]) {
       await services.hypotheses.create(p);
       await seedBuild(services, p.id, functionalOverlaySource());
+      // Cycle-scoping fix: revisionBuildHandler now only considers hypotheses whose
+      // hypothesis.build task row lives in the triggering correlationId chain ('corr-1' — the
+      // buildTask() below). This fixture previously relied on the unscoped
+      // listByStrategyProfile sweep; seed the task rows a real research.run_cycle would have
+      // created (research-run-cycle.handler.ts ~line 435) to keep both hypotheses in-cycle.
+      await services.researchTasks.create({
+        id: `build-task-${p.id}`, taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'completed', payload: { hypothesisId: p.id }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      });
     }
 
     // --- Step 1: revision.build composes + accepts v2 ---
