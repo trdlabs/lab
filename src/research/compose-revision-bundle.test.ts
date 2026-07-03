@@ -86,6 +86,39 @@ export const overlay = {
 };
 `;
 
+// Finding 1 repro: a leading block comment that itself quotes `export const overlay = function ...`
+// syntax (realistic — builder-sdk-doc.ts's own examples get echoed by the LLM into header
+// comments). Style detection strips comments so this still classifies as functional, but a naive
+// non-global `.replace` on RAW source would rewrite the COMMENT occurrence (the first literal
+// match) instead of the real `export` statement below it, leaving the real export un-rewritten.
+const OVERLAY_WITH_EXPORT_QUOTED_IN_COMMENT = `
+/**
+ * Example from builder-sdk-doc.ts:
+ *   export const overlay = function apply(ctx) {
+ *     return { kind: 'pass' };
+ *   };
+ */
+export const overlay = function apply(ctx) {
+  return { kind: 'veto', reasonCode: 'test_veto', rationale: 'blocked' };
+};
+`;
+
+// Finding 1 repro for the base source rewrite: a leading block comment quoting
+// `export default function ...` syntax.
+const BASE_SOURCE_WITH_EXPORT_QUOTED_IN_COMMENT = `
+/**
+ * Example:
+ *   export default function createStrategyModule() { ... }
+ */
+export default function createStrategyModule() {
+  return {
+    onBarClose(ctx) {
+      return { kind: 'enter', side: 'short', rationale: 'base-enter' };
+    },
+  };
+}
+`;
+
 async function loadComposedModule(sourceOverride: string, manifestMeta: StrategyManifestMeta) {
   const bundle = await assembleStrategyBundle({ source: sourceOverride, manifestMeta });
   const dir = await mkdtemp(join(tmpdir(), 'compose-revision-bundle-'));
@@ -234,5 +267,66 @@ describe('composeRevisionBundle', () => {
       rules: [ruleActions.h1],
       theses: ['thesis for h1'],
     });
+  });
+
+  // Finding 1 (Critical) regressions.
+  it('overlay with a leading comment quoting export syntax composes and vetoes at runtime (not a comment-mangled syntax error)', async () => {
+    const overlays: OverlayModuleInput[] = [{ hypothesisId: 'h1', source: OVERLAY_WITH_EXPORT_QUOTED_IN_COMMENT }];
+    const result = composeRevisionBundle({
+      baseSource: BASE_SOURCE,
+      baseManifestMeta: BASE_MANIFEST_META,
+      overlays,
+      ruleActions: { h1: ruleAction() },
+      revisionVersion: 1,
+    });
+    expect(result.included).toEqual(['h1']);
+
+    const { instance } = await loadComposedModule(result.output.source, result.output.manifestMeta);
+    const decision = instance.onBarClose(STUB_CTX) as { kind: string; rationale?: string };
+    expect(decision).toEqual({ kind: 'idle', rationale: 'test_veto' });
+  });
+
+  it('base source with a leading comment quoting export-default syntax composes and runs (not a comment-mangled syntax error)', async () => {
+    const overlays: OverlayModuleInput[] = [{ hypothesisId: 'h1', source: VETO_OVERLAY }];
+    const result = composeRevisionBundle({
+      baseSource: BASE_SOURCE_WITH_EXPORT_QUOTED_IN_COMMENT,
+      baseManifestMeta: BASE_MANIFEST_META,
+      overlays,
+      ruleActions: { h1: ruleAction() },
+      revisionVersion: 1,
+    });
+    expect(result.included).toEqual(['h1']);
+
+    const { instance } = await loadComposedModule(result.output.source, result.output.manifestMeta);
+    const decision = instance.onBarClose(STUB_CTX) as { kind: string; rationale?: string };
+    expect(decision).toEqual({ kind: 'idle', rationale: 'test_veto' });
+  });
+
+  // Finding 2 (Important) regression.
+  it('throws when an included hypothesisId has no ruleAction (caller-contract violation)', () => {
+    const overlays: OverlayModuleInput[] = [{ hypothesisId: 'h1', source: VETO_OVERLAY }];
+    expect(() =>
+      composeRevisionBundle({
+        baseSource: BASE_SOURCE,
+        baseManifestMeta: BASE_MANIFEST_META,
+        overlays,
+        ruleActions: {},
+        revisionVersion: 1,
+      }),
+    ).toThrow(/ruleAction missing for hypothesis/);
+  });
+
+  // Finding 3 (Minor) regression.
+  it('mergedRuleSet.order is a defensive copy, not aliased to result.included', () => {
+    const overlays: OverlayModuleInput[] = [{ hypothesisId: 'h1', source: VETO_OVERLAY }];
+    const result = composeRevisionBundle({
+      baseSource: BASE_SOURCE,
+      baseManifestMeta: BASE_MANIFEST_META,
+      overlays,
+      ruleActions: { h1: ruleAction() },
+      revisionVersion: 1,
+    });
+    result.included.push('mutated');
+    expect(result.mergedRuleSet.order).toEqual(['h1']);
   });
 });
