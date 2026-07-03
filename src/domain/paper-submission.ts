@@ -14,4 +14,12 @@ export interface PaperSubmission {
   params?: Record<string, unknown>; // champion params
   createdAt: string;
   updatedAt: string;
+  // Ledger monitor state (paper.monitor slice, all optional)
+  strategyName?: string;
+  paperRunId?: string;
+  runStartedAtMs?: number;
+  monitorStatus?: 'watching' | 'window_complete' | 'stalled';
+  observedTrades?: number;
+  windowPolicy?: Record<string, unknown>;
+  lowConfidence?: boolean;
 }

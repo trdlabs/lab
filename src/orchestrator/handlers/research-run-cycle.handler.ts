@@ -39,6 +39,9 @@ export const ResearchRunCyclePayloadSchema = z.object({
     decision: z.string(),
     reasons: z.array(z.string()),
   }).optional(),
+  /** The paper run the paper-monitor is watching; when present, loaded regardless of status
+   *  so Cycle 2 is not blind to the very run it was triggered for. */
+  paperRunId: z.string().optional(),
 });
 
 function errMsg(err: unknown): string {
@@ -180,6 +183,25 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
       summary: await services.botResults.getRunSummary(run.runId),
       trades: await services.botResults.getClosedTrades(run.runId),
     })));
+
+    if (payload.paperRunId) {
+      const paperRun = (await services.botResults.listBotRuns({ mode: 'paper' }))
+        .find((r) => r.runId === payload.paperRunId);
+      if (paperRun) {
+        if (!botResults.some((b) => b.run.runId === paperRun.runId)) {
+          botResults = [
+            {
+              run: paperRun,
+              summary: await services.botResults.getRunSummary(paperRun.runId),
+              trades: await services.botResults.getClosedTrades(paperRun.runId),
+            },
+            ...botResults,
+          ];
+        }
+      } else {
+        await services.events.append(event(task.id, 'researcher.paper_run_missing', { paperRunId: payload.paperRunId }));
+      }
+    }
   } catch (err) {
     await services.events.append(event(task.id, 'researcher.bot_results_unavailable', { error: errMsg(err) }));
   }

@@ -112,6 +112,18 @@ export interface Env {
   OPERATOR_RERANK_MIN_CANDIDATES: number;
   /** RRF ambiguity margin — top-two gap <= this triggers reranking (default: 0.002). */
   OPERATOR_RERANK_RRF_MARGIN: number;
+  /** Trade count that closes the paper observation window with full confidence (default: 30). */
+  PAPER_WINDOW_MIN_TRADES: number;
+  /** At PAPER_WINDOW_MAX_DAYS, this many closed trades still closes the window, flagged low-confidence (default: 15). */
+  PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: number;
+  /** Minimum elapsed days before the paper window can ever complete (default: 3). */
+  PAPER_WINDOW_MIN_DAYS: number;
+  /** Elapsed days at which the paper window forces a verdict (default: 30). */
+  PAPER_WINDOW_MAX_DAYS: number;
+  /** Max days the paper monitor waits before treating a run as unresponsive (default: 7). */
+  PAPER_MONITOR_MAX_WAIT_DAYS: number;
+  /** Delay (ms) between paper.monitor self-reschedule polls (default: 21600000 — 6 hours). */
+  PAPER_MONITOR_POLL_MS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -224,6 +236,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     WFO_SWEEP_DESIGNER_MODEL: source.WFO_SWEEP_DESIGNER_MODEL ?? 'anthropic/claude-sonnet-4-6',
     WFO_RESULT_INTERPRETER_ADAPTER: resolveAdapter(source.WFO_RESULT_INTERPRETER_ADAPTER),
     WFO_RESULT_INTERPRETER_MODEL: source.WFO_RESULT_INTERPRETER_MODEL ?? 'anthropic/claude-sonnet-4-6',
+    PAPER_WINDOW_MIN_TRADES: parsePositiveInt(source.PAPER_WINDOW_MIN_TRADES, 30),
+    PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: parsePositiveInt(source.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD, 15),
+    PAPER_WINDOW_MIN_DAYS: parsePositiveInt(source.PAPER_WINDOW_MIN_DAYS, 3),
+    PAPER_WINDOW_MAX_DAYS: parsePositiveInt(source.PAPER_WINDOW_MAX_DAYS, 30),
+    PAPER_MONITOR_MAX_WAIT_DAYS: parsePositiveInt(source.PAPER_MONITOR_MAX_WAIT_DAYS, 7),
+    PAPER_MONITOR_POLL_MS: parsePositiveInt(source.PAPER_MONITOR_POLL_MS, 21600000),
     ...loadRagEnv(source),
   };
 }

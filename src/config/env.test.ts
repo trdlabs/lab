@@ -384,3 +384,44 @@ describe('loadEnv — Phoenix read config', () => {
     expect(loadEnv({} as NodeJS.ProcessEnv).PHOENIX_READ_BASE_URL).toBe('http://localhost:6006');
   });
 });
+
+describe('loadEnv — paper window policy', () => {
+  it('defaults to minTrades=30, lowConfidenceThreshold=15, minDays=3, maxDays=30, maxWaitDays=7', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.PAPER_WINDOW_MIN_TRADES).toBe(30);
+    expect(env.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD).toBe(15);
+    expect(env.PAPER_WINDOW_MIN_DAYS).toBe(3);
+    expect(env.PAPER_WINDOW_MAX_DAYS).toBe(30);
+    expect(env.PAPER_MONITOR_MAX_WAIT_DAYS).toBe(7);
+  });
+
+  it('honors overrides', () => {
+    const env = loadEnv({
+      PAPER_WINDOW_MIN_TRADES: '50',
+      PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: '20',
+      PAPER_WINDOW_MIN_DAYS: '5',
+      PAPER_WINDOW_MAX_DAYS: '45',
+      PAPER_MONITOR_MAX_WAIT_DAYS: '10',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.PAPER_WINDOW_MIN_TRADES).toBe(50);
+    expect(env.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD).toBe(20);
+    expect(env.PAPER_WINDOW_MIN_DAYS).toBe(5);
+    expect(env.PAPER_WINDOW_MAX_DAYS).toBe(45);
+    expect(env.PAPER_MONITOR_MAX_WAIT_DAYS).toBe(10);
+  });
+
+  it('falls back to defaults on non-positive-int values', () => {
+    const env = loadEnv({
+      PAPER_WINDOW_MIN_TRADES: '0',
+      PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: 'abc',
+      PAPER_WINDOW_MIN_DAYS: '-1',
+      PAPER_WINDOW_MAX_DAYS: '3.5',
+      PAPER_MONITOR_MAX_WAIT_DAYS: '',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.PAPER_WINDOW_MIN_TRADES).toBe(30);
+    expect(env.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD).toBe(15);
+    expect(env.PAPER_WINDOW_MIN_DAYS).toBe(3);
+    expect(env.PAPER_WINDOW_MAX_DAYS).toBe(30);
+    expect(env.PAPER_MONITOR_MAX_WAIT_DAYS).toBe(7);
+  });
+});

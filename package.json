@@ -15,6 +15,7 @@
     "ingress": "node --experimental-strip-types src/ingress/server.ts",
     "worker": "node --experimental-strip-types src/worker/worker.ts",
     "platform:resume": "node --experimental-strip-types scripts/platform-resume.ts",
+    "paper:monitor:resume": "node --experimental-strip-types scripts/paper-monitor-resume.mts",
     "analyst:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/strategy-analyst-eval.ts",
     "researcher:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/researcher-eval.ts",
     "builder:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/builder-eval.ts",

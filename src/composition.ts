@@ -17,6 +17,8 @@ import { backtestCompletedHandler } from './orchestrator/handlers/backtest-compl
 import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
 import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.ts';
+import { paperMonitorHandler } from './orchestrator/handlers/paper-monitor.handler.ts';
+import { HeuristicPaperRunLocator } from './adapters/platform/heuristic-paper-run-locator.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
 import { buildBacktestCallbackUrl } from './config/backtest-callback-url.ts';
 import type { AppServices } from './orchestrator/app-services.ts';
@@ -51,6 +53,7 @@ import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
 import { DrizzlePaperSubmissionRepository } from './adapters/repository/drizzle-paper-submission.repository.ts';
+import { type PaperWindowPolicy, validatePaperWindowPolicy } from './domain/paper-window.ts';
 import { selectPaperIntake } from './adapters/platform/paper-intake.port.ts';
 import { DrizzleEvaluationRepository } from './adapters/repository/drizzle-evaluation.repository.ts';
 import type { BuilderPort } from './ports/builder.port.ts';
@@ -279,6 +282,15 @@ export function composeRuntime() {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   if (!env.REDIS_URL) throw new Error('REDIS_URL is required');
 
+  const paperWindowPolicy: PaperWindowPolicy = {
+    minTrades: env.PAPER_WINDOW_MIN_TRADES,
+    lowConfidenceThreshold: env.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD,
+    minDays: env.PAPER_WINDOW_MIN_DAYS,
+    maxDays: env.PAPER_WINDOW_MAX_DAYS,
+    maxWaitDays: env.PAPER_MONITOR_MAX_WAIT_DAYS,
+  };
+  validatePaperWindowPolicy(paperWindowPolicy);
+
   const mastraRuntime = composeMastra(env);
 
   const { db, pool } = createDbClient(env.DATABASE_URL);
@@ -296,6 +308,8 @@ export function composeRuntime() {
   const backtests = new DrizzleBacktestRunRepository(db);
   const experiments = new DrizzleResearchExperimentRepository(db);
   const runTrades = selectRunTrades(env.TRADING_PLATFORM_INTEGRATION);
+  const botResults = selectBotResults(process.env);
+  const paperRunLocator = new HeuristicPaperRunLocator(botResults);
   const platformPoll = { maxPolls: env.PLATFORM_RUN_MAX_POLLS, pollDelayMs: env.PLATFORM_RUN_POLL_DELAY_MS };
   const backtestCallbackUrl = buildBacktestCallbackUrl(env.TRADING_LAB_CALLBACK_PUBLIC_URL, env.TRADING_LAB_CALLBACK_TOKEN);
   const now = () => new Date().toISOString();
@@ -348,7 +362,7 @@ export function composeRuntime() {
     platform: new MockPlatformGatewayAdapter(),
     researchPlatform,
     researchIntegration,
-    botResults: selectBotResults(process.env),
+    botResults,
     marketHistory: selectMarketHistory(process.env),
     tradeEvidence: selectTradeEvidence(process.env),
     researcher: buildResearcher(mastraRuntime),
@@ -383,6 +397,9 @@ export function composeRuntime() {
     strategyBacktests,
     paperIntake: selectPaperIntake(process.env),
     paperSubmissions: new DrizzlePaperSubmissionRepository(db),
+    paperWindowPolicy,
+    paperMonitorPollMs: env.PAPER_MONITOR_POLL_MS,
+    paperRunLocator,
   };
 
   const router = new WorkflowRouter();
@@ -394,6 +411,7 @@ export function composeRuntime() {
   router.register('strategy.baseline', strategyBaselineHandler);
   router.register('strategy.wfo', strategyWfoHandler);
   router.register('paper.start', paperStartHandler);
+  router.register('paper.monitor', paperMonitorHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),

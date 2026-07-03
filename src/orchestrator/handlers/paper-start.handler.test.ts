@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { paperStartHandler, PaperStartPayloadSchema } from './paper-start.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import type { AppServices } from '../app-services.ts';
-import type { ResearchTask } from '../../domain/types.ts';
+import type { ResearchTask, QueueEnvelope } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchExperiment, ExperimentRunMember } from '../../domain/research-experiment.ts';
 import type { StrategyBacktestRun } from '../../domain/strategy-backtest-run.ts';
@@ -82,15 +82,20 @@ interface MakeOpts {
   result?: PaperCandidateIntakeResult;
   mismatchedBaselineHash?: boolean;
   seedExisting?: 'submitted' | 'failed';
+  /** Only applied when seedExisting === 'submitted'; omit to seed a row WITHOUT monitorStatus (retry-edge). */
+  monitorStatus?: 'watching' | 'window_complete' | 'stalled';
+  /** Only applied when seedExisting === 'submitted'; omit to seed a row WITHOUT strategyName (pre-G4 legacy row). */
+  strategyName?: string;
 }
 
 async function make(opts: MakeOpts = {}): Promise<{
   services: AppServices;
   intakeCalls: SubmitProvenCandidateArgs[];
   events: { type: string; payload: Record<string, unknown> }[];
-  artifacts: { putHashes: string[] };
+  artifacts: { putHashes: string[]; getHashes: string[] };
   bundleHash: string;
   manifestId: string;
+  queueCalls: { envelope: QueueEnvelope; opts?: { delayMs?: number } }[];
 }> {
   const intakeCalls: SubmitProvenCandidateArgs[] = [];
   const result: PaperCandidateIntakeResult = opts.result ?? {
@@ -119,6 +124,13 @@ async function make(opts: MakeOpts = {}): Promise<{
     const ref = await originalPut(content, meta);
     putHashes.push(ref.content_hash);
     return ref;
+  };
+
+  const getHashes: string[] = [];
+  const originalGet = services.artifacts.get.bind(services.artifacts);
+  services.artifacts.get = async (ref) => {
+    getHashes.push(ref.content_hash);
+    return originalGet(ref);
   };
 
   const baselineBundleHash = opts.mismatchedBaselineHash ? 'sha256:mismatched' : bundle.bundleHash;
@@ -164,6 +176,8 @@ async function make(opts: MakeOpts = {}): Promise<{
       id: 'existing-1', experimentId: 'exp-wfo', strategyProfileId: 'prof-1',
       submissionStatus: opts.seedExisting,
       ...(opts.seedExisting === 'submitted' ? { candidateId: 'cand-prior', admissionStatus: 'admitted' } : { error: { category: 'validation_error', code: 'x', message: 'prior fail' } }),
+      ...(opts.seedExisting === 'submitted' && opts.monitorStatus ? { monitorStatus: opts.monitorStatus } : {}),
+      ...(opts.seedExisting === 'submitted' && opts.strategyName ? { strategyName: opts.strategyName } : {}),
       idempotencyKey: 'wfo-champion:exp-wfo', bundleHash: bundle.bundleHash, createdAt: NOW, updatedAt: NOW,
     });
   }
@@ -175,7 +189,14 @@ async function make(opts: MakeOpts = {}): Promise<{
     return originalAppend(evt);
   };
 
-  return { services, intakeCalls, events, artifacts: { putHashes }, bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id };
+  const queueCalls: { envelope: QueueEnvelope; opts?: { delayMs?: number } }[] = [];
+  const originalEnqueue = services.taskQueue.enqueue.bind(services.taskQueue);
+  services.taskQueue.enqueue = async (envelope, enqueueOpts) => {
+    queueCalls.push({ envelope, opts: enqueueOpts });
+    return originalEnqueue(envelope, enqueueOpts);
+  };
+
+  return { services, intakeCalls, events, artifacts: { putHashes, getHashes }, bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id, queueCalls };
 }
 
 describe('paperStartHandler', () => {
@@ -193,24 +214,73 @@ describe('paperStartHandler', () => {
   });
 
   it('happy path: bytes in CAS (content_hash === bundleHash), ledger submitted, event with candidateId', async () => {
-    const { services, artifacts, bundleHash, events } = await make({
+    const { services, artifacts, bundleHash, events, manifestId } = await make({
       result: { ok: true, candidateId: 'cand-1', admissionStatus: 'admitted', admissionReasonCode: null, idempotentReplay: false },
     });
     await paperStartHandler(taskOf(), services);
     expect(artifacts.putHashes).toContain(bundleHash);
     const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
-    expect(row).toMatchObject({ submissionStatus: 'submitted', candidateId: 'cand-1', admissionStatus: 'admitted', idempotencyKey: 'wfo-champion:exp-wfo' });
+    expect(row).toMatchObject({
+      submissionStatus: 'submitted', candidateId: 'cand-1', admissionStatus: 'admitted', idempotencyKey: 'wfo-champion:exp-wfo',
+      strategyName: manifestId, monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy,
+    });
     expect(events).toContainEqual({
       type: 'paper.candidate_submitted',
       payload: { experimentId: 'exp-wfo', candidateId: 'cand-1', admissionStatus: 'admitted', idempotentReplay: false },
     });
   });
 
-  it('already submitted: no port call, paper.already_submitted event', async () => {
-    const { services, intakeCalls, events } = await make({ seedExisting: 'submitted' });
+  it('admitted: enqueues paper.monitor with delayMs = services.paperMonitorPollMs', async () => {
+    const { services, queueCalls } = await make({
+      result: { ok: true, candidateId: 'cand-1', admissionStatus: 'admitted', admissionReasonCode: null, idempotentReplay: false },
+    });
+    await paperStartHandler(taskOf(), services);
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.envelope.correlationId).toBe('c1');
+    expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
+    const queuedTask = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0');
+    expect(queuedTask?.payload).toEqual({ experimentId: 'exp-wfo' });
+  });
+
+  it('already submitted with terminal monitorStatus (window_complete): old behavior, no monitor enqueued', async () => {
+    const { services, intakeCalls, events, queueCalls } = await make({ seedExisting: 'submitted', monitorStatus: 'window_complete' });
     await paperStartHandler(taskOf(), services);
     expect(intakeCalls).toHaveLength(0);
     expect(events).toContainEqual({ type: 'paper.already_submitted', payload: { experimentId: 'exp-wfo', candidateId: 'cand-prior' } });
+    expect(queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor')).toHaveLength(0);
+  });
+
+  it('retry-edge: already-submitted fully-seeded row (strategyName present) seeds monitor fields + enqueues paper.monitor, no duplicate submit, no bundle reconstruction', async () => {
+    const { services, intakeCalls, queueCalls, artifacts } = await make({ seedExisting: 'submitted', strategyName: 'already-set-strategy-name' });
+    await paperStartHandler(taskOf(), services);
+    expect(intakeCalls).toHaveLength(0);
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row).toMatchObject({
+      monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy,
+      strategyName: 'already-set-strategy-name',
+    });
+    expect(artifacts.getHashes).toHaveLength(0);
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
+  });
+
+  it('retry-edge: legacy already-submitted row without strategyName (pre-G4) backfills strategyName from the reconstructed bundle + seeds monitor fields + enqueues paper.monitor', async () => {
+    const { services, intakeCalls, queueCalls, artifacts, manifestId } = await make({ seedExisting: 'submitted' });
+    await paperStartHandler(taskOf(), services);
+    expect(intakeCalls).toHaveLength(0);
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row).toMatchObject({
+      strategyName: manifestId, monitorStatus: 'watching', observedTrades: 0, windowPolicy: services.paperWindowPolicy,
+    });
+    expect(artifacts.getHashes.length).toBeGreaterThan(0);
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
   });
 
   it('bundleHash mismatch wfo↔baseline → actionable error', async () => {
@@ -218,17 +288,19 @@ describe('paperStartHandler', () => {
     await expect(paperStartHandler(taskOf(), services)).rejects.toThrow(/bundleHash mismatch/);
   });
 
-  it('ok:true + admissionStatus rejected → ledger rejected + paper.candidate_rejected, no throw', async () => {
-    const { services, events } = await make({
+  it('ok:true + admissionStatus rejected → ledger rejected + paper.candidate_rejected, no throw, no monitor task', async () => {
+    const { services, events, queueCalls } = await make({
       result: { ok: true, candidateId: 'cand-2', admissionStatus: 'rejected', admissionReasonCode: 'low_confidence', idempotentReplay: false },
     });
     await paperStartHandler(taskOf(), services);
     const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
     expect(row).toMatchObject({ submissionStatus: 'rejected', candidateId: 'cand-2' });
+    expect(row?.monitorStatus).toBeUndefined();
     expect(events).toContainEqual({
       type: 'paper.candidate_rejected',
       payload: { experimentId: 'exp-wfo', candidateId: 'cand-2', reasonCode: 'low_confidence' },
     });
+    expect(queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor')).toHaveLength(0);
   });
 
   it('ok:false internal_error → throws (retry), no ledger row', async () => {
