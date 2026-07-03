@@ -1,6 +1,7 @@
 import type { StrategyBuilder, StrategyBuilderInput, BuildFeedback } from '../ports/strategy-builder.port.ts';
 import type { BundleProverPort, ProofVerdict } from './bundle-prover.port.ts';
 import { assembleStrategyBundle } from '../domain/strategy-bundle.ts';
+import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
 import { validateStrategyBundle } from '../validation/strategy-bundle-validator.ts';
 
 export interface ProofOutcome {
@@ -8,6 +9,8 @@ export interface ProofOutcome {
   readonly attempts: number;
   readonly lastVerdict?: ProofVerdict;
   readonly lastViolations?: string[];
+  /** G2 (2026-07-03): собранный бандл при proven — для отправки в paper-intake (аддитивно). */
+  readonly bundle?: AssembledStrategyBundle;
 }
 
 export interface BuilderProofLoopDeps {
@@ -42,7 +45,7 @@ export async function runBuilderProofLoop(deps: BuilderProofLoopDeps): Promise<P
     }
 
     const proof = await deps.prover.prove(bundle.source);
-    if (proof.proven) return { proven: true, attempts: attempt };
+    if (proof.proven) return { proven: true, attempts: attempt, bundle };
     if ('divergence' in proof) {
       lastVerdict = proof;
       lastViolations = undefined;
