@@ -94,4 +94,9 @@ export class DrizzlePaperSubmissionRepository implements PaperSubmissionReposito
     const result = await this.db.update(paperSubmission).set(set).where(eq(paperSubmission.experimentId, experimentId)).returning({ id: paperSubmission.id });
     if (result.length === 0) throw new Error(`paper submission not found for experimentId: ${experimentId}`);
   }
+
+  async listWatching(): Promise<PaperSubmission[]> {
+    const rows = await this.db.select().from(paperSubmission).where(eq(paperSubmission.monitorStatus, 'watching'));
+    return rows.map(paperSubmissionToDomain);
+  }
 }

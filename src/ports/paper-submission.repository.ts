@@ -7,4 +7,7 @@ export interface PaperSubmissionRepository {
   // experimentId in the message when no row exists for it.
   updateMonitorState(experimentId: string, patch: Partial<Pick<PaperSubmission,
     'strategyName' | 'paperRunId' | 'runStartedAtMs' | 'monitorStatus' | 'observedTrades' | 'windowPolicy' | 'lowConfidence'>> & { updatedAt: string }): Promise<void>;
+  // Rows currently under active monitoring (monitorStatus === 'watching') — used by the
+  // paper:monitor:resume CLI to re-enqueue paper.monitor tasks after a Redis job loss.
+  listWatching(): Promise<PaperSubmission[]>;
 }

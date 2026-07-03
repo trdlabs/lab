@@ -23,4 +23,8 @@ export class InMemoryPaperSubmissionRepository implements PaperSubmissionReposit
     const definedPatch = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
     this.byExperimentId.set(experimentId, { ...existing, ...definedPatch });
   }
+
+  async listWatching(): Promise<PaperSubmission[]> {
+    return [...this.byExperimentId.values()].filter((s) => s.monitorStatus === 'watching');
+  }
 }

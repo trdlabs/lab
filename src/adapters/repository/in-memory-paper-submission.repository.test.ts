@@ -76,4 +76,22 @@ describe('InMemoryPaperSubmissionRepository', () => {
     await expect(repo.updateMonitorState('nope', { updatedAt: '2026-07-05T00:00:00.000Z' }))
       .rejects.toThrow(/nope/);
   });
+
+  it('listWatching returns only rows with monitorStatus === watching', async () => {
+    const repo = new InMemoryPaperSubmissionRepository();
+    await repo.upsertByExperimentId(row({ experimentId: 'exp-watching-1', monitorStatus: 'watching' }));
+    await repo.upsertByExperimentId(row({ experimentId: 'exp-complete', monitorStatus: 'window_complete' }));
+    await repo.upsertByExperimentId(row({ experimentId: 'exp-stalled', monitorStatus: 'stalled' }));
+    await repo.upsertByExperimentId(row({ experimentId: 'exp-no-monitor', monitorStatus: undefined }));
+    await repo.upsertByExperimentId(row({ experimentId: 'exp-watching-2', monitorStatus: 'watching' }));
+
+    const watching = await repo.listWatching();
+    expect(watching.map((r) => r.experimentId).sort()).toEqual(['exp-watching-1', 'exp-watching-2']);
+  });
+
+  it('listWatching returns an empty array when no rows are watching', async () => {
+    const repo = new InMemoryPaperSubmissionRepository();
+    await repo.upsertByExperimentId(row({ monitorStatus: 'window_complete' }));
+    expect(await repo.listWatching()).toEqual([]);
+  });
 });

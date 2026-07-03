@@ -121,6 +121,13 @@ services:
       # Platform paper-intake (feature 036/066). Unset URL = paper bridge disabled (kill-switch).
       LAB_PAPER_INTAKE_URL: ${LAB_PAPER_INTAKE_URL:-}
       LAB_PAPER_INTAKE_TOKEN: ${LAB_PAPER_INTAKE_TOKEN:-}
+      # paper.monitor (slice G4) — adaptive paper-observation window + self-reschedule poll.
+      PAPER_MONITOR_POLL_MS: ${PAPER_MONITOR_POLL_MS:-21600000}
+      PAPER_WINDOW_MIN_TRADES: ${PAPER_WINDOW_MIN_TRADES:-30}
+      PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: ${PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD:-15}
+      PAPER_WINDOW_MIN_DAYS: ${PAPER_WINDOW_MIN_DAYS:-3}
+      PAPER_WINDOW_MAX_DAYS: ${PAPER_WINDOW_MAX_DAYS:-30}
+      PAPER_MONITOR_MAX_WAIT_DAYS: ${PAPER_MONITOR_MAX_WAIT_DAYS:-7}
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,6 +215,13 @@ services:
       # Platform paper-intake (feature 036/066). Unset URL = paper bridge disabled (kill-switch).
       LAB_PAPER_INTAKE_URL: ${LAB_PAPER_INTAKE_URL:-}
       LAB_PAPER_INTAKE_TOKEN: ${LAB_PAPER_INTAKE_TOKEN:-}
+      # paper.monitor (slice G4) — adaptive paper-observation window + self-reschedule poll.
+      PAPER_MONITOR_POLL_MS: ${PAPER_MONITOR_POLL_MS:-21600000}
+      PAPER_WINDOW_MIN_TRADES: ${PAPER_WINDOW_MIN_TRADES:-30}
+      PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: ${PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD:-15}
+      PAPER_WINDOW_MIN_DAYS: ${PAPER_WINDOW_MIN_DAYS:-3}
+      PAPER_WINDOW_MAX_DAYS: ${PAPER_WINDOW_MAX_DAYS:-30}
+      PAPER_MONITOR_MAX_WAIT_DAYS: ${PAPER_MONITOR_MAX_WAIT_DAYS:-7}
     depends_on:
       postgres:
         condition: service_healthy
