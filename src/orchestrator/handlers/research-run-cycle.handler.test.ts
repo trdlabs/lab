@@ -273,6 +273,69 @@ describe('researchRunCycleHandler', () => {
     expect(await types(services)).toContain('researcher.bot_results_unavailable');
   });
 
+  it('includes the monitored paper run via paperRunId even though it is running (excluded by the finished filter)', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis PR1')], researchSummary: 's' });
+    const runningPaperRun = {
+      runId: 'paper-1', mode: 'paper' as const, status: 'running' as const, strategy: { name: 's', version: '1' },
+      startedAtMs: 1, finishedAtMs: 0, lastSeenMs: 5, symbols: ['BTCUSDT'],
+    };
+    const botResults: BotResultsReadPort = {
+      async listBotRuns(filter) {
+        if (filter?.mode === 'paper') return [runningPaperRun];
+        return []; // 'finished' filter excludes the still-running paper run
+      },
+      async getRunSummary(runId) {
+        expect(runId).toBe('paper-1');
+        return { runId: 'paper-1', excludesReconcile: true, asOf: 5, closedTrades: 1, wins: 1, losses: 0, breakeven: 0, winratePct: 100, pnlUsd: '5', avgPnl: '5', exitReasons: {} };
+      },
+      async getClosedTrades(runId) {
+        expect(runId).toBe('paper-1');
+        return [{ tradeId: 'pt-1', runId: 'paper-1', symbol: 'BTCUSDT', side: 'long', openedAtMs: 1, closedAtMs: 2, realizedPnl: '5', pnlPct: '0.5', isWin: true, closeReason: 'take_profit_final', entryPrice: null, exitPrice: null, closeReasonRaw: null }];
+      },
+      async getOperationalEvents() { return { items: [], nextCursor: null, asOf: 5, window: {}, freshness: 'fresh' }; },
+      async getDecisionLog() { return { items: [], nextCursor: null, asOf: 5, window: {}, freshness: 'fresh' }; },
+    };
+    const services = makeServices({ researcher: cap.port, botResults });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT', paperRunId: 'paper-1' }), services);
+
+    const input = cap.captured();
+    expect(input?.botResults?.[0]?.run.runId).toBe('paper-1');
+    expect(input?.botResults?.[0]?.trades.map((t) => t.tradeId)).toEqual(['pt-1']);
+  });
+
+  it('emits researcher.paper_run_missing and still completes the cycle when paperRunId points nowhere', async () => {
+    const services = makeServices({ researcher: stubResearcher({ hypotheses: [draft('thesis PR2')], researchSummary: 's' }) });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', paperRunId: 'does-not-exist' }), services);
+
+    const t = await types(services);
+    expect(t).toContain('researcher.paper_run_missing');
+    expect(t.at(-1)).toBe('research.run_cycle.completed');
+  });
+
+  it('does not touch mode=paper bot-results when paperRunId is absent (byte-identical behavior)', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis PR3')], researchSummary: 's' });
+    let paperModeCalls = 0;
+    const botResults: BotResultsReadPort = {
+      async listBotRuns(filter) {
+        if (filter?.mode === 'paper') paperModeCalls += 1;
+        return [];
+      },
+      async getRunSummary() { throw new Error('should not be called'); },
+      async getClosedTrades() { throw new Error('should not be called'); },
+      async getOperationalEvents() { return { items: [], nextCursor: null, asOf: 0, window: {}, freshness: 'fresh' }; },
+      async getDecisionLog() { return { items: [], nextCursor: null, asOf: 0, window: {}, freshness: 'fresh' }; },
+    };
+    const services = makeServices({ researcher: cap.port, botResults });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+
+    expect(paperModeCalls).toBe(0);
+    expect(cap.captured()?.botResults).toEqual([]);
+    expect(await types(services)).not.toContain('researcher.paper_run_missing');
+  });
+
   it('records researcher token usage against the task correlationId', async () => {
     const tokenUsage = new InMemoryTokenUsageRepository();
     const reportingResearcher: ResearcherPort = {
