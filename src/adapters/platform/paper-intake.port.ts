@@ -46,18 +46,10 @@ export interface PaperIntakePort {
   submitProvenCandidate(args: SubmitProvenCandidateArgs): Promise<PaperCandidateIntakeResult>;
 }
 
-// SDK 0.9.0 ещё не типизирует identity-поля strategy-блока (платформа 062 уже
-// принимает их по HTTP: allowlist-проекция). Локальное аддитивное расширение —
-// снимется при следующем релизе SDK.
-type StrategyWithIdentity = PaperCandidateIntakeRequest['strategy'] & {
-  readonly strategyName?: string;
-  readonly side?: 'long' | 'short';
-  readonly params?: Record<string, unknown>;
-};
-
 /** Чистый маппер: proven-бандл + identity + evidence → intake-запрос (тестируется без сети). */
 export function buildPaperIntakeRequest(args: SubmitProvenCandidateArgs): PaperCandidateIntakeRequest {
-  const strategy: StrategyWithIdentity = {
+  // SDK ≥0.9.1 типизирует identity-поля strategy-блока нативно.
+  const strategy: PaperCandidateIntakeRequest['strategy'] = {
     strategyProfileRef: null,
     moduleRef: null,
     moduleBundleHash: args.bundle.bundleHash,
