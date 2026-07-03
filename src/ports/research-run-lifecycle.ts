@@ -157,7 +157,10 @@ export interface RunResultSummary {
 
 export type GatewayErrorCategory =
   | 'validation_error' | 'missing_dataset' | 'unsupported_data_needs'
-  | 'sandbox_module_error' | 'runner_failure' | 'internal_gateway_error';
+  | 'sandbox_module_error' | 'runner_failure' | 'internal_gateway_error'
+  // Backpressure (backtester 429 queue_full / SDK BacktesterRateLimitError): the run was NOT
+  // created — safe to retry the submit later; resumeToken makes the replay idempotent.
+  | 'rate_limited';
 
 export interface GatewayError {
   readonly category: GatewayErrorCategory;
