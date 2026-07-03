@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { withinTokenBudget } from '../token-budget.ts';
 import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
@@ -185,4 +186,28 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     hypothesisId,
     backtestRunId,
   }));
+
+  // Cycle-completion trigger (fail-soft): once every hypothesis.build/backtest.completed task in this
+  // correlation chain (except this one) is terminal, batch the cycle's proxy-passed hypotheses into a
+  // revision.build candidate. dedupeKey absorbs duplicate enqueues from concurrent last-finishers.
+  try {
+    const chainTasks = await services.researchTasks.listByCorrelationAndTypes(
+      task.correlationId, ['hypothesis.build', 'backtest.completed'],
+    );
+    const others = chainTasks.filter((t) => t.id !== task.id);
+    const allTerminal = others.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'rejected');
+    if (allTerminal) {
+      await createAndEnqueueTask(
+        {
+          taskType: 'revision.build', source: task.source,
+          payload: { strategyProfileId, correlationId: task.correlationId },
+          correlationId: task.correlationId,
+          dedupeKey: `revision.build:${task.correlationId}`,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
+    }
+  } catch (err) {
+    await services.events.append(event(task.id, 'revision.build_trigger_failed', { error: errMsg(err) }));
+  }
 };

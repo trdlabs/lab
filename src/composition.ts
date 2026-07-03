@@ -17,6 +17,7 @@ import { backtestCompletedHandler } from './orchestrator/handlers/backtest-compl
 import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
 import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.ts';
+import { revisionBuildHandler } from './orchestrator/handlers/revision-build.handler.ts';
 import { paperMonitorHandler } from './orchestrator/handlers/paper-monitor.handler.ts';
 import { HeuristicPaperRunLocator } from './adapters/platform/heuristic-paper-run-locator.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
@@ -97,6 +98,7 @@ import { PhoenixTraceReader } from './read-api/phoenix/phoenix-trace-reader.ts';
 import { randomUUID } from 'node:crypto';
 import { BacktesterExperimentRunExecutor } from './research/backtester-experiment-run-executor.ts';
 import { BacktesterStrategyExperimentRunExecutor } from './research/backtester-strategy-experiment-run-executor.ts';
+import { BacktesterRevisionRunExecutor } from './research/backtester-revision-run-executor.ts';
 import { ExperimentService, DEFAULT_WFO_BUDGET } from './research/experiment-service.ts';
 import { ParamGridRunner } from './research/param-grid-runner.ts';
 import { FakeGate1 } from './adapters/wfo/fake-gate1.ts';
@@ -332,6 +334,13 @@ export function composeRuntime() {
     ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
     now,
   });
+  const revisionRunExecutor = new BacktesterRevisionRunExecutor({
+    platform: researchPlatform,
+    strategyBacktests,
+    poll: platformPoll,
+    ...(backtestCallbackUrl !== undefined ? { callbackUrl: backtestCallbackUrl } : {}),
+    now,
+  });
   // WFO agent adapters: env-driven mastra/fake adapter selection, mirroring buildCritic/buildStrategyCritic.
   const paramGridRunner = new ParamGridRunner({ strategyRunExecutor, concurrency: env.RESEARCH_GRID_CONCURRENCY });
   const tokenUsage = new DrizzleTokenUsageRepository(db);
@@ -399,6 +408,8 @@ export function composeRuntime() {
     strategyBuilder: buildStrategyBuilder(env),
     strategyBacktests,
     revisions,
+    revisionRunExecutor,
+    revisionBatchMax: env.REVISION_BATCH_MAX,
     paperIntake: selectPaperIntake(process.env),
     paperSubmissions: new DrizzlePaperSubmissionRepository(db),
     paperWindowPolicy,
@@ -416,6 +427,7 @@ export function composeRuntime() {
   router.register('strategy.wfo', strategyWfoHandler);
   router.register('paper.start', paperStartHandler);
   router.register('paper.monitor', paperMonitorHandler);
+  router.register('revision.build', revisionBuildHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),

@@ -38,6 +38,7 @@ import { FakeResultInterpreter } from '../../src/adapters/wfo/fake-result-interp
 import type { StrategyExperimentRunExecutor } from '../../src/research/strategy-experiment-run-executor.ts';
 import { InMemoryPaperSubmissionRepository } from '../../src/adapters/repository/in-memory-paper-submission.repository.ts';
 import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.port.ts';
+import type { StrategyRevisionRunExecutor } from '../../src/ports/strategy-revision-run-executor.ts';
 import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
@@ -54,6 +55,13 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
       runId: `sr-${req.role}`,
       platformRunId: 'plat-strategy-fake',
       totalTrades: 90,
+    }),
+  };
+  const revisionRunExecutor: StrategyRevisionRunExecutor = {
+    execute: async (req) => ({
+      status: 'completed' as const,
+      runId: `rev-${req.label}`,
+      platformRunId: 'plat-revision-fake',
     }),
   };
   const experimentService = new ExperimentService({
@@ -117,6 +125,8 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     strategyBuilder: new FakeStrategyBuilder(),
     strategyBacktests,
     revisions,
+    revisionRunExecutor,
+    revisionBatchMax: 5,
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

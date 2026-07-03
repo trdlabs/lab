@@ -53,7 +53,10 @@ describe('backtestCompletedHandler', () => {
 
       const events = await s.events.listByTask('task-bt-completed');
       expect(events.map((e) => e.type)).toContain('hypothesis.paper_candidate');
-      expect(queue.queued).toHaveLength(0);
+      // No research.run_cycle retry — the cycle-completion trigger (this being the sole
+      // correlated task) legitimately enqueues a revision.build; see the dedicated
+      // 'cycle-completion trigger' describe block below.
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(0);
     });
   });
 
@@ -65,7 +68,7 @@ describe('backtestCompletedHandler', () => {
 
       const events = await s.events.listByTask('task-bt-completed');
       expect(events.map((e) => e.type)).toContain('hypothesis.passed');
-      expect(queue.queued).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(0);
     });
   });
 
@@ -77,7 +80,7 @@ describe('backtestCompletedHandler', () => {
 
       const events = await s.events.listByTask('task-bt-completed');
       expect(events.map((e) => e.type)).toContain('hypothesis.inconclusive');
-      expect(queue.queued).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(0);
     });
   });
 
@@ -95,7 +98,7 @@ describe('backtestCompletedHandler', () => {
       expect(eventTypes).toContain('hypothesis.failed');
       expect(eventTypes).toContain('research.retry_enqueued');
 
-      const enqueued = queue.queued;
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
       expect(enqueued).toHaveLength(1);
       const first = enqueued[0]!;
       expect(first.taskType).toBe('research.run_cycle');
@@ -121,7 +124,7 @@ describe('backtestCompletedHandler', () => {
       const eventTypes = events.map((e) => e.type);
       expect(eventTypes).toContain('hypothesis.failed');
       expect(eventTypes).toContain('research.retry_budget_exhausted');
-      expect(queue.queued).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(0);
     });
   });
 
@@ -139,7 +142,7 @@ describe('backtestCompletedHandler', () => {
       expect(eventTypes).toContain('hypothesis.modify_required');
       expect(eventTypes).toContain('research.retry_enqueued');
 
-      const enqueued = queue.queued;
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
       expect(enqueued).toHaveLength(1);
       const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
       expect(retryTask!.payload).toMatchObject({
@@ -155,7 +158,7 @@ describe('backtestCompletedHandler', () => {
         task({ ...BASE_PAYLOAD, decision: 'MODIFY', cycleDepth: MAX_CYCLE_DEPTH }),
         s,
       );
-      expect(queue.queued).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(0);
     });
   });
 
@@ -302,6 +305,83 @@ describe('backtestCompletedHandler', () => {
 
       const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
       expect(types).toContain('proxy_deltas_missing');
+    });
+  });
+
+  describe('cycle-completion trigger', () => {
+    it('enqueues revision.build once this is the sole (vacuously all-terminal) correlated task', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+      expect(revisionTasks[0]!.dedupeKey).toBe('revision.build:corr-1');
+
+      const created = await s.researchTasks.findById(revisionTasks[0]!.taskId);
+      expect(created?.payload).toEqual({ strategyProfileId: 'profile-1', correlationId: 'corr-1' });
+    });
+
+    it('does NOT enqueue revision.build while a sibling hypothesis.build/backtest.completed task is still non-terminal', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      const sibling: ResearchTask = {
+        id: 'task-sibling', taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'running', payload: {}, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await s.researchTasks.create(sibling);
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
+
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+    });
+
+    it('enqueues revision.build once the last sibling task turns terminal', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      const sibling: ResearchTask = {
+        id: 'task-sibling', taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'completed', payload: {}, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await s.researchTasks.create(sibling);
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
+
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(1);
+    });
+
+    it('two concurrent last-finishing backtest.completed tasks both trigger — dedupeKey absorbs into exactly one revision.build task', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      const taskA: ResearchTask = task({ ...BASE_PAYLOAD, hypothesisId: 'hyp-a', backtestRunId: 'bt-a', decision: 'PASS' });
+      taskA.id = 'task-a';
+      const taskB: ResearchTask = task({ ...BASE_PAYLOAD, hypothesisId: 'hyp-b', backtestRunId: 'bt-b', decision: 'PASS' });
+      taskB.id = 'task-b';
+      // Both are already-completed siblings of each other from the trigger's point of view —
+      // register them up front so each invocation's listByCorrelationAndTypes sees the other as terminal.
+      const registerAsCompleted = async (t: ResearchTask) => {
+        await s.researchTasks.create({ ...t, status: 'completed' });
+      };
+      await registerAsCompleted(taskA);
+      await registerAsCompleted(taskB);
+
+      await backtestCompletedHandler(taskA, s);
+      await backtestCompletedHandler(taskB, s);
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+    });
+
+    it('trigger failure is fail-soft: emits revision.build_trigger_failed, does not throw', async () => {
+      const s = makeServices();
+      s.researchTasks.listByCorrelationAndTypes = async () => {
+        throw new Error('db down');
+      };
+      await expect(
+        backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s),
+      ).resolves.toBeUndefined();
+
+      const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
+      expect(types).toContain('revision.build_trigger_failed');
+      expect(types).toContain('backtest.result_ready'); // the task's own outcome is unaffected
     });
   });
 });
