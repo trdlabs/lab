@@ -37,6 +37,7 @@ import { FakeResultInterpreter } from '../../src/adapters/wfo/fake-result-interp
 import type { StrategyExperimentRunExecutor } from '../../src/research/strategy-experiment-run-executor.ts';
 import { InMemoryPaperSubmissionRepository } from '../../src/adapters/repository/in-memory-paper-submission.repository.ts';
 import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.port.ts';
+import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -120,9 +121,14 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     paperSubmissions: new InMemoryPaperSubmissionRepository(),
     paperWindowPolicy: { minTrades: 30, lowConfidenceThreshold: 15, minDays: 3, maxDays: 30, maxWaitDays: 7 },
     paperMonitorPollMs: 21600000,
+    paperRunLocator: NEVER_LOCATES,
     ...overrides,
   };
 }
+
+// Base default: never locates a run — tests exercising paperMonitorHandler's locate path opt in
+// via the `paperRunLocator` override (a fixture/fake keyed on strategyName+submittedAtMs).
+const NEVER_LOCATES: PaperRunLocatorPort = { locate: async () => null };
 
 // Base happy-path default: disabled (no LAB_PAPER_INTAKE_URL analogue in tests); tests that
 // exercise submission opt in via the `paperIntake` override (see selectPaperIntake's real shape).

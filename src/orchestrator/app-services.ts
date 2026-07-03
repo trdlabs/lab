@@ -34,6 +34,7 @@ import type { StrategyBacktestRunRepository } from '../ports/strategy-backtest-r
 import type { PaperIntakePort } from '../adapters/platform/paper-intake.port.ts';
 import type { PaperSubmissionRepository } from '../ports/paper-submission.repository.ts';
 import type { PaperWindowPolicy } from '../domain/paper-window.ts';
+import type { PaperRunLocatorPort } from '../ports/paper-run-locator.port.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -100,4 +101,6 @@ export interface AppServices {
   paperWindowPolicy: PaperWindowPolicy;
   /** Delay (ms) between paper.monitor self-reschedule polls. */
   paperMonitorPollMs: number;
+  /** Locates the live paper-mode run for a submitted champion (candidateId->runId seam, §2). */
+  paperRunLocator: PaperRunLocatorPort;
 }
