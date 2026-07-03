@@ -43,6 +43,36 @@ export function validatePaperWindowPolicy(p: PaperWindowPolicy): void {
   // named here for documentation parity with the invariant list.
 }
 
+const POLICY_KEYS: readonly (keyof PaperWindowPolicy)[] = [
+  'minTrades',
+  'lowConfidenceThreshold',
+  'minDays',
+  'maxDays',
+  'maxWaitDays',
+];
+
+/**
+ * Resolves the effective window policy from a persisted (jsonb) snapshot, falling back to the
+ * live env-validated policy when the snapshot is missing, partial, or otherwise invalid — e.g. a
+ * future field rename or a manual edit. Without this guard, a corrupted snapshot makes every
+ * comparison in evaluatePaperWindow compare against `undefined` (always false), which pins the
+ * verdict at 'watching' forever (unbounded self-reschedule) instead of surfacing loudly.
+ */
+export function resolveWindowPolicy(
+  snapshot: Record<string, unknown> | undefined,
+  fallback: PaperWindowPolicy,
+): PaperWindowPolicy {
+  if (!snapshot) return fallback;
+  if (!POLICY_KEYS.every((key) => typeof snapshot[key] === 'number')) return fallback;
+  const candidate = snapshot as unknown as PaperWindowPolicy;
+  try {
+    validatePaperWindowPolicy(candidate);
+    return candidate;
+  } catch {
+    return fallback;
+  }
+}
+
 export function evaluatePaperWindow(
   policy: PaperWindowPolicy,
   input: { runStartedAtMs: number; nowMs: number; closedTrades: number },

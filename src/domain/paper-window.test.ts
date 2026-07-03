@@ -1,6 +1,6 @@
 // src/domain/paper-window.test.ts
 import { describe, expect, it } from 'vitest';
-import { evaluatePaperWindow, validatePaperWindowPolicy, type PaperWindowPolicy } from './paper-window.ts';
+import { evaluatePaperWindow, resolveWindowPolicy, validatePaperWindowPolicy, type PaperWindowPolicy } from './paper-window.ts';
 
 const P: PaperWindowPolicy = { minTrades: 30, lowConfidenceThreshold: 15, minDays: 3, maxDays: 30, maxWaitDays: 7 };
 const day = 24 * 3600 * 1000;
@@ -26,5 +26,25 @@ describe('validatePaperWindowPolicy', () => {
     [{ ...P, maxWaitDays: 0 }, /maxWaitDays/],
   ] as const)('validate rejects bad policy %#', (p, re) => {
     expect(() => validatePaperWindowPolicy(p)).toThrow(re);
+  });
+});
+
+describe('resolveWindowPolicy', () => {
+  it('returns the snapshot when it is a valid policy', () => {
+    const snapshot = { ...P, minTrades: 50 };
+    expect(resolveWindowPolicy(snapshot, P)).toEqual(snapshot);
+  });
+
+  it('returns the fallback when the snapshot is missing a numeric field', () => {
+    expect(resolveWindowPolicy({ minTrades: 30 }, P)).toEqual(P);
+  });
+
+  it('returns the fallback when the snapshot violates a cross-field invariant', () => {
+    const snapshot = { ...P, lowConfidenceThreshold: 999 };
+    expect(resolveWindowPolicy(snapshot, P)).toEqual(P);
+  });
+
+  it('returns the fallback when the snapshot is undefined', () => {
+    expect(resolveWindowPolicy(undefined, P)).toEqual(P);
   });
 });

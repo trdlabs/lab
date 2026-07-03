@@ -2,8 +2,7 @@
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
-import type { PaperWindowPolicy } from '../../domain/paper-window.ts';
-import { evaluatePaperWindow } from '../../domain/paper-window.ts';
+import { evaluatePaperWindow, resolveWindowPolicy } from '../../domain/paper-window.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { event } from './backtest-support.ts';
 
@@ -34,7 +33,7 @@ export const paperMonitorHandler: WorkflowHandler = async (task, services) => {
   }
   if (!sub.strategyName) throw new Error(`paper.monitor: paper_submission ${experimentId} has no strategyName — re-run paper.start (post-G4 version)`);
 
-  const policy = (sub.windowPolicy ?? services.paperWindowPolicy) as unknown as PaperWindowPolicy;
+  const policy = resolveWindowPolicy(sub.windowPolicy, services.paperWindowPolicy);
   const submittedAtMs = Date.parse(sub.createdAt);
 
   const reschedule = async (): Promise<void> => {

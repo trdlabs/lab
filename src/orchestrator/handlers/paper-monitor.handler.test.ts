@@ -157,6 +157,22 @@ describe('paperMonitorHandler', () => {
     expect(queueCalls.filter((c) => c.envelope.taskType === 'research.run_cycle')).toHaveLength(1);
   });
 
+  it('watching row with a partial/corrupted windowPolicy snapshot → falls back to the live policy instead of permanent watching', async () => {
+    // windowPolicy is missing minTrades: with the raw unsafe cast, `closedTrades >= policy.minTrades`
+    // is always `>= undefined` (false), so the verdict is permanently 'watching' no matter the trade
+    // count — the exact unbounded-reschedule failure mode this fix closes.
+    const runStartedAtMs = Date.now() - 10 * DAY_MS; // within the live fallback policy's [minDays=3, maxDays=30)
+    const { services } = harness({ runSummary: runSummary(30, 'run-live-corrupt') }); // meets fallback minTrades=30
+    const corruptWindowPolicy = { lowConfidenceThreshold: 15, minDays: 3, maxDays: 30, maxWaitDays: 7 };
+    await services.paperSubmissions.upsertByExperimentId(
+      submissionRow({ paperRunId: 'run-live-corrupt', runStartedAtMs, windowPolicy: corruptWindowPolicy }),
+    );
+    await paperMonitorHandler(taskOf({ experimentId: 'exp-wfo' }), services);
+
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row).toMatchObject({ monitorStatus: 'window_complete', observedTrades: 30, lowConfidence: false });
+  });
+
   it('stalled at maxDays (elapsed>=maxDays, closedTrades<lowConfidenceThreshold) → ledger+event, no Cycle 2 trigger', async () => {
     const runStartedAtMs = Date.now() - 31 * DAY_MS; // past maxDays=30
     const { services, events, queueCalls } = harness({ runSummary: runSummary(5, 'run-live-4') });
