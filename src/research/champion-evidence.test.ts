@@ -67,6 +67,7 @@ function wfoMembers(): ExperimentRunMember[] {
       periodFrom: '2026-06-12T00:00:00.000Z', periodTo: '2026-06-19T00:00:00.000Z',
       symbols: ['ESPORTSUSDT'], paramsHash: 'ph-holdout', params: { dumpPct: 8 },
       bundleHash: 'sha256:wfo-champ', createdAt: NOW,
+      resultSummary: { decision: 'PAPER_CANDIDATE', totalTrades: 42, netPnlUsd: 500, maxDrawdownPct: 3.2, sharpe: 1.4 },
     },
   ];
 }
@@ -82,14 +83,12 @@ function baselineMembers(): ExperimentRunMember[] {
   ];
 }
 
-// NOTE (verify-point, not one of the two flagged in the brief): StrategyProfile has NO `name`
-// field (verified via the domain source — id/version/sourceKind/sourceFingerprint/direction/
-// coreIdea/requiredMarketFeatures/confidence/unknowns/profile/sourceArtifactRef/contractVersion/
-// createdAt/updatedAt only). `profile.id` is the closest existing identity-anchor field, so the
-// implementation reads strategyName from `profile.id` instead of the brief's `profile.name`.
+// profile.id is a UUID in production (randomUUID()) — deliberately UUID-shaped here so a
+// regression back to reading identity.strategyName from profile.id visibly breaks the
+// happy-path assertion below (strategyName must come from bundleManifestId instead).
 function profile(): StrategyProfile {
   return {
-    id: 'long_oi',
+    id: '6f1c2a34-9b2e-4f7d-8a1c-3e5d7b9f2c46',
     version: 1,
     sourceKind: 'bot_code',
     sourceFingerprint: 'fp',
@@ -144,6 +143,7 @@ function fixture(): ChampionSubmissionInput {
     profile: profile(),
     baselineRun: backtestRun({ id: 'run-base-lab', platformRunId: 'plat-run-base' }),
     variantRun: backtestRun({ id: 'run-var-lab', platformRunId: 'plat-run-var' }),
+    bundleManifestId: 'long_oi_dump_reversal_v1',
     correlationId: 'corr-champion-1',
   };
 }
@@ -154,14 +154,32 @@ describe('buildChampionSubmission', () => {
     expect(args.evidence.baselineRunId).toBe('plat-run-base'); // platformRunId, NOT lab id
     expect(args.evidence.variantRunId).toBe('plat-run-var');
     expect(args.bundle.bundleHash).toBe(fixture().wfoExperiment.bundleHash);
-    expect(args.identity).toEqual({ strategyName: 'long_oi', side: 'long', params: { dumpPct: 8 } });
+    expect(args.identity).toEqual({ strategyName: 'long_oi_dump_reversal_v1', side: 'long', params: { dumpPct: 8 } });
     expect(args.evidence.window).toEqual({
       fromMs: Date.parse('2026-06-12T00:00:00.000Z'),
       toMs: Date.parse('2026-06-19T00:00:00.000Z'),
     });
     expect(args.evidence.symbols).toEqual(['ESPORTSUSDT']);
+    expect(args.evidence.metricsSnapshot).toEqual({
+      ...fixture().variantRun.metrics,
+      resultSummary: { decision: 'PAPER_CANDIDATE', totalTrades: 42, netPnlUsd: 500, maxDrawdownPct: 3.2, sharpe: 1.4 },
+    });
     expect(args.idempotencyKey).toBe(`wfo-champion:${fixture().wfoExperiment.id}`);
     expect(args.workflowId).toBe(fixture().wfoExperiment.id);
+  });
+
+  it('omits resultSummary from metricsSnapshot when the wfo holdout member has none', () => {
+    const f = fixture();
+    const withoutResultSummary = {
+      ...f,
+      wfoMembers: f.wfoMembers.map((m) => {
+        if (m.role !== 'holdout') return m;
+        const { resultSummary: _resultSummary, ...rest } = m;
+        return rest;
+      }),
+    };
+    const args = buildChampionSubmission(withoutResultSummary);
+    expect(args.evidence.metricsSnapshot).toEqual({ ...f.variantRun.metrics });
   });
 
   it.each([
@@ -186,6 +204,16 @@ describe('buildChampionSubmission', () => {
       'unsupported direction',
       (f: ChampionSubmissionInput) => ({ ...f, profile: { ...f.profile, direction: 'both' as const } }),
       /long\|short/i,
+    ],
+    [
+      'bundleManifestId empty',
+      (f: ChampionSubmissionInput) => ({ ...f, bundleManifestId: '' }),
+      /bundleManifestId/,
+    ],
+    [
+      'bundleManifestId whitespace-only',
+      (f: ChampionSubmissionInput) => ({ ...f, bundleManifestId: '   ' }),
+      /bundleManifestId/,
     ],
   ])('fails fast: %s', (_name, mutate, re) => {
     expect(() => buildChampionSubmission(mutate(fixture()))).toThrow(re);

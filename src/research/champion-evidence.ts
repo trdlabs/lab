@@ -17,6 +17,12 @@ export interface ChampionSubmissionInput {
   profile: StrategyProfile;
   baselineRun: StrategyBacktestRun; // looked up by caller from baseline holdout member's strategyBacktestRunId
   variantRun: StrategyBacktestRun; // looked up from WFO holdout member's strategyBacktestRunId
+  /**
+   * The assembled bundle's manifest.id — human-readable module identity (e.g.
+   * 'long_oi_dump_reversal_v1'); the platform projects it into bot_bundle.metadata. Never pass
+   * profile.id — it is a UUID and is not fit for operator-facing display.
+   */
+  bundleManifestId: string;
   correlationId: string;
 }
 
@@ -37,14 +43,18 @@ export function buildChampionSubmission(input: ChampionSubmissionInput): SubmitP
 
   if (!wfoExperiment.bundleHash) throw new Error(`experiment ${wfoExperiment.id}: bundleHash missing`);
 
+  if (!input.bundleManifestId || input.bundleManifestId.trim() === '') {
+    throw new Error(`experiment ${wfoExperiment.id}: bundleManifestId missing`);
+  }
+
   const scope = wfoExperiment.datasetScope;
 
   return {
     bundle: { bundleHash: wfoExperiment.bundleHash },
     identity: {
-      // StrategyProfile has no `name` field — `id` is the closest identity-anchor field the
-      // domain actually exposes (see champion-evidence.test.ts fixture comment).
-      strategyName: profile.id,
+      // Human-readable module identity from the assembled bundle's manifest — NOT profile.id
+      // (that is a UUID; see ChampionSubmissionInput.bundleManifestId doc comment).
+      strategyName: input.bundleManifestId,
       side: profile.direction,
       ...(wfoHoldout.params ? { params: wfoHoldout.params } : {}),
     },
