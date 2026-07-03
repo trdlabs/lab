@@ -5,6 +5,7 @@ import { makeServices } from '../../../test/support/make-services.ts';
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 import type { ResearchTask } from '../../domain/types.ts';
+import type { HypothesisProposal } from '../../domain/hypothesis.ts';
 
 function task(payload: Record<string, unknown>): ResearchTask {
   const now = '2026-01-01T00:00:00Z';
@@ -31,6 +32,17 @@ const BASE_PAYLOAD = {
   reasons: ['strong_robust_edge'],
   cycleDepth: 0,
 };
+
+function hyp(id: string, status: 'validated' | 'rejected' = 'validated'): HypothesisProposal {
+  return {
+    id, strategyProfileId: 'profile-1', thesis: 't', targetBehavior: 'b',
+    ruleAction: { appliesTo: 'long', rules: [{ when: 'w', action: 'no_op', params: {} }] },
+    requiredFeatures: ['oi'], validationPlan: 'p', expectedEffect: { metric: 'win_rate', direction: 'increase' },
+    invalidationCriteria: ['x'], confidence: 0.5, status, fingerprint: 'sha256:' + id,
+    proposal: {} as never, issues: [], contractVersion: 'hypothesis-proposal-v1',
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  };
+}
 
 describe('backtestCompletedHandler', () => {
   describe('PAPER_CANDIDATE', () => {
@@ -237,6 +249,59 @@ describe('backtestCompletedHandler', () => {
       const last = recordedEvents[recordedEvents.length - 1]!;
       expect(last.type).toBe('backtest.result_ready');
       expect(last.payload).toMatchObject({ decision: 'FAIL', profileId: 'profile-1' });
+    });
+  });
+
+  describe('hypothesis proxy status update', () => {
+    const DELTAS = { deltaNetPnlUsd: 111.5, deltaMaxDrawdownPct: -4.25 };
+
+    it.each([
+      ['PASS', 'proxy_passed'],
+      ['PAPER_CANDIDATE', 'proxy_paper_candidate'],
+      ['FAIL', 'proxy_failed'],
+      ['MODIFY', 'proxy_failed'],
+      ['INCONCLUSIVE', 'proxy_failed'],
+    ] as const)('%s decision -> %s status + proxyMetrics on the proposal', async (decision, expectedStatus) => {
+      const s = makeServices();
+      await s.hypotheses.create(hyp('hyp-1'));
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision, ...DELTAS }), s);
+
+      const updated = await s.hypotheses.findById('hyp-1');
+      expect(updated?.status).toBe(expectedStatus);
+      expect(updated?.proxyMetrics).toEqual({
+        decision, backtestRunId: 'bt-run-1',
+        deltaNetPnlUsd: DELTAS.deltaNetPnlUsd, deltaMaxDrawdownPct: DELTAS.deltaMaxDrawdownPct,
+      });
+
+      const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
+      expect(types).not.toContain('hypothesis.status_update_failed');
+      expect(types).not.toContain('proxy_deltas_missing');
+    });
+
+    it('missing hypothesis row: fails soft with hypothesis.status_update_failed, does NOT throw', async () => {
+      const s = makeServices(); // no hypothesis row created for 'hyp-1'
+      await expect(
+        backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS', ...DELTAS }), s),
+      ).resolves.toBeUndefined();
+
+      const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
+      expect(types).toContain('hypothesis.status_update_failed');
+      // still terminates normally
+      expect(types).toContain('backtest.result_ready');
+    });
+
+    it('missing deltas: writes proxyMetrics with 0s and emits proxy_deltas_missing (fail-soft, older in-flight tasks)', async () => {
+      const s = makeServices();
+      await s.hypotheses.create(hyp('hyp-1'));
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s); // no deltas in payload
+
+      const updated = await s.hypotheses.findById('hyp-1');
+      expect(updated?.proxyMetrics).toEqual({
+        decision: 'PASS', backtestRunId: 'bt-run-1', deltaNetPnlUsd: 0, deltaMaxDrawdownPct: 0,
+      });
+
+      const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
+      expect(types).toContain('proxy_deltas_missing');
     });
   });
 });

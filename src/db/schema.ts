@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
 import type { BacktestRunStatus } from '../domain/backtest-run.ts';
 import type { ArtifactRef, TaskSource } from '../domain/types.ts';
-import type { RuleAction, ExpectedEffect, HypothesisProposalDraft } from '../domain/hypothesis.ts';
+import type { RuleAction, ExpectedEffect, HypothesisProposalDraft, HypothesisProxyMetrics } from '../domain/hypothesis.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
 import type { ModuleManifest } from '../domain/module-bundle.ts';
@@ -100,6 +100,7 @@ export const hypothesisProposal = pgTable('hypothesis_proposal', {
   proposal: jsonb('proposal').notNull().$type<HypothesisProposalDraft>(),
   issues: jsonb('issues').notNull().$type<ValidationIssue[]>(),
   contractVersion: text('contract_version').notNull(),
+  proxyMetrics: jsonb('proxy_metrics').$type<HypothesisProxyMetrics>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({

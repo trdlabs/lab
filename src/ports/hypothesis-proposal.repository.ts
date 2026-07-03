@@ -1,4 +1,4 @@
-import type { HypothesisProposal } from '../domain/hypothesis.ts';
+import type { HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics } from '../domain/hypothesis.ts';
 
 export interface HypothesisProposalRepository {
   create(proposal: HypothesisProposal): Promise<void>;
@@ -11,4 +11,6 @@ export interface HypothesisProposalRepository {
    * out of scope. Canonical source of truth for hypothesis existence stays here.
    */
   findLatestValidatedByProfile(strategyProfileId: string): Promise<HypothesisProposal | null>;
+  /** Updates status (+ optional proxyMetrics). Throws, naming the id, when it doesn't exist. */
+  updateStatus(id: string, status: HypothesisStatus, proxyMetrics?: HypothesisProxyMetrics): Promise<void>;
 }

@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { createDbClient } from '../../db/client.ts';
 import { DrizzleHypothesisProposalRepository } from './drizzle-hypothesis-proposal.repository.ts';
 import { DrizzleHypothesisReviewRepository } from './drizzle-hypothesis-review.repository.ts';
-import type { HypothesisProposal } from '../../domain/hypothesis.ts';
+import type { HypothesisProposal, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 import type { HypothesisReview } from '../../domain/critic.ts';
 
 const url = process.env.DATABASE_URL;
@@ -52,6 +52,22 @@ function hyp(id: string, fp: string, status: 'validated' | 'rejected' = 'validat
     const fp = 'sha256:dup-' + Date.now();
     await proposals.create(hyp('a-' + Date.now(), fp));
     await expect(proposals.create(hyp('b-' + Date.now(), fp))).rejects.toThrow();
+  });
+
+  it('updateStatus round-trips status and proxyMetrics', async () => {
+    const id = 'h-update-' + Date.now();
+    await proposals.create(hyp(id, 'sha256:update-' + id));
+    const proxyMetrics: HypothesisProxyMetrics = {
+      decision: 'PASS', deltaNetPnlUsd: 42, deltaMaxDrawdownPct: -3.5, backtestRunId: 'bt-update',
+    };
+    await proposals.updateStatus(id, 'proxy_passed', proxyMetrics);
+    const found = await proposals.findById(id);
+    expect(found?.status).toBe('proxy_passed');
+    expect(found?.proxyMetrics).toEqual(proxyMetrics);
+  });
+
+  it('updateStatus throws on unknown id, naming the id', async () => {
+    await expect(proposals.updateStatus('missing-id-' + Date.now(), 'proxy_failed')).rejects.toThrow('missing-id-');
   });
 
   it('persists and lists a review', async () => {

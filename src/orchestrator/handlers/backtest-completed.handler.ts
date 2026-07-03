@@ -6,6 +6,7 @@ import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { withinTokenBudget } from '../token-budget.ts';
+import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 
 export const BacktestCompletedPayloadSchema = z.object({
   backtestRunId: z.string().min(1),
@@ -15,9 +16,28 @@ export const BacktestCompletedPayloadSchema = z.object({
   reasons: z.array(z.string()),
   /** Depth of the research→build→backtest cycle chain. Used to cap retries. */
   cycleDepth: z.number().int().min(0).default(0),
+  /** Absent on older in-flight tasks enqueued before this field existed — fail-soft to 0s. */
+  deltaNetPnlUsd: z.number().optional(),
+  deltaMaxDrawdownPct: z.number().optional(),
 });
 
 export type BacktestCompletedPayload = z.infer<typeof BacktestCompletedPayloadSchema>;
+
+/**
+ * Maps a backtest.completed evaluation decision to a PROXY status — a fast, cheap, single-fold
+ * signal, NOT a validated/confirmed outcome. That stronger claim is earned only by a later
+ * paper/live promotion, outside this slice.
+ */
+export function mapDecisionToProxyStatus(decision: BacktestCompletedPayload['decision']): HypothesisStatus {
+  switch (decision) {
+    case 'PASS': return 'proxy_passed';
+    case 'PAPER_CANDIDATE': return 'proxy_paper_candidate';
+    case 'FAIL':
+    case 'MODIFY':
+    case 'INCONCLUSIVE':
+      return 'proxy_failed';
+  }
+}
 
 /** Max number of automatic retry cycles (FAIL/MODIFY → new research.run_cycle). */
 export const MAX_CYCLE_DEPTH = 2;
@@ -56,7 +76,10 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   if (parsed.status === 'invalid') {
     throw new Error(`invalid backtest.completed payload: ${JSON.stringify(parsed.issues)}`);
   }
-  const { backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth } = parsed.data;
+  const {
+    backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth,
+    deltaNetPnlUsd, deltaMaxDrawdownPct,
+  } = parsed.data;
 
   const cumulativeTokens = await services.tokenUsage.get(task.correlationId);
   const withinBudget = withinTokenBudget(cumulativeTokens, services.researchTaskTokenBudget);
@@ -129,6 +152,25 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       }));
       break;
     }
+  }
+
+  // PROXY status bookkeeping: a fast, cheap, single-fold signal, NOT a validated/confirmed
+  // outcome. Fail-soft — a bookkeeping problem here must not fail the task.
+  const deltasMissing = deltaNetPnlUsd === undefined || deltaMaxDrawdownPct === undefined;
+  if (deltasMissing) {
+    await services.events.append(event(task.id, 'proxy_deltas_missing', { backtestRunId, hypothesisId }));
+  }
+  const proxyMetrics: HypothesisProxyMetrics = {
+    decision, backtestRunId,
+    deltaNetPnlUsd: deltaNetPnlUsd ?? 0,
+    deltaMaxDrawdownPct: deltaMaxDrawdownPct ?? 0,
+  };
+  try {
+    await services.hypotheses.updateStatus(hypothesisId, mapDecisionToProxyStatus(decision), proxyMetrics);
+  } catch (err) {
+    await services.events.append(event(task.id, 'hypothesis.status_update_failed', {
+      hypothesisId, error: errMsg(err),
+    }));
   }
 
   await services.events.append(event(task.id, 'research.run_cost', {

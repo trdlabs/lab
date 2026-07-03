@@ -134,6 +134,13 @@
       "when": 1783094102856,
       "tag": "0018_sloppy_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783094949192,
+      "tag": "0019_hypothesis_proposal_proxy_metrics",
+      "breakpoints": true
     }
   ]
 }

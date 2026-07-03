@@ -290,7 +290,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   try {
     const validatedProposals = (await services.hypotheses.listByStrategyProfile(profile.id))
       .filter((p) => p.status === 'validated');
-    activeOverlayRules = validatedProposals.map((p) => ({ thesis: p.thesis, ruleAction: p.ruleAction, status: p.status }));
+    activeOverlayRules = validatedProposals.map((p) => ({ thesis: p.thesis, ruleAction: p.ruleAction, status: 'validated' as const }));
   } catch { activeOverlayRules = []; }
 
   let marketContextMath;

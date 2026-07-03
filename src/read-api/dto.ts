@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AgentId, AgentLifecycle } from './agent-taxonomy.ts';
 import type { ParameterGrid } from '../domain/research-experiment.ts';
+import type { HypothesisStatus } from '../domain/hypothesis.ts';
 
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const BACKTEST_STATUSES = ['queued', 'submitted', 'running', 'completed', 'rejected', 'failed', 'evaluated'] as const;
@@ -34,7 +35,7 @@ export interface RulesSummaryDto { appliesTo: string; ruleCount: number; }
 
 export interface HypothesisListItemDto {
   id: string; profileId: string; thesis: string; targetBehavior: string;
-  status: 'validated' | 'rejected'; confidence: number;
+  status: HypothesisStatus; confidence: number;
   expectedEffect: ExpectedEffectDto; rulesSummary: RulesSummaryDto;
   createdAt: string; updatedAt: string;
 }

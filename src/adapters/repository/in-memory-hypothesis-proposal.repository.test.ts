@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryHypothesisProposalRepository } from './in-memory-hypothesis-proposal.repository.ts';
-import type { HypothesisProposal } from '../../domain/hypothesis.ts';
+import type { HypothesisProposal, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 
 function hyp(id: string, profileId: string, fp: string): HypothesisProposal {
   return {
@@ -67,5 +67,33 @@ describe('InMemoryHypothesisProposalRepository', () => {
     await repo.create(rejected);
     await repo.create(otherProfile);
     expect(await repo.findLatestValidatedByProfile('p1')).toBeNull();
+  });
+
+  describe('updateStatus', () => {
+    it('round-trips status and proxyMetrics', async () => {
+      const repo = new InMemoryHypothesisProposalRepository();
+      await repo.create(hyp('h1', 'p1', 'sha256:a'));
+      const proxyMetrics: HypothesisProxyMetrics = {
+        decision: 'PASS', deltaNetPnlUsd: 123.45, deltaMaxDrawdownPct: -1.2, backtestRunId: 'bt-1',
+      };
+      await repo.updateStatus('h1', 'proxy_passed', proxyMetrics);
+      const found = await repo.findById('h1');
+      expect(found?.status).toBe('proxy_passed');
+      expect(found?.proxyMetrics).toEqual(proxyMetrics);
+    });
+
+    it('updates status without touching proxyMetrics when omitted', async () => {
+      const repo = new InMemoryHypothesisProposalRepository();
+      await repo.create(hyp('h1', 'p1', 'sha256:a'));
+      await repo.updateStatus('h1', 'merged');
+      const found = await repo.findById('h1');
+      expect(found?.status).toBe('merged');
+      expect(found?.proxyMetrics).toBeUndefined();
+    });
+
+    it('throws on unknown id, naming the id', async () => {
+      const repo = new InMemoryHypothesisProposalRepository();
+      await expect(repo.updateStatus('missing-id', 'proxy_failed')).rejects.toThrow('missing-id');
+    });
   });
 });

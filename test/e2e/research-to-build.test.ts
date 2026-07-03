@@ -74,11 +74,13 @@ describe('research → build pipeline (e2e)', () => {
 
     await queue.drain();
 
+    // The full pipeline runs backtest.completed too, which flips status away from 'validated'
+    // to a proxy_* status (Task 2 slice) — so identify the 2 built hypotheses by profile
+    // membership, not by a status value the pipeline is expected to mutate.
     const hypotheses = await services.hypotheses.listByStrategyProfile('p1');
-    const validated = hypotheses.filter((h) => h.status === 'validated');
-    expect(validated).toHaveLength(2);
+    expect(hypotheses).toHaveLength(2);
 
-    for (const h of validated) {
+    for (const h of hypotheses) {
       const builds = await services.builds.listByHypothesis(h.id);
       expect(builds).toHaveLength(1);
       expect(builds[0]!.status).toBe('submitted');
