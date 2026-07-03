@@ -67,7 +67,7 @@ interface PaperWindowPolicy {
 2. Если `paper_run_id` ещё не зафиксирован: `locator.locate(...)` → null и `elapsed(submittedAt) > maxWaitDays` → `stalled` + `paper.run_not_found`; null и не истёк → re-enqueue себя (`attempt+1`, dedupeKey с attempt) и выход; found → зафиксировать `paper_run_id`+`run_started_at` в ledger + событие `paper.run_located {runId}`.
 3. `botResults.getRunSummary(runId)` → `closedTrades` → `evaluatePaperWindow`:
    - `watching` → обновить `observed_trades` в ledger, re-enqueue с delayMs;
-   - `window_complete` → ledger `monitor_status='window_complete'` (+lowConfidence flag) + событие `paper.window_complete {runId, closedTrades, lowConfidence}` + **enqueue `research.run_cycle {strategyProfileId}`** (source `platform`, correlationId task.correlationId, dedupeKey `paper_window:${runId}` — ровно один Цикл 2 на окно);
+   - `window_complete` → ledger `monitor_status='window_complete'` (+lowConfidence flag) + событие `paper.window_complete {runId, closedTrades, lowConfidence}` + **enqueue `research.run_cycle {strategyProfileId, paperRunId}`** (source `platform`, correlationId task.correlationId, dedupeKey `paper_window:${runId}` — ровно один Цикл 2 на окно; paperRunId — тот самый зафиксированный ран, см. §6);
    - `stalled` → ledger + событие, БЕЗ триггера.
 4. Kill-switch мониторинга не нужен: если paper-мост выключен (нет LAB_PAPER_INTAKE_URL), paper.monitor просто никогда не энкьюится (submitted-строк нет). Для чтения нужен `LAB_BOT_RESULTS_INTEGRATION=http` — при mock/fixture монитор честно работает по их данным (тестируемость).
 
