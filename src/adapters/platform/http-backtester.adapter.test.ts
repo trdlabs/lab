@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacktesterConflictError, BacktesterError } from '@trading-backtester/sdk/client';
+import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trading-backtester/sdk/client';
 import type {
   CapabilityDescriptor as BtCapabilityDescriptor,
   DatasetDescriptor as BtDatasetDescriptor,
@@ -201,6 +201,44 @@ describe('HttpBacktesterAdapter', () => {
     const fake = new FakeClient();
     fake.resultMode = 'error';
     await expect(new HttpBacktesterAdapter(fake).getRunResult('r')).rejects.toBeInstanceOf(GatewayRunError);
+  });
+
+  it('maps backtester 429 backpressure to category rate_limited (all three signals)', async () => {
+    // Signal 1: the typed SDK class.
+    const fake1 = new FakeClient();
+    fake1.getRunStatus = async () => {
+      throw new BacktesterRateLimitError(429, 'queue_full', 'queue depth 5 >= cap 5', 'rate_limit', undefined, 30);
+    };
+    const err1 = await new HttpBacktesterAdapter(fake1).getRunStatus('r').then(
+      () => undefined,
+      (e: unknown) => e as GatewayRunError,
+    );
+    expect(err1).toBeInstanceOf(GatewayRunError);
+    expect(err1?.category).toBe('rate_limited');
+    expect(err1?.code).toBe('queue_full');
+
+    // Signal 2+3: a base BacktesterError carrying status 429 / code queue_full (older SDK shape).
+    const fake2 = new FakeClient();
+    fake2.getRunStatus = async () => {
+      throw new BacktesterError(429, 'queue_full', 'full', 'rate_limit', undefined);
+    };
+    const err2 = await new HttpBacktesterAdapter(fake2).getRunStatus('r').then(
+      () => undefined,
+      (e: unknown) => e as GatewayRunError,
+    );
+    expect(err2?.category).toBe('rate_limited');
+  });
+
+  it('does not leak unknown wire categories into the union (falls back by status)', async () => {
+    const fake = new FakeClient();
+    fake.getRunStatus = async () => {
+      throw new BacktesterError(500, 'boom', 'kaput', 'brand_new_wire_category', undefined);
+    };
+    const err = await new HttpBacktesterAdapter(fake).getRunStatus('r').then(
+      () => undefined,
+      (e: unknown) => e as GatewayRunError,
+    );
+    expect(err?.category).toBe('internal_gateway_error');
   });
 
   it('discovers capabilities and lists datasets', async () => {

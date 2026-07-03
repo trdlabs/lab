@@ -25,7 +25,7 @@ import type {
   OverlayRunPreset,
 } from '@trading-backtester/sdk/contracts';
 import { createModuleBundle } from '@trading-backtester/sdk/builder';
-import { BacktesterConflictError, BacktesterError } from '@trading-backtester/sdk/client';
+import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trading-backtester/sdk/client';
 import type {
   ResearchPlatformPort,
   ResearchCapabilityDescriptor,
@@ -68,10 +68,26 @@ export interface BacktesterClientLike {
 
 const TERMINAL = new Set(['completed', 'failed', 'canceled', 'expired', 'timed_out']);
 
+/** Категории, которые lab действительно понимает: чужая строка с провода не должна протекать в
+ *  union через слепой каст (сервер шлёт например 'rate_limit', которого в union нет). */
+const KNOWN_GATEWAY_CATEGORIES: ReadonlySet<GatewayError['category']> = new Set([
+  'validation_error', 'missing_dataset', 'unsupported_data_needs',
+  'sandbox_module_error', 'runner_failure', 'internal_gateway_error', 'rate_limited',
+]);
+
 function toGatewayError(err: unknown): GatewayError {
+  // Backpressure (Tier 2 lite): SDK class / HTTP 429 / queue_full — любой из трёх сигналов ⇒
+  // rate_limited. Ретраить submit целиком (resumeToken делает replay идемпотентным) — забота
+  // вызывающего; SDK уже сам ретраит 429 с Retry-After до maxAttempts.
+  if (err instanceof BacktesterRateLimitError ||
+      (err instanceof BacktesterError && (err.status === 429 || err.code === 'queue_full'))) {
+    return { category: 'rate_limited', code: err.code, message: err.message };
+  }
   if (err instanceof BacktesterError) {
-    const category = (err.category as GatewayError['category'] | undefined) ??
-      (err.status === 400 ? 'validation_error' : 'internal_gateway_error');
+    const wire = err.category as GatewayError['category'] | undefined;
+    const category = wire !== undefined && KNOWN_GATEWAY_CATEGORIES.has(wire)
+      ? wire
+      : err.status === 400 ? 'validation_error' : 'internal_gateway_error';
     return { category, code: err.code, message: err.message };
   }
   return { category: 'internal_gateway_error', code: 'client_error', message: String((err as Error)?.message ?? err) };
