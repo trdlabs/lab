@@ -161,6 +161,40 @@ describe('runStrategyBaselineValidation', () => {
     expect((await experiments.findById(experimentId))?.bundleArtifactRef).toEqual(ref);
   });
 
+  it('backfills bundleArtifactRef onto an existing completed experiment that predates ref persistence', async () => {
+    const { svc, experiments, executor } = buildSvc(
+      () => ({ status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 4 }),
+      { 'plat-sanity': trades(4) },
+    );
+    const shortInput = baseInput({
+      datasetScope: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-01-07' } },
+    });
+
+    // First run: no bundleArtifactRef supplied (simulates a row created before ref persistence landed).
+    const first = await svc.runStrategyBaselineValidation(shortInput);
+    expect(first.verdict).toBe('INCONCLUSIVE');
+    expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toBeUndefined();
+    expect(executor.calls).toEqual(['sanity']);
+
+    // Second run: same key, now WITH a ref — dedup early-return must backfill it onto the existing row.
+    const refA = testArtifactRef();
+    const second = await svc.runStrategyBaselineValidation({ ...shortInput, bundleArtifactRef: refA });
+    expect(second.experimentId).toBe(first.experimentId);
+    expect(second.verdict).toBe('INCONCLUSIVE');
+    expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toEqual(refA);
+
+    // No new member/run was created by the dedup path.
+    expect(executor.calls).toEqual(['sanity']);
+    expect(await experiments.listMembers(first.experimentId)).toHaveLength(1);
+
+    // Third run: a DIFFERENT ref must NOT overwrite the already-backfilled one (first ref wins).
+    const refB: typeof refA = { ...refA, artifact_id: 'art-2', uri: 'file:///tmp/b.json' };
+    const third = await svc.runStrategyBaselineValidation({ ...shortInput, bundleArtifactRef: refB });
+    expect(third.experimentId).toBe(first.experimentId);
+    expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toEqual(refA);
+    expect(executor.calls).toEqual(['sanity']);
+  });
+
   it('synthetic ≥30-trade path with a surviving holdout → PAPER_CANDIDATE', async () => {
     const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
       if (role === 'holdout') {

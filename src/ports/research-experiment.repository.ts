@@ -8,7 +8,7 @@ export interface ResearchExperimentRepository {
   findByKey(experimentKey: string): Promise<ResearchExperiment | null>;
   listByType(type: ExperimentType, opts?: { limit?: number }): Promise<ResearchExperiment[]>;
   updateExperiment(id: string, patch: Partial<Pick<ResearchExperiment,
-    'status' | 'verdict' | 'verdictReason' | 'holdoutBoundary' | 'aggregateMetrics' | 'completedAt' | 'updatedAt' | 'parameterGrid'>>): Promise<void>;
+    'status' | 'verdict' | 'verdictReason' | 'holdoutBoundary' | 'aggregateMetrics' | 'completedAt' | 'updatedAt' | 'parameterGrid' | 'bundleArtifactRef'>>): Promise<void>;
   addMember(m: ExperimentRunMember): Promise<void>;
   updateMember(id: string, patch: Partial<Pick<ExperimentRunMember,
     'backtestRunId' | 'strategyBacktestRunId' | 'tradeCount' | 'resultSummary'>>): Promise<void>;

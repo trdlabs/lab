@@ -238,7 +238,15 @@ export class ExperimentService {
       datasetScope: input.datasetScope, holdoutPolicy: policy,
     });
     const existing = await this.d.experiments.findByKey(experimentKey);
-    if (existing && existing.status === 'completed') return { experimentId: existing.id, verdict: existing.verdict ?? 'INCONCLUSIVE' };
+    if (existing && existing.status === 'completed') {
+      if (!existing.bundleArtifactRef && input.bundleArtifactRef) {
+        await this.d.experiments.updateExperiment(existing.id, {
+          bundleArtifactRef: input.bundleArtifactRef,
+          updatedAt: this.d.now(),
+        });
+      }
+      return { experimentId: existing.id, verdict: existing.verdict ?? 'INCONCLUSIVE' };
+    }
 
     const now = this.d.now();
     const experimentId = existing?.id ?? this.d.newId('exp');

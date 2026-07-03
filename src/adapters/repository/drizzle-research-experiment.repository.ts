@@ -85,6 +85,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
     if (patch.holdoutBoundary !== undefined) set.holdoutBoundary = patch.holdoutBoundary;
     if (patch.aggregateMetrics !== undefined) set.aggregateMetrics = patch.aggregateMetrics;
     if (patch.parameterGrid !== undefined) set.parameterGrid = patch.parameterGrid;
+    if (patch.bundleArtifactRef !== undefined) set.bundleArtifactRef = patch.bundleArtifactRef;
     if (patch.completedAt !== undefined) set.completedAt = patch.completedAt ? new Date(patch.completedAt) : null;
     await this.db.update(researchExperiment).set(set).where(eq(researchExperiment.id, id));
   }
