@@ -144,4 +144,24 @@ describe('strategyBaselineHandler', () => {
     expect(patched?.baselineExperimentId).toBe('exp-1');
     expect(patched?.baselineTaskId).toBe('t1');
   });
+
+  it('maps PAPER_CANDIDATE verdict to passed status', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    const consolidatedRevision: StrategyRevision = {
+      id: 'C', strategyProfileId: 'prof-1', version: 1, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'consolidated', baselineValidationStatus: 'pending',
+      createdAt: now, updatedAt: now,
+    };
+    await revisions.create(consolidatedRevision);
+
+    const { services } = await makeFakeServices({ revisions, verdict: 'PAPER_CANDIDATE' });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', consolidatedRevisionId: 'C' }), services);
+
+    const patched = await revisions.findById('C');
+    expect(patched?.baselineValidationStatus).toBe('passed');
+    expect(patched?.baselineExperimentId).toBe('exp-1');
+    expect(patched?.baselineTaskId).toBe('t1');
+  });
 });

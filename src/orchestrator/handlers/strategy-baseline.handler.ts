@@ -63,10 +63,13 @@ export const strategyBaselineHandler: WorkflowHandler = async (task, services) =
   });
 
   if (parsed.data.consolidatedRevisionId) {
-    // Verdict -> baselineValidationStatus: PASS is the only clean pass; INCONCLUSIVE stays
-    // inconclusive; everything else (FAIL / MODIFY / PAPER_CANDIDATE) is not a clean baseline
-    // pass for the consolidated revision, so it lands in 'failed'.
-    const baselineValidationStatus = verdict === 'PASS' ? 'passed' : verdict === 'INCONCLUSIVE' ? 'inconclusive' : 'failed';
+    // Verdict -> baselineValidationStatus: PASS and PAPER_CANDIDATE are both positive outcomes
+    // that map to 'passed'; INCONCLUSIVE stays inconclusive; everything else (FAIL / MODIFY)
+    // is not a clean baseline pass for the consolidated revision, so it lands in 'failed'.
+    const baselineValidationStatus =
+      verdict === 'PASS' || verdict === 'PAPER_CANDIDATE' ? 'passed'
+      : verdict === 'INCONCLUSIVE' ? 'inconclusive'
+      : 'failed';
     await services.revisions.updateStatus(parsed.data.consolidatedRevisionId, {
       baselineValidationStatus,
       baselineExperimentId: experimentId,
