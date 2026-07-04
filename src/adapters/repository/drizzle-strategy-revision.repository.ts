@@ -1,0 +1,85 @@
+import { and, asc, desc, eq } from 'drizzle-orm';
+import type { Db } from '../../db/client.ts';
+import { strategyRevision } from '../../db/schema.ts';
+import type { StrategyRevision } from '../../domain/strategy-revision.ts';
+import type { StrategyRevisionRepository } from '../../ports/strategy-revision.repository.ts';
+
+export type StrategyRevisionRow = typeof strategyRevision.$inferSelect;
+
+// Exported so other adapters can reuse the SAME mapper — single source of truth.
+export function strategyRevisionToDomain(r: StrategyRevisionRow): StrategyRevision {
+  return {
+    id: r.id, strategyProfileId: r.strategyProfileId, version: r.version,
+    baseRevisionId: r.baseRevisionId ?? undefined,
+    hypothesisIds: r.hypothesisIds,
+    dropped: r.dropped ?? undefined,
+    mergedRuleSet: r.mergedRuleSet,
+    bundleArtifactRef: r.bundleArtifactRef ?? undefined,
+    bundleHash: r.bundleHash ?? undefined,
+    comboBacktestRunId: r.comboBacktestRunId ?? undefined,
+    status: r.status,
+    metrics: r.metrics ?? undefined,
+    verdictReason: r.verdictReason ?? undefined,
+    createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
+  };
+}
+
+export class DrizzleStrategyRevisionRepository implements StrategyRevisionRepository {
+  private readonly db: Db;
+  constructor(db: Db) { this.db = db; }
+
+  async create(r: StrategyRevision): Promise<void> {
+    await this.db.insert(strategyRevision).values({
+      id: r.id, strategyProfileId: r.strategyProfileId, version: r.version,
+      baseRevisionId: r.baseRevisionId ?? null,
+      hypothesisIds: r.hypothesisIds,
+      dropped: r.dropped ?? null,
+      mergedRuleSet: r.mergedRuleSet,
+      bundleArtifactRef: r.bundleArtifactRef ?? null,
+      bundleHash: r.bundleHash ?? null,
+      comboBacktestRunId: r.comboBacktestRunId ?? null,
+      status: r.status,
+      metrics: r.metrics ?? null,
+      verdictReason: r.verdictReason ?? null,
+      createdAt: new Date(r.createdAt), updatedAt: new Date(r.updatedAt),
+    });
+  }
+
+  async findById(id: string): Promise<StrategyRevision | null> {
+    const rows = await this.db.select().from(strategyRevision).where(eq(strategyRevision.id, id)).limit(1);
+    return rows[0] ? strategyRevisionToDomain(rows[0]) : null;
+  }
+
+  async findLatestAccepted(strategyProfileId: string): Promise<StrategyRevision | null> {
+    const rows = await this.db.select().from(strategyRevision)
+      .where(and(eq(strategyRevision.strategyProfileId, strategyProfileId), eq(strategyRevision.status, 'accepted')))
+      .orderBy(desc(strategyRevision.version))
+      .limit(1);
+    return rows[0] ? strategyRevisionToDomain(rows[0]) : null;
+  }
+
+  async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt'>>): Promise<void> {
+    const set: Record<string, unknown> = {};
+    if (patch.status !== undefined) set.status = patch.status;
+    if (patch.comboBacktestRunId !== undefined) set.comboBacktestRunId = patch.comboBacktestRunId;
+    if (patch.metrics !== undefined) set.metrics = patch.metrics;
+    if (patch.verdictReason !== undefined) set.verdictReason = patch.verdictReason;
+    if (patch.dropped !== undefined) set.dropped = patch.dropped;
+    if (patch.hypothesisIds !== undefined) set.hypothesisIds = patch.hypothesisIds;
+    if (patch.mergedRuleSet !== undefined) set.mergedRuleSet = patch.mergedRuleSet;
+    if (patch.bundleArtifactRef !== undefined) set.bundleArtifactRef = patch.bundleArtifactRef;
+    if (patch.bundleHash !== undefined) set.bundleHash = patch.bundleHash;
+    if (patch.updatedAt !== undefined) set.updatedAt = new Date(patch.updatedAt);
+
+    const result = await this.db.update(strategyRevision).set(set).where(eq(strategyRevision.id, id)).returning({ id: strategyRevision.id });
+    if (result.length === 0) throw new Error(`strategy revision not found for id: ${id}`);
+  }
+
+  async listByProfile(strategyProfileId: string): Promise<StrategyRevision[]> {
+    const rows = await this.db.select().from(strategyRevision)
+      .where(eq(strategyRevision.strategyProfileId, strategyProfileId))
+      .orderBy(asc(strategyRevision.version));
+    return rows.map(strategyRevisionToDomain);
+  }
+}

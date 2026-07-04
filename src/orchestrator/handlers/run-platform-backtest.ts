@@ -106,6 +106,8 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
       decision: result.decision,
       reasons: result.reasons,
       cycleDepth,
+      deltaNetPnlUsd: result.deltaNetPnlUsd,
+      deltaMaxDrawdownPct: result.deltaMaxDrawdownPct,
     });
   }
 }

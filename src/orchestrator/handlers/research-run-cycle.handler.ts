@@ -11,7 +11,7 @@ import { validateHypothesis } from '../../validation/hypothesis-validator.ts';
 import { LAB_FEATURE_CATALOG, normalizeFeature } from '../../domain/hypothesis-rules.ts';
 import {
   ResearcherOutputSchema, hypothesisFingerprint,
-  HYPOTHESIS_PROPOSAL_CONTRACT_VERSION, type HypothesisProposal, type HypothesisProposalDraft,
+  HYPOTHESIS_PROPOSAL_CONTRACT_VERSION, type HypothesisProposal, type HypothesisProposalDraft, type RuleAction,
 } from '../../domain/hypothesis.ts';
 import type { ResearcherFocus, ActiveOverlayRuleSummary, ResearcherInput } from '../../ports/researcher.port.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
@@ -286,11 +286,19 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   }
 
   // Active overlay rules for both passes' critical framing.
+  // Slice G3: sourced from the latest ACCEPTED strategy_revision's mergedRuleSet — schema-validated-
+  // but-unmerged HypothesisProposals are NO LONGER fed here (proxy != proven; see spec §6). No accepted
+  // revision (or a bootstrap v1 with empty rules) -> empty list.
   let activeOverlayRules: ActiveOverlayRuleSummary[] = [];
   try {
-    const validatedProposals = (await services.hypotheses.listByStrategyProfile(profile.id))
-      .filter((p) => p.status === 'validated');
-    activeOverlayRules = validatedProposals.map((p) => ({ thesis: p.thesis, ruleAction: p.ruleAction, status: p.status }));
+    const accepted = await services.revisions.findLatestAccepted(profile.id);
+    const rules = (accepted?.mergedRuleSet?.rules ?? []) as RuleAction[];
+    const theses = (accepted?.mergedRuleSet?.theses ?? []) as string[];
+    activeOverlayRules = rules.map((ruleAction, i) => ({
+      thesis: theses[i] ?? 'accepted revision rule',
+      ruleAction,
+      status: 'accepted_revision' as const,
+    }));
   } catch { activeOverlayRules = []; }
 
   let marketContextMath;

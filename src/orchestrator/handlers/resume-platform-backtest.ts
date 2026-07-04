@@ -61,6 +61,8 @@ export async function resumePlatformRun(services: AppServices, run: BacktestRun)
       decision: result.decision,
       reasons: result.reasons,
       cycleDepth: typeof task.payload.cycleDepth === 'number' ? task.payload.cycleDepth : 0,
+      deltaNetPnlUsd: result.deltaNetPnlUsd,
+      deltaMaxDrawdownPct: result.deltaMaxDrawdownPct,
     });
     await services.events.append(event(task.id, 'backtest.resume.completed', { runId }));
     return { kind: 'completed', runId };

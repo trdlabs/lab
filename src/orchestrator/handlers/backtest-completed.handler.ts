@@ -4,8 +4,10 @@ import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { withinTokenBudget } from '../token-budget.ts';
+import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 
 export const BacktestCompletedPayloadSchema = z.object({
   backtestRunId: z.string().min(1),
@@ -15,9 +17,28 @@ export const BacktestCompletedPayloadSchema = z.object({
   reasons: z.array(z.string()),
   /** Depth of the research→build→backtest cycle chain. Used to cap retries. */
   cycleDepth: z.number().int().min(0).default(0),
+  /** Absent on older in-flight tasks enqueued before this field existed — fail-soft to 0s. */
+  deltaNetPnlUsd: z.number().optional(),
+  deltaMaxDrawdownPct: z.number().optional(),
 });
 
 export type BacktestCompletedPayload = z.infer<typeof BacktestCompletedPayloadSchema>;
+
+/**
+ * Maps a backtest.completed evaluation decision to a PROXY status — a fast, cheap, single-fold
+ * signal, NOT a validated/confirmed outcome. That stronger claim is earned only by a later
+ * paper/live promotion, outside this slice.
+ */
+export function mapDecisionToProxyStatus(decision: BacktestCompletedPayload['decision']): HypothesisStatus {
+  switch (decision) {
+    case 'PASS': return 'proxy_passed';
+    case 'PAPER_CANDIDATE': return 'proxy_paper_candidate';
+    case 'FAIL':
+    case 'MODIFY':
+    case 'INCONCLUSIVE':
+      return 'proxy_failed';
+  }
+}
 
 /** Max number of automatic retry cycles (FAIL/MODIFY → new research.run_cycle). */
 export const MAX_CYCLE_DEPTH = 2;
@@ -56,7 +77,10 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   if (parsed.status === 'invalid') {
     throw new Error(`invalid backtest.completed payload: ${JSON.stringify(parsed.issues)}`);
   }
-  const { backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth } = parsed.data;
+  const {
+    backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth,
+    deltaNetPnlUsd, deltaMaxDrawdownPct,
+  } = parsed.data;
 
   const cumulativeTokens = await services.tokenUsage.get(task.correlationId);
   const withinBudget = withinTokenBudget(cumulativeTokens, services.researchTaskTokenBudget);
@@ -131,6 +155,25 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     }
   }
 
+  // PROXY status bookkeeping: a fast, cheap, single-fold signal, NOT a validated/confirmed
+  // outcome. Fail-soft — a bookkeeping problem here must not fail the task.
+  const deltasMissing = deltaNetPnlUsd === undefined || deltaMaxDrawdownPct === undefined;
+  if (deltasMissing) {
+    await services.events.append(event(task.id, 'proxy_deltas_missing', { backtestRunId, hypothesisId }));
+  }
+  const proxyMetrics: HypothesisProxyMetrics = {
+    decision, backtestRunId,
+    deltaNetPnlUsd: deltaNetPnlUsd ?? 0,
+    deltaMaxDrawdownPct: deltaMaxDrawdownPct ?? 0,
+  };
+  try {
+    await services.hypotheses.updateStatus(hypothesisId, mapDecisionToProxyStatus(decision), proxyMetrics);
+  } catch (err) {
+    await services.events.append(event(task.id, 'hypothesis.status_update_failed', {
+      hypothesisId, error: errMsg(err),
+    }));
+  }
+
   await services.events.append(event(task.id, 'research.run_cost', {
     correlationId: task.correlationId,
     costUsd: await services.tokenUsage.getCost(task.correlationId),
@@ -143,4 +186,34 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     hypothesisId,
     backtestRunId,
   }));
+
+  // Cycle-completion trigger (fail-soft): once every hypothesis.build/backtest.completed/
+  // research.run_cycle task in this correlation chain (except this one) is terminal, batch the
+  // cycle's proxy-passed hypotheses into a revision.build candidate. research.run_cycle is
+  // included so a same-correlationId retry enqueued above (see enqueueResearchRetry, which runs
+  // earlier in this same handler invocation and is therefore already visible here) blocks the
+  // trigger until the ENTIRE chain — including retry cycles — is terminal. Without it, the trigger
+  // fired immediately on the last finisher that decided FAIL/MODIFY, before the retried cycle's
+  // hypotheses ever got a revision pass, burning the dedupeKey early. dedupeKey absorbs duplicate
+  // enqueues from concurrent last-finishers.
+  try {
+    const chainTasks = await services.researchTasks.listByCorrelationAndTypes(
+      task.correlationId, ['hypothesis.build', 'backtest.completed', 'research.run_cycle'],
+    );
+    const others = chainTasks.filter((t) => t.id !== task.id);
+    const allTerminal = others.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'rejected');
+    if (allTerminal) {
+      await createAndEnqueueTask(
+        {
+          taskType: 'revision.build', source: task.source,
+          payload: { strategyProfileId, correlationId: task.correlationId },
+          correlationId: task.correlationId,
+          dedupeKey: `revision.build:${task.correlationId}`,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
+    }
+  } catch (err) {
+    await services.events.append(event(task.id, 'revision.build_trigger_failed', { error: errMsg(err) }));
+  }
 };

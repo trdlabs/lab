@@ -17,6 +17,7 @@ import { FakeStrategyBuilder } from '../../src/adapters/builder/fake-strategy-bu
 import { InMemoryHypothesisBuildRepository } from '../../src/adapters/repository/in-memory-hypothesis-build.repository.ts';
 import { InMemoryBacktestRunRepository } from '../../src/adapters/repository/in-memory-backtest-run.repository.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../../src/adapters/repository/in-memory-strategy-backtest-run.repository.ts';
+import { InMemoryStrategyRevisionRepository } from '../../src/adapters/repository/in-memory-strategy-revision.repository.ts';
 import { InMemoryEvaluationRepository } from '../../src/adapters/repository/in-memory-evaluation.repository.ts';
 import { DEFAULT_EVALUATOR_THRESHOLDS } from '../../src/validation/evaluator.ts';
 import { InMemoryChatSessionRepository } from '../../src/adapters/repository/in-memory-chat-session.repository.ts';
@@ -37,6 +38,7 @@ import { FakeResultInterpreter } from '../../src/adapters/wfo/fake-result-interp
 import type { StrategyExperimentRunExecutor } from '../../src/research/strategy-experiment-run-executor.ts';
 import { InMemoryPaperSubmissionRepository } from '../../src/adapters/repository/in-memory-paper-submission.repository.ts';
 import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.port.ts';
+import type { StrategyRevisionRunExecutor } from '../../src/ports/strategy-revision-run-executor.ts';
 import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
@@ -45,6 +47,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
   const runTrades = new MockRunTradesAdapter();
   const events = overrides.events ?? new InMemoryAgentEventRepository();
   const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
+  const revisions = overrides.revisions ?? new InMemoryStrategyRevisionRepository();
   let _id = 0;
   const strategyRunExecutor: StrategyExperimentRunExecutor = {
     execute: async (req) => ({
@@ -52,6 +55,13 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
       runId: `sr-${req.role}`,
       platformRunId: 'plat-strategy-fake',
       totalTrades: 90,
+    }),
+  };
+  const revisionRunExecutor: StrategyRevisionRunExecutor = {
+    execute: async (req) => ({
+      status: 'completed' as const,
+      runId: `rev-${req.label}`,
+      platformRunId: 'plat-revision-fake',
     }),
   };
   const experimentService = new ExperimentService({
@@ -75,6 +85,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     resultInterpreter: new FakeResultInterpreter(),
     paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
     strategyBacktests,
+    revisions,
   });
   return {
     taskQueue: new InMemoryQueueAdapter(),
@@ -113,6 +124,9 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     experimentService,
     strategyBuilder: new FakeStrategyBuilder(),
     strategyBacktests,
+    revisions,
+    revisionRunExecutor,
+    revisionBatchMax: 5,
     backtestBackend: 'research_platform',
     platformPoll: { maxPolls: 5, pollDelayMs: 0 },
     baselineVersion: 'v1',

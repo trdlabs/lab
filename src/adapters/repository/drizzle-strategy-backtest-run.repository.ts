@@ -61,4 +61,7 @@ export class DrizzleStrategyBacktestRunRepository implements StrategyBacktestRun
       .limit(1);
     return rows[0] ? toDomain(rows[0]) : null;
   }
+  findByBundleAndParams(strategyBundleId: string, paramsHash: string, bundleHash: string): Promise<StrategyBacktestRun | null> {
+    return this.findByIdentity(strategyBundleId, paramsHash, bundleHash);
+  }
 }

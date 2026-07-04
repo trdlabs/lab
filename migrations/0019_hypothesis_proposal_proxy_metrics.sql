@@ -1,0 +1,1 @@
+ALTER TABLE "hypothesis_proposal" ADD COLUMN "proxy_metrics" jsonb;

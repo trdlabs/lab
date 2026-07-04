@@ -8,4 +8,6 @@ export interface StrategyBacktestRunRepository {
   findById(id: string): Promise<StrategyBacktestRun | null>;
   findByPlatformRunId(platformRunId: string): Promise<StrategyBacktestRun | null>;
   findByIdentity(strategyBundleId: string, paramsHash: string, bundleHash: string): Promise<StrategyBacktestRun | null>;
+  /** Same identity lookup as `findByIdentity` — named for the revision-lane dedup call site (§3 same-run-context comparison idempotency). */
+  findByBundleAndParams(strategyBundleId: string, paramsHash: string, bundleHash: string): Promise<StrategyBacktestRun | null>;
 }

@@ -51,6 +51,8 @@ describe('startWorker', () => {
         if (status === 'failed') throw new Error('db down');
         return base.researchTasks.updateStatus(id, status);
       },
+      listByCorrelationAndTypes: (correlationId: string, taskTypes: ResearchTask['taskType'][]) =>
+        base.researchTasks.listByCorrelationAndTypes(correlationId, taskTypes),
     };
     const services = { ...base, researchTasks };
     const router = new WorkflowRouter();

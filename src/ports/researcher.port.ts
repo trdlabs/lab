@@ -14,7 +14,9 @@ export type ResearcherFocus = 'loss_reduction' | 'profit_improvement';
 export interface ActiveOverlayRuleSummary {
   readonly thesis: string;
   readonly ruleAction: RuleAction;
-  readonly status: 'validated' | 'rejected';
+  /** 'accepted_revision': rule sourced from the latest accepted strategy_revision's mergedRuleSet
+   *  (slice G3 — schema-validated-but-unmerged proposals are no longer fed to the researcher). */
+  readonly status: 'validated' | 'rejected' | 'accepted_revision';
 }
 
 export interface ResearcherInput {

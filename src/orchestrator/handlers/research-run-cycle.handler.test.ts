@@ -15,6 +15,7 @@ import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.por
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { AppServices } from '../app-services.ts';
+import type { StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { BotResultsReadPort } from '../../ports/bot-results-read.port.ts';
 import type { TradeEvidenceReadPort } from '../../ports/trade-evidence-read.port.ts';
 import type { MarketHistoryReadPort, CanonicalRowV2 } from '../../ports/market-history-read.port.ts';
@@ -853,5 +854,87 @@ describe('two-pass research', () => {
     await seedProfile(services2);
     await researchRunCycleHandler(runCycleTask(), services2);
     expect(calls2).toEqual(['loss_reduction']);
+  });
+
+  describe('activeOverlayRules (slice G3: sourced from the latest ACCEPTED revision)', () => {
+    it('REGRESSION PIN: a validated-but-unmerged HypothesisProposal is NOT fed as an active overlay rule', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+      await services.hypotheses.create({
+        id: 'h-validated', strategyProfileId: 'p1', thesis: 'unmerged thesis', targetBehavior: 'b',
+        ruleAction: { appliesTo: 'long', rules: [{ when: 'x', action: 'skip_entry', params: {} }] },
+        requiredFeatures: ['oi'], validationPlan: 'p', expectedEffect: { metric: 'win_rate', direction: 'increase' },
+        invalidationCriteria: ['none'], confidence: 0.5, status: 'validated', fingerprint: 'sha256:h-validated',
+        proposal: {} as never, issues: [], contractVersion: 'hypothesis-proposal-v1',
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      });
+
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+      expect(cap.captured()?.activeOverlayRules).toEqual([]);
+    });
+
+    it('is empty when the latest accepted revision is a v1 bootstrap with empty rules', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+      const v1: StrategyRevision = {
+        id: 'rev-1', strategyProfileId: 'p1', version: 1, hypothesisIds: [],
+        mergedRuleSet: { order: [], rules: [] }, status: 'accepted',
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await services.revisions.create(v1);
+
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+      expect(cap.captured()?.activeOverlayRules).toEqual([]);
+    });
+
+    it('reflects the latest accepted revision mergedRuleSet rules + theses (status accepted_revision)', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+      const v1: StrategyRevision = {
+        id: 'rev-1', strategyProfileId: 'p1', version: 1, hypothesisIds: [],
+        mergedRuleSet: { order: [], rules: [] }, status: 'accepted',
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await services.revisions.create(v1);
+      const v2: StrategyRevision = {
+        id: 'rev-2', strategyProfileId: 'p1', version: 2, baseRevisionId: 'rev-1', hypothesisIds: ['h1'],
+        mergedRuleSet: {
+          order: ['h1'],
+          rules: [{ appliesTo: 'long', rules: [{ when: 'oi trend', action: 'skip_entry', params: { bars: 2 } }] }],
+          theses: ['merged thesis h1'],
+        },
+        status: 'accepted',
+        createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z',
+      };
+      await services.revisions.create(v2);
+
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+      expect(cap.captured()?.activeOverlayRules).toEqual([
+        {
+          thesis: 'merged thesis h1',
+          ruleAction: { appliesTo: 'long', rules: [{ when: 'oi trend', action: 'skip_entry', params: { bars: 2 } }] },
+          status: 'accepted_revision',
+        },
+      ]);
+    });
+
+    it('is fail-soft: a throwing revisions repo yields an empty activeOverlayRules', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const throwing: AppServices['revisions'] = {
+        async create() { throw new Error('db down'); },
+        async findById() { throw new Error('db down'); },
+        async findLatestAccepted() { throw new Error('db down'); },
+        async updateStatus() { throw new Error('db down'); },
+        async listByProfile() { throw new Error('db down'); },
+      };
+      const services = makeServices({ researcher: cap.port, revisions: throwing });
+      await seedProfile(services);
+
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+      expect(cap.captured()?.activeOverlayRules).toEqual([]);
+    });
   });
 });

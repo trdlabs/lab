@@ -3,7 +3,8 @@ import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
 
 export const STRATEGY_RUN_KIND = 'strategy_baseline' as const;
-export type StrategyRunKind = typeof STRATEGY_RUN_KIND;
+export const REVISION_COMBO_RUN_KIND = 'revision_combo' as const;
+export type StrategyRunKind = typeof STRATEGY_RUN_KIND | typeof REVISION_COMBO_RUN_KIND;
 
 export interface StrategyBacktestRun {
   id: string;

@@ -25,4 +25,7 @@ export class InMemoryStrategyBacktestRunRepository implements StrategyBacktestRu
     for (const r of this.rows.values()) if (r.strategyBundleId === bundleId && r.paramsHash === ph && r.bundleHash === bh) return r;
     return null;
   }
+  findByBundleAndParams(strategyBundleId: string, paramsHash: string, bundleHash: string): Promise<StrategyBacktestRun | null> {
+    return this.findByIdentity(strategyBundleId, paramsHash, bundleHash);
+  }
 }

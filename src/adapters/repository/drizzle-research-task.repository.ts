@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { researchTask } from '../../db/schema.ts';
-import type { ResearchTask, TaskStatus } from '../../domain/types.ts';
+import type { AgentTaskType, ResearchTask, TaskStatus } from '../../domain/types.ts';
 import type { ResearchTaskRepository } from '../../ports/research-task.repository.ts';
 
 type Row = typeof researchTask.$inferSelect;
@@ -55,5 +55,13 @@ export class DrizzleResearchTaskRepository implements ResearchTaskRepository {
       .where(eq(researchTask.id, id))
       .returning({ id: researchTask.id });
     if (updated.length === 0) throw new Error(`research_task not found: ${id}`);
+  }
+
+  async listByCorrelationAndTypes(correlationId: string, taskTypes: AgentTaskType[]): Promise<ResearchTask[]> {
+    if (taskTypes.length === 0) return [];
+    const rows = await this.db.select().from(researchTask).where(
+      and(eq(researchTask.correlationId, correlationId), inArray(researchTask.taskType, taskTypes)),
+    );
+    return rows.map(toDomain);
   }
 }

@@ -1,4 +1,4 @@
-import type { HypothesisProposal } from '../../domain/hypothesis.ts';
+import type { HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 import type { HypothesisProposalRepository } from '../../ports/hypothesis-proposal.repository.ts';
 
 export class InMemoryHypothesisProposalRepository implements HypothesisProposalRepository {
@@ -43,5 +43,18 @@ export class InMemoryHypothesisProposalRepository implements HypothesisProposalR
       });
     // Defensive copy — keep the store immutable from callers, matching findById.
     return candidates[0] ? { ...candidates[0] } : null;
+  }
+
+  async updateStatus(id: string, status: HypothesisStatus, proxyMetrics?: HypothesisProxyMetrics): Promise<void> {
+    const existing = this.byId.get(id);
+    if (!existing) {
+      throw new Error(`hypothesis_proposal not found for id: ${id}`);
+    }
+    this.byId.set(id, {
+      ...existing,
+      status,
+      ...(proxyMetrics !== undefined ? { proxyMetrics } : {}),
+      updatedAt: new Date().toISOString(),
+    });
   }
 }

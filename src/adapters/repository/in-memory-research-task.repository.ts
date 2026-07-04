@@ -1,4 +1,4 @@
-import type { ResearchTask, TaskStatus } from '../../domain/types.ts';
+import type { AgentTaskType, ResearchTask, TaskStatus } from '../../domain/types.ts';
 import type { ResearchTaskRepository } from '../../ports/research-task.repository.ts';
 
 export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
@@ -18,6 +18,11 @@ export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
       if (t.dedupeKey === dedupeKey) return t;
     }
     return null;
+  }
+
+  async listByCorrelationAndTypes(correlationId: string, taskTypes: AgentTaskType[]): Promise<ResearchTask[]> {
+    const types = new Set(taskTypes);
+    return [...this.byId.values()].filter((t) => t.correlationId === correlationId && types.has(t.taskType));
   }
 
   async updateStatus(id: string, status: TaskStatus): Promise<void> {

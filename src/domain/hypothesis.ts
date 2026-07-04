@@ -48,7 +48,20 @@ export type ResearcherOutput = z.infer<typeof ResearcherOutputSchema>;
 
 export const HYPOTHESIS_PROPOSAL_CONTRACT_VERSION = 'hypothesis-proposal-v1';
 
-export type HypothesisStatus = 'validated' | 'rejected';
+// 'proxy_*' statuses come from a fast, cheap, single-fold backtest signal. They are a cheap
+// early read, NOT a validated/confirmed outcome — that stronger claim is only earned by a
+// later paper/live promotion (outside this slice).
+export type HypothesisStatus = 'validated' | 'rejected'
+  | 'proxy_passed' | 'proxy_failed' | 'proxy_paper_candidate'
+  | 'merged' | 'dropped_merge_conflict' | 'dropped_combo_fail' | 'dropped_unsupported_shape';
+
+/** Proxy-signal feedback recorded from a backtest.completed evaluation decision. */
+export interface HypothesisProxyMetrics {
+  decision: 'PASS' | 'FAIL' | 'MODIFY' | 'INCONCLUSIVE' | 'PAPER_CANDIDATE';
+  deltaNetPnlUsd: number;
+  deltaMaxDrawdownPct: number;
+  backtestRunId: string;
+}
 
 export interface HypothesisProposal {
   id: string;
@@ -67,6 +80,7 @@ export interface HypothesisProposal {
   issues: ValidationIssue[]; // [] for validated; reasons for rejected
   contractVersion: string;
   origin?: ResearcherFocus; // which research pass produced this; undefined for legacy single-pass
+  proxyMetrics?: HypothesisProxyMetrics; // set by backtestCompletedHandler's proxy status update
   createdAt: string;
   updatedAt: string;
 }

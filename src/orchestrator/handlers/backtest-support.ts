@@ -54,6 +54,8 @@ export function computeParamsHash(
 export interface BacktestCompletionResult {
   decision: EvaluationDecision;
   reasons: string[];
+  deltaNetPnlUsd: number;
+  deltaMaxDrawdownPct: number;
 }
 
 /** Shared completion + evaluation tail (extracted verbatim from the SP-4 path). */
@@ -83,7 +85,10 @@ export async function finalizeBacktestCompletion(
   await services.evaluations.create(evaluation);
   await services.backtests.markEvaluated(args.runId);
   await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: outcome.decision, reasons: outcome.reasons }));
-  return { decision: outcome.decision, reasons: outcome.reasons };
+  return {
+    decision: outcome.decision, reasons: outcome.reasons,
+    deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,
+  };
 }
 
 /** Enqueue a backtest.completed task so the router can act on the evaluation outcome. */
@@ -97,6 +102,8 @@ export async function enqueueBacktestCompleted(
     decision: EvaluationDecision;
     reasons: string[];
     cycleDepth: number;
+    deltaNetPnlUsd?: number;
+    deltaMaxDrawdownPct?: number;
   },
 ): Promise<void> {
   const completedTaskId = randomUUID();
@@ -123,7 +130,7 @@ export async function enqueueBacktestCompleted(
 }
 
 export type PlatformTerminalResult =
-  | { kind: 'completed'; decision: EvaluationDecision; reasons: string[] }
+  | { kind: 'completed'; decision: EvaluationDecision; reasons: string[]; deltaNetPnlUsd: number; deltaMaxDrawdownPct: number }
   | { kind: 'failed'; reason: 'platform_rejected' | 'result_invalid' };
 
 /**
@@ -159,5 +166,8 @@ export async function applyPlatformTerminalOutcome(
     throw err;
   }
   const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, comparison, artifactRefs: [...outcome.artifactIds] });
-  return { kind: 'completed', decision: completion.decision, reasons: completion.reasons };
+  return {
+    kind: 'completed', decision: completion.decision, reasons: completion.reasons,
+    deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,
+  };
 }

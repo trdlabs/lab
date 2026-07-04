@@ -2,7 +2,7 @@ import { eq, and, desc, asc } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { hypothesisProposal } from '../../db/schema.ts';
 import type {
-  HypothesisProposal, HypothesisStatus, RuleAction, ExpectedEffect, HypothesisProposalDraft,
+  HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics, RuleAction, ExpectedEffect, HypothesisProposalDraft,
 } from '../../domain/hypothesis.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
 import type { HypothesisProposalRepository } from '../../ports/hypothesis-proposal.repository.ts';
@@ -26,6 +26,9 @@ function toDomain(row: Row): HypothesisProposal {
     proposal: row.proposal as HypothesisProposalDraft,
     issues: row.issues as ValidationIssue[],
     contractVersion: row.contractVersion,
+    ...(row.proxyMetrics !== null && row.proxyMetrics !== undefined
+      ? { proxyMetrics: row.proxyMetrics as HypothesisProxyMetrics }
+      : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -79,5 +82,15 @@ export class DrizzleHypothesisProposalRepository implements HypothesisProposalRe
       .orderBy(desc(hypothesisProposal.createdAt), desc(hypothesisProposal.id))
       .limit(1);
     return rows[0] ? toDomain(rows[0]) : null;
+  }
+
+  async updateStatus(id: string, status: HypothesisStatus, proxyMetrics?: HypothesisProxyMetrics): Promise<void> {
+    const set: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (proxyMetrics !== undefined) set.proxyMetrics = proxyMetrics;
+
+    const result = await this.db.update(hypothesisProposal).set(set)
+      .where(eq(hypothesisProposal.id, id))
+      .returning({ id: hypothesisProposal.id });
+    if (result.length === 0) throw new Error(`hypothesis_proposal not found for id: ${id}`);
   }
 }
