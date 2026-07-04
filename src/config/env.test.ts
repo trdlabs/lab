@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadEnv } from './env.ts';
+import { loadEnv, parseTrustedSigners } from './env.ts';
 import { DEFAULT_EVALUATOR_THRESHOLDS } from '../validation/evaluator.ts';
 
 describe('loadEnv SP-3 fields', () => {
@@ -423,5 +423,60 @@ describe('loadEnv — paper window policy', () => {
     expect(env.PAPER_WINDOW_MIN_DAYS).toBe(3);
     expect(env.PAPER_WINDOW_MAX_DAYS).toBe(30);
     expect(env.PAPER_MONITOR_MAX_WAIT_DAYS).toBe(7);
+  });
+});
+
+describe('parseTrustedSigners (Task 4)', () => {
+  it('returns {} on undefined', () => {
+    expect(parseTrustedSigners(undefined)).toEqual({});
+  });
+
+  it('returns {} on an empty string', () => {
+    expect(parseTrustedSigners('')).toEqual({});
+  });
+
+  it('round-trips a valid keyId -> PEM map', () => {
+    const map = { 'signer-1': '-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----' };
+    expect(parseTrustedSigners(JSON.stringify(map))).toEqual(map);
+  });
+
+  it('throws /LAB_TRUSTED_SIGNERS_JSON/ on malformed JSON', () => {
+    expect(() => parseTrustedSigners('{not json')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+  });
+
+  it('throws /LAB_TRUSTED_SIGNERS_JSON/ when a value is not a string', () => {
+    expect(() => parseTrustedSigners(JSON.stringify({ k: 123 }))).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+  });
+
+  it('throws /LAB_TRUSTED_SIGNERS_JSON/ when the JSON is not a flat object', () => {
+    expect(() => parseTrustedSigners('[]')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+    expect(() => parseTrustedSigners('null')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+    expect(() => parseTrustedSigners('"just a string"')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+    expect(() => parseTrustedSigners('42')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+  });
+});
+
+describe('LAB_PAPER_EVIDENCE_REQUIRED + LAB_TRUSTED_SIGNERS_JSON via loadEnv (Task 4)', () => {
+  it('defaults LAB_PAPER_EVIDENCE_REQUIRED to false and LAB_TRUSTED_SIGNERS_JSON to {}', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.LAB_PAPER_EVIDENCE_REQUIRED).toBe(false);
+    expect(env.LAB_TRUSTED_SIGNERS_JSON).toEqual({});
+  });
+
+  it('LAB_PAPER_EVIDENCE_REQUIRED=true enables it; any other value keeps it false', () => {
+    expect(loadEnv({ LAB_PAPER_EVIDENCE_REQUIRED: 'true' } as unknown as NodeJS.ProcessEnv).LAB_PAPER_EVIDENCE_REQUIRED).toBe(true);
+    expect(loadEnv({ LAB_PAPER_EVIDENCE_REQUIRED: '1' } as unknown as NodeJS.ProcessEnv).LAB_PAPER_EVIDENCE_REQUIRED).toBe(false);
+  });
+
+  it('reads LAB_TRUSTED_SIGNERS_JSON through loadEnv', () => {
+    const map = { 'signer-1': 'pem-1' };
+    const env = loadEnv({ LAB_TRUSTED_SIGNERS_JSON: JSON.stringify(map) } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_TRUSTED_SIGNERS_JSON).toEqual(map);
+  });
+
+  it('propagates the parseTrustedSigners throw through loadEnv on malformed JSON', () => {
+    expect(() =>
+      loadEnv({ LAB_TRUSTED_SIGNERS_JSON: '{bad' } as unknown as NodeJS.ProcessEnv),
+    ).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
   });
 });

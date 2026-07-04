@@ -37,6 +37,7 @@ import type { PaperIntakePort } from '../adapters/platform/paper-intake.port.ts'
 import type { PaperSubmissionRepository } from '../ports/paper-submission.repository.ts';
 import type { PaperWindowPolicy } from '../domain/paper-window.ts';
 import type { PaperRunLocatorPort } from '../ports/paper-run-locator.port.ts';
+import type { SignedEvidenceProviderPort } from '../ports/signed-evidence-provider.port.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -111,4 +112,10 @@ export interface AppServices {
   paperMonitorPollMs: number;
   /** Locates the live paper-mode run for a submitted champion (candidateId->runId seam, §2). */
   paperRunLocator: PaperRunLocatorPort;
+  /** Signed-evidence provider (079); boot-fail-guarded by LAB_PAPER_EVIDENCE_REQUIRED [I1]. */
+  signedEvidence: SignedEvidenceProviderPort;
+  /** keyId -> SPKI PEM map for verifying signed backtest evidence (079). */
+  trustedSigners: Record<string, string>;
+  /** Fail-closed gate mirrored from env.LAB_PAPER_EVIDENCE_REQUIRED (079). */
+  paperEvidenceRequired: boolean;
 }

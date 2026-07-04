@@ -30,6 +30,7 @@ import { selectRunTrades } from './adapters/platform/select-run-trades.ts';
 import { selectBotResults } from './adapters/platform/select-bot-results.ts';
 import { selectMarketHistory } from './adapters/platform/select-market-history.ts';
 import { selectTradeEvidence } from './adapters/platform/select-trade-evidence.ts';
+import { selectSignedEvidence } from './adapters/platform/select-signed-evidence.ts';
 import { FakeResearcher } from './adapters/researcher/fake-researcher.ts';
 import { MastraResearcher } from './adapters/researcher/mastra-researcher.ts';
 import { FakeCritic } from './adapters/critic/fake-critic.ts';
@@ -280,6 +281,20 @@ function buildStrategyBuilder(env: ReturnType<typeof loadEnv>): StrategyBuilder 
 /** Operator confirmation window for a proposed chat action — policy, not deployment tuning. */
 const CHAT_PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * Fail-closed boot guard [I1]: when LAB_PAPER_EVIDENCE_REQUIRED=true, refuse to boot unless a
+ * non-'none' signed-evidence source (LAB_SIGNED_EVIDENCE_SOURCE) is available. Pure so it can be
+ * unit-tested without booting the whole runtime — selectSignedEvidence itself covers the
+ * fixture-in-prod refusal [I2], this guard covers the opposite direction (required but absent).
+ */
+export function assertEvidenceReadiness(evidenceRequired: boolean, available: boolean): void {
+  if (evidenceRequired && !available) {
+    throw new Error(
+      'LAB_PAPER_EVIDENCE_REQUIRED=true but LAB_SIGNED_EVIDENCE_SOURCE=none — refusing to boot a worker that would quarantine every submission',
+    );
+  }
+}
+
 export function composeRuntime() {
   const env = loadEnv();
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required');
@@ -293,6 +308,9 @@ export function composeRuntime() {
     maxWaitDays: env.PAPER_MONITOR_MAX_WAIT_DAYS,
   };
   validatePaperWindowPolicy(paperWindowPolicy);
+
+  const signedEvidence = selectSignedEvidence(process.env);
+  assertEvidenceReadiness(env.LAB_PAPER_EVIDENCE_REQUIRED, signedEvidence.available);
 
   const mastraRuntime = composeMastra(env);
 
@@ -415,6 +433,9 @@ export function composeRuntime() {
     paperWindowPolicy,
     paperMonitorPollMs: env.PAPER_MONITOR_POLL_MS,
     paperRunLocator,
+    signedEvidence,
+    trustedSigners: env.LAB_TRUSTED_SIGNERS_JSON,
+    paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
   };
 
   const router = new WorkflowRouter();

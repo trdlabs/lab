@@ -126,6 +126,10 @@ export interface Env {
   PAPER_MONITOR_POLL_MS: number;
   /** Max eligible hypotheses batched into one strategy_revision candidate (default: 5). */
   REVISION_BATCH_MAX: number;
+  /** Fail-closed gate: when true, boot refuses unless a non-'none' signed-evidence source is available (default: false). */
+  LAB_PAPER_EVIDENCE_REQUIRED: boolean;
+  /** keyId -> SPKI PEM map for verifying signed backtest evidence; parsed from JSON (default: {}). */
+  LAB_TRUSTED_SIGNERS_JSON: Record<string, string>;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -154,6 +158,26 @@ function parseFloatOr(value: string | undefined, fallback: number): number {
   if (value === undefined || value === '') return fallback;
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+/** Parses LAB_TRUSTED_SIGNERS_JSON: {} on undefined/empty; throws on invalid JSON or non-string values. */
+export function parseTrustedSigners(raw: string | undefined): Record<string, string> {
+  if (raw === undefined || raw === '') return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`LAB_TRUSTED_SIGNERS_JSON must be valid JSON, got '${raw}'`);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('LAB_TRUSTED_SIGNERS_JSON must be a flat JSON object of keyId -> PEM strings');
+  }
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== 'string') {
+      throw new Error(`LAB_TRUSTED_SIGNERS_JSON value for '${key}' must be a string, got ${typeof value}`);
+    }
+  }
+  return parsed as Record<string, string>;
 }
 
 function derivePhoenixReadBaseUrl(source: NodeJS.ProcessEnv): string {
@@ -245,6 +269,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PAPER_MONITOR_MAX_WAIT_DAYS: parsePositiveInt(source.PAPER_MONITOR_MAX_WAIT_DAYS, 7),
     PAPER_MONITOR_POLL_MS: parsePositiveInt(source.PAPER_MONITOR_POLL_MS, 21600000),
     REVISION_BATCH_MAX: parsePositiveInt(source.REVISION_BATCH_MAX, 5),
+    LAB_PAPER_EVIDENCE_REQUIRED: source.LAB_PAPER_EVIDENCE_REQUIRED === 'true',
+    LAB_TRUSTED_SIGNERS_JSON: parseTrustedSigners(source.LAB_TRUSTED_SIGNERS_JSON),
     ...loadRagEnv(source),
   };
 }

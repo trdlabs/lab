@@ -40,6 +40,7 @@ import { InMemoryPaperSubmissionRepository } from '../../src/adapters/repository
 import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.port.ts';
 import type { StrategyRevisionRunExecutor } from '../../src/ports/strategy-revision-run-executor.ts';
 import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
+import { selectSignedEvidence } from '../../src/adapters/platform/select-signed-evidence.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -136,6 +137,9 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     paperWindowPolicy: { minTrades: 30, lowConfidenceThreshold: 15, minDays: 3, maxDays: 30, maxWaitDays: 7 },
     paperMonitorPollMs: 21600000,
     paperRunLocator: NEVER_LOCATES,
+    signedEvidence: selectSignedEvidence({} as NodeJS.ProcessEnv),
+    trustedSigners: {},
+    paperEvidenceRequired: false,
     ...overrides,
   };
 }
