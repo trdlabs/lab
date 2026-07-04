@@ -36,4 +36,18 @@ describe('evaluateConsolidation', () => {
     const a = { ...M() } as Record<string, number>; delete a.sharpe;
     expect(evaluateConsolidation(a as unknown as BacktestMetricBlock, M()).decision).toBe('ACCEPT');
   });
+
+  it('rejects only when the relative tolerance is the binding constraint (proves max(tolAbs, tolRel*|a|), not tolAbs-only)', () => {
+    // netPnlUsd 10000: tolRel*|a| = 0.001*10000 = 10, far above tolAbs 0.01. A diff of 5 is inside the
+    // relative band -> ACCEPT (a tolAbs-only floor of 0.01 would have REJECTed this).
+    expect(evaluateConsolidation(M({ netPnlUsd: 10000 }), M({ netPnlUsd: 10005 })).decision).toBe('ACCEPT');
+    // A diff of 15 exceeds the relative band (10) -> REJECT.
+    expect(evaluateConsolidation(M({ netPnlUsd: 10000 }), M({ netPnlUsd: 10015 })).decision).toBe('REJECT');
+  });
+
+  it('skips a field absent from the CLEAN side too (symmetric to the accepted-side skip)', () => {
+    const clean = { ...M() } as Record<string, number>;
+    delete clean.sharpe;
+    expect(evaluateConsolidation(M(), clean as unknown as BacktestMetricBlock).decision).toBe('ACCEPT');
+  });
 });
