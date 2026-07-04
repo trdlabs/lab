@@ -134,6 +134,8 @@ export interface Env {
   CONSOLIDATOR_ADAPTER: 'off' | 'fake' | 'mastra';
   /** Model for the consolidator agent when CONSOLIDATOR_ADAPTER=mastra. */
   CONSOLIDATOR_MODEL: string;
+  /** Nesting-depth threshold that triggers revision.consolidate (slice G3b); 0 = kill-switch (default 2). */
+  LAB_CONSOLIDATION_DEPTH_THRESHOLD: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -279,6 +281,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     CONSOLIDATOR_ADAPTER:
       source.CONSOLIDATOR_ADAPTER === 'mastra' ? 'mastra' : source.CONSOLIDATOR_ADAPTER === 'fake' ? 'fake' : 'off',
     CONSOLIDATOR_MODEL: source.CONSOLIDATOR_MODEL ?? 'openrouter/anthropic/claude-opus-4-8',
+    LAB_CONSOLIDATION_DEPTH_THRESHOLD: parseNonNegativeInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),
     ...loadRagEnv(source),
   };
 }

@@ -69,6 +69,8 @@ export interface AppServices {
   strategyCritic: StrategyCriticPort | null;
   /** LLM-consolidation of stacked strategy revisions (slice G3b); null when CONSOLIDATOR_ADAPTER=off (default). */
   consolidator: StrategyConsolidatorPort | null;
+  /** compositionDepth threshold that triggers revision.consolidate (env LAB_CONSOLIDATION_DEPTH_THRESHOLD); 0 = kill-switch. */
+  consolidationDepthThreshold: number;
   hypotheses: HypothesisProposalRepository;
   hypothesisReviews: HypothesisReviewRepository;
   similarHypotheses: SimilarHypothesisSearchPort;

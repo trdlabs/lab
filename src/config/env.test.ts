@@ -512,3 +512,22 @@ describe('CONSOLIDATOR_ADAPTER + CONSOLIDATOR_MODEL (slice G3b, Task 5)', () => 
     ).toBe('anthropic/claude-sonnet-4-6');
   });
 });
+
+describe('LAB_CONSOLIDATION_DEPTH_THRESHOLD (slice G3b, Task 7)', () => {
+  it('defaults to 2', () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+  });
+
+  it('reads an override', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '3' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(3);
+  });
+
+  it('honors 0 as a kill-switch (NOT coerced to the default)', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '0' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(0);
+  });
+
+  it('falls back to the default on an invalid value', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: 'abc' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '-3' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+  });
+});

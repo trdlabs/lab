@@ -418,6 +418,7 @@ export function composeRuntime() {
     critic: buildCritic(env, mastraRuntime),
     strategyCritic: buildStrategyCritic(env, mastraRuntime),
     consolidator: buildConsolidator(env),
+    consolidationDepthThreshold: env.LAB_CONSOLIDATION_DEPTH_THRESHOLD,
     hypotheses,
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),

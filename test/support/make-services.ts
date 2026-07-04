@@ -141,6 +141,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     trustedSigners: {},
     paperEvidenceRequired: false,
     consolidator: overrides.consolidator ?? null,
+    consolidationDepthThreshold: overrides.consolidationDepthThreshold ?? 0,
     ...overrides,
   };
 }
