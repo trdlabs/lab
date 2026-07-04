@@ -39,6 +39,7 @@ export interface SubmitProvenCandidateArgs {
   readonly idempotencyKey: string;
   readonly workflowId?: string;
   readonly correlationId?: string;
+  readonly evidenceArtifactRef?: string;
 }
 
 export interface PaperIntakePort {
@@ -64,7 +65,7 @@ export function buildPaperIntakeRequest(args: SubmitProvenCandidateArgs): PaperC
     evidence: {
       baselineRunId: args.evidence.baselineRunId,
       variantRunId: args.evidence.variantRunId,
-      artifactRefs: [args.bundle.bundleHash],
+      artifactRefs: args.evidenceArtifactRef ? [args.bundle.bundleHash, args.evidenceArtifactRef] : [args.bundle.bundleHash],
       externalEvidenceRef: null,
       datasetRef: args.evidence.datasetRef,
       window: { fromMs: args.evidence.window.fromMs, toMs: args.evidence.window.toMs },

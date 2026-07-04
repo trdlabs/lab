@@ -32,6 +32,16 @@ describe('buildPaperIntakeRequest', () => {
     const req = buildPaperIntakeRequest({ ...ARGS, identity: { strategyName: 's', side: 'short' } });
     expect('params' in (req.strategy as Record<string, unknown>)).toBe(false);
   });
+
+  it('appends evidenceArtifactRef to artifactRefs when present', () => {
+    const req = buildPaperIntakeRequest({ ...ARGS, evidenceArtifactRef: 'sha256:ev' });
+    expect(req.evidence.artifactRefs).toEqual([ARGS.bundle.bundleHash, 'sha256:ev']);
+  });
+
+  it('omits it → artifactRefs byte-identical to prior behavior', () => {
+    const req = buildPaperIntakeRequest(ARGS);
+    expect(req.evidence.artifactRefs).toEqual([ARGS.bundle.bundleHash]);
+  });
 });
 
 describe('createSdkPaperIntake / fake transport', () => {

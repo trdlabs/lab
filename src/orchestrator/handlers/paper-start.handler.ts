@@ -8,6 +8,7 @@ import type { ResearchExperiment } from '../../domain/research-experiment.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { buildChampionSubmission } from '../../research/champion-evidence.ts';
+import { verifySignedEvidence } from '../../research/verify-signed-evidence.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { event } from './backtest-support.ts';
 
@@ -114,7 +115,40 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
     wfoExperiment: wfo, wfoMembers, baselineExperiment: baseline, baselineMembers,
     profile, baselineRun, variantRun, bundleManifestId: bundle.manifest.id, correlationId: task.correlationId,
   });
-  const res = await services.paperIntake.submitProvenCandidate(args);
+
+  let evidenceArtifactRef: string | undefined;
+  if (services.signedEvidence.available) {
+    const scope = { from: wfo.datasetScope.period.from, to: wfo.datasetScope.period.to };
+    const evidence = await services.signedEvidence.provide({
+      backtesterRunId: variantRun.platformRunId, bundleHash: bundle.bundleHash,
+      datasetRef: wfo.datasetScope.datasetId, window: scope,
+      symbols: wfo.datasetScope.symbols, timeframe: wfo.datasetScope.timeframe,
+    });
+    if (!evidence) {
+      if (services.paperEvidenceRequired) {
+        await services.events.append(event(task.id, 'paper.evidence_required', { experimentId, reason: 'provider_returned_null' }));
+        return; // [I1] no submit
+      }
+      // not required (non-079 intake) → fall through, submit without evidence
+    } else {
+      const check = verifySignedEvidence(evidence, {
+        bundleHash: bundle.bundleHash, datasetRef: wfo.datasetScope.datasetId,
+        window: { fromMs: Date.parse(wfo.datasetScope.period.from), toMs: Date.parse(wfo.datasetScope.period.to) },
+        symbols: wfo.datasetScope.symbols, timeframe: wfo.datasetScope.timeframe,
+      }, services.trustedSigners);
+      if (!check.ok) {
+        await services.events.append(event(task.id, 'paper.evidence_rejected', { experimentId, reason: check.reason }));
+        return; // [I1]+[I3] no submit, no ref
+      }
+      const evRef = await services.artifacts.put(JSON.stringify(evidence), { kind: 'signed_backtest_evidence', mime_type: 'application/json', producer: 'paper-start-handler' });
+      evidenceArtifactRef = evRef.content_hash; // [I3] ref only AFTER verify passes
+    }
+  } else if (services.paperEvidenceRequired) {
+    // defense-in-depth (boot guard should already have failed): never submit unsigned to a 079 intake
+    await services.events.append(event(task.id, 'paper.evidence_required', { experimentId, reason: 'provider_unavailable' }));
+    return;
+  }
+  const res = await services.paperIntake.submitProvenCandidate({ ...args, ...(evidenceArtifactRef ? { evidenceArtifactRef } : {}) });
   const now = new Date().toISOString();
 
   if (res.ok) {
