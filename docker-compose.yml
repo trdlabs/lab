@@ -222,6 +222,11 @@ services:
       PAPER_WINDOW_MIN_DAYS: ${PAPER_WINDOW_MIN_DAYS:-3}
       PAPER_WINDOW_MAX_DAYS: ${PAPER_WINDOW_MAX_DAYS:-30}
       PAPER_MONITOR_MAX_WAIT_DAYS: ${PAPER_MONITOR_MAX_WAIT_DAYS:-7}
+      # Signed backtest evidence (slice 079) — paper.start runs in this worker process.
+      LAB_SIGNED_EVIDENCE_SOURCE: ${LAB_SIGNED_EVIDENCE_SOURCE:-none}
+      LAB_PAPER_EVIDENCE_REQUIRED: ${LAB_PAPER_EVIDENCE_REQUIRED:-false}
+      LAB_ALLOW_FIXTURE_EVIDENCE: ${LAB_ALLOW_FIXTURE_EVIDENCE:-}
+      LAB_TRUSTED_SIGNERS_JSON: ${LAB_TRUSTED_SIGNERS_JSON:-}
     depends_on:
       postgres:
         condition: service_healthy
