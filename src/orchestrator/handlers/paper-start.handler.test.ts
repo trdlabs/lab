@@ -10,6 +10,9 @@ import type { StrategyBacktestRun } from '../../domain/strategy-backtest-run.ts'
 import type { PaperIntakePort, SubmitProvenCandidateArgs } from '../../adapters/platform/paper-intake.port.ts';
 import { FakeStrategyBuilder } from '../../adapters/builder/fake-strategy-builder.ts';
 import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
+import type { SignedEvidenceProviderPort, SignedEvidenceProvideArgs } from '../../ports/signed-evidence-provider.port.ts';
+import type { SignedBacktestEvidence } from '../../ports/backtester-strategy.port.ts';
+import { buildFixtureSignedEvidence } from '../../research/fixture-signed-evidence.ts';
 
 const NOW = '2026-07-03T00:00:00.000Z';
 
@@ -19,6 +22,18 @@ const DATASET_SCOPE = {
   timeframe: '1h',
   period: { from: '2026-06-12T00:00:00.000Z', to: '2026-06-19T00:00:00.000Z' },
 };
+
+/** Builds the evidence-check scope paper-start passes to provide()/verifySignedEvidence for a given bundleHash. */
+function evidenceScope(bundleHash: string, platformRunId: string) {
+  return {
+    backtesterRunId: platformRunId,
+    bundleHash,
+    datasetRef: DATASET_SCOPE.datasetId,
+    window: { fromMs: Date.parse(DATASET_SCOPE.period.from), toMs: Date.parse(DATASET_SCOPE.period.to) },
+    symbols: DATASET_SCOPE.symbols,
+    timeframe: DATASET_SCOPE.timeframe,
+  };
+}
 
 const HOLDOUT_POLICY = {
   mode: 'trade_based' as const,
@@ -86,16 +101,33 @@ interface MakeOpts {
   monitorStatus?: 'watching' | 'window_complete' | 'stalled';
   /** Only applied when seedExisting === 'submitted'; omit to seed a row WITHOUT strategyName (pre-G4 legacy row). */
   strategyName?: string;
+  /** services.signedEvidence.available (default false — matches makeServices' NoneSignedEvidenceProvider default). */
+  signedEvidenceAvailable?: boolean;
+  /**
+   * Called from the fake provider's provide() with the real bundleHash + requested platformRunId.
+   * `trustedSignersSink` is the SAME object backing services.trustedSigners — mutate it (e.g. via
+   * Object.assign) to wire matching signers before returning evidence, or leave it untouched to
+   * simulate an untrusted/unverifiable signer. Return null to simulate "no evidence available yet".
+   */
+  evidenceFactory?: (
+    ctx: { bundleHash: string; platformRunId: string },
+    trustedSignersSink: Record<string, string>,
+  ) => SignedBacktestEvidence | null;
+  /** Seed value for services.trustedSigners (default {}); evidenceFactory may add to it via the sink param. */
+  trustedSigners?: Record<string, string>;
+  /** services.paperEvidenceRequired (default false). */
+  paperEvidenceRequired?: boolean;
 }
 
 async function make(opts: MakeOpts = {}): Promise<{
   services: AppServices;
   intakeCalls: SubmitProvenCandidateArgs[];
   events: { type: string; payload: Record<string, unknown> }[];
-  artifacts: { putHashes: string[]; getHashes: string[] };
+  artifacts: { putHashes: string[]; getHashes: string[]; puts: { content_hash: string; kind: string }[] };
   bundleHash: string;
   manifestId: string;
   queueCalls: { envelope: QueueEnvelope; opts?: { delayMs?: number } }[];
+  signedEvidenceCalls: SignedEvidenceProvideArgs[];
 }> {
   const intakeCalls: SubmitProvenCandidateArgs[] = [];
   const result: PaperCandidateIntakeResult = opts.result ?? {
@@ -109,7 +141,22 @@ async function make(opts: MakeOpts = {}): Promise<{
     },
   };
 
-  const services = makeServices({ paperIntake });
+  const signedEvidenceCalls: SignedEvidenceProvideArgs[] = [];
+  const trustedSignersRef: Record<string, string> = { ...(opts.trustedSigners ?? {}) };
+  const signedEvidence: SignedEvidenceProviderPort = {
+    available: opts.signedEvidenceAvailable ?? false,
+    provide: async (args) => {
+      signedEvidenceCalls.push(args);
+      if (!opts.evidenceFactory) return null;
+      // `bundle` is assigned below; provide() is only invoked once make() has fully returned.
+      return opts.evidenceFactory({ bundleHash: bundle.bundleHash, platformRunId: args.backtesterRunId }, trustedSignersRef);
+    },
+  };
+
+  const services = makeServices({
+    paperIntake, signedEvidence, trustedSigners: trustedSignersRef,
+    paperEvidenceRequired: opts.paperEvidenceRequired ?? false,
+  });
   await services.strategyProfiles.create(profile());
 
   const bundle = await makeTestStrategyBundle();
@@ -119,10 +166,12 @@ async function make(opts: MakeOpts = {}): Promise<{
   );
 
   const putHashes: string[] = [];
+  const puts: { content_hash: string; kind: string }[] = [];
   const originalPut = services.artifacts.put.bind(services.artifacts);
   services.artifacts.put = async (content, meta) => {
     const ref = await originalPut(content, meta);
     putHashes.push(ref.content_hash);
+    puts.push({ content_hash: ref.content_hash, kind: meta.kind });
     return ref;
   };
 
@@ -196,7 +245,10 @@ async function make(opts: MakeOpts = {}): Promise<{
     return originalEnqueue(envelope, enqueueOpts);
   };
 
-  return { services, intakeCalls, events, artifacts: { putHashes, getHashes }, bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id, queueCalls };
+  return {
+    services, intakeCalls, events, artifacts: { putHashes, getHashes, puts },
+    bundleHash: bundle.bundleHash, manifestId: bundle.manifest.id, queueCalls, signedEvidenceCalls,
+  };
 }
 
 describe('paperStartHandler', () => {
@@ -211,6 +263,21 @@ describe('paperStartHandler', () => {
     expect(intakeCalls).toHaveLength(0);
     expect(events.map((e) => e.type)).toContain('paper.intake_skipped');
     expect(await services.paperSubmissions.findByExperimentId('exp-wfo')).toBeNull();
+  });
+
+  it('[review fix #3] disabled intake never touches the evidence provider/verifier: early-return happens before the evidence block', async () => {
+    const { services, intakeCalls, signedEvidenceCalls, artifacts } = await make({
+      enabled: false, signedEvidenceAvailable: true,
+      evidenceFactory: (ctx, sink) => {
+        const built = buildFixtureSignedEvidence(evidenceScope(ctx.bundleHash, ctx.platformRunId));
+        Object.assign(sink, built.trustedSigners);
+        return built.evidence;
+      },
+    });
+    await paperStartHandler(taskOf(), services);
+    expect(intakeCalls).toHaveLength(0);
+    expect(signedEvidenceCalls).toHaveLength(0); // provide() never called → verify() (downstream of it) never called either
+    expect(artifacts.puts.some((p) => p.kind === 'signed_backtest_evidence')).toBe(false);
   });
 
   it('happy path: bytes in CAS (content_hash === bundleHash), ledger submitted, event with candidateId', async () => {
@@ -331,6 +398,83 @@ describe('paperStartHandler', () => {
     expect(intakeCalls).toHaveLength(1);
     const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
     expect(row).toMatchObject({ submissionStatus: 'submitted', candidateId: 'cand-3', id: 'existing-1' });
+  });
+
+  describe('signed evidence (079)', () => {
+    it('back-compat: enabled intake + provider unavailable + evidence not required → submits WITHOUT evidenceArtifactRef (old behavior byte-identical)', async () => {
+      const { services, intakeCalls } = await make({ signedEvidenceAvailable: false, paperEvidenceRequired: false });
+      await paperStartHandler(taskOf(), services);
+      expect(intakeCalls).toHaveLength(1);
+      expect(intakeCalls[0]?.evidenceArtifactRef).toBeUndefined();
+      const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+      expect(row?.submissionStatus).toBe('submitted');
+    });
+
+    it('[I1a] paperEvidenceRequired=true + provider unavailable → paper.evidence_required, no submit', async () => {
+      const { services, intakeCalls, events } = await make({
+        paperEvidenceRequired: true, signedEvidenceAvailable: false,
+      });
+      await paperStartHandler(taskOf(), services);
+      expect(intakeCalls).toHaveLength(0);
+      expect(events).toContainEqual({
+        type: 'paper.evidence_required',
+        payload: { experimentId: 'exp-wfo', reason: 'provider_unavailable' },
+      });
+      expect(await services.paperSubmissions.findByExperimentId('exp-wfo')).toBeNull();
+    });
+
+    it('[I1b] paperEvidenceRequired=true + provider available but provide()→null → paper.evidence_required, no submit', async () => {
+      const { services, intakeCalls, events, signedEvidenceCalls } = await make({
+        paperEvidenceRequired: true, signedEvidenceAvailable: true, // no evidenceFactory → provide() resolves null
+      });
+      await paperStartHandler(taskOf(), services);
+      expect(signedEvidenceCalls).toHaveLength(1);
+      expect(intakeCalls).toHaveLength(0);
+      expect(events).toContainEqual({
+        type: 'paper.evidence_required',
+        payload: { experimentId: 'exp-wfo', reason: 'provider_returned_null' },
+      });
+      expect(await services.paperSubmissions.findByExperimentId('exp-wfo')).toBeNull();
+    });
+
+    it('[I3a] provide() returns evidence but verify FAILS (untrusted signer) → paper.evidence_rejected, NO evidence CAS put, no submit', async () => {
+      const { services, intakeCalls, events, artifacts } = await make({
+        signedEvidenceAvailable: true,
+        evidenceFactory: (ctx) => {
+          // trustedSignersSink deliberately left untouched → verifyEvidenceSignature can't find the keyId → fails closed.
+          const built = buildFixtureSignedEvidence(evidenceScope(ctx.bundleHash, ctx.platformRunId));
+          return built.evidence;
+        },
+      });
+      await paperStartHandler(taskOf(), services);
+      expect(intakeCalls).toHaveLength(0);
+      expect(events).toContainEqual({
+        type: 'paper.evidence_rejected',
+        payload: { experimentId: 'exp-wfo', reason: 'evidence_signature_invalid' },
+      });
+      expect(artifacts.puts.some((p) => p.kind === 'signed_backtest_evidence')).toBe(false);
+      expect(await services.paperSubmissions.findByExperimentId('exp-wfo')).toBeNull();
+    });
+
+    it('[I3b] provide() + verify OK → evidence put to CAS, submit carries evidenceArtifactRef === content_hash, submission proceeds', async () => {
+      const { services, intakeCalls, artifacts, events } = await make({
+        signedEvidenceAvailable: true,
+        evidenceFactory: (ctx, sink) => {
+          const built = buildFixtureSignedEvidence(evidenceScope(ctx.bundleHash, ctx.platformRunId));
+          Object.assign(sink, built.trustedSigners); // wire the matching signer BEFORE provide() resolves
+          return built.evidence;
+        },
+      });
+      await paperStartHandler(taskOf(), services);
+      const evidencePut = artifacts.puts.find((p) => p.kind === 'signed_backtest_evidence');
+      expect(evidencePut).toBeDefined();
+      expect(intakeCalls).toHaveLength(1);
+      expect(intakeCalls[0]?.evidenceArtifactRef).toBe(evidencePut?.content_hash);
+      const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+      expect(row?.submissionStatus).toBe('submitted');
+      expect(events.map((e) => e.type)).not.toContain('paper.evidence_rejected');
+      expect(events.map((e) => e.type)).not.toContain('paper.evidence_required');
+    });
   });
 });
 
