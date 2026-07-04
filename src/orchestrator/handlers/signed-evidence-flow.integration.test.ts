@@ -10,9 +10,15 @@
 // transport) received an evidenceArtifactRef that — once run through the SAME wire mapper
 // paper-intake.port.ts uses in production (buildPaperIntakeRequest) — surfaces inside
 // evidence.artifactRefs, and the submission was admitted.
+//
+// A second suite closes the composition-wiring gap: it drives the handler through the REAL
+// selectSignedEvidence('fixture') provider with trustedSigners wired the way composeRuntime
+// wires them (provider.trustedSigners UNION env), proving the fixture source actually reaches
+// submit — and, as a control, that dropping the provider's signer fails closed.
 import { describe, it, expect } from 'vitest';
 import { paperStartHandler } from './paper-start.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
+import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchExperiment, ExperimentRunMember } from '../../domain/research-experiment.ts';
@@ -22,6 +28,7 @@ import { buildPaperIntakeRequest } from '../../adapters/platform/paper-intake.po
 import { FakeStrategyBuilder } from '../../adapters/builder/fake-strategy-builder.ts';
 import { assembleStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { buildFixtureSignedEvidence } from '../../research/fixture-signed-evidence.ts';
+import { selectSignedEvidence } from '../../adapters/platform/select-signed-evidence.ts';
 import type { SignedEvidenceProviderPort } from '../../ports/signed-evidence-provider.port.ts';
 
 const NOW = '2026-07-04T00:00:00.000Z';
@@ -39,6 +46,11 @@ const HOLDOUT_POLICY = {
   minTradesHoldout: 10,
   lowConfidenceThreshold: 0.5,
   minHistoryDays: 30,
+};
+
+const CHAMPION_TASK: ResearchTask = {
+  id: 't1', taskType: 'paper.start', source: 'operator', correlationId: 'c1', status: 'running',
+  payload: { experimentId: 'exp-wfo', baselineExperimentId: 'exp-base' }, createdAt: NOW, updatedAt: NOW,
 };
 
 function profile(): StrategyProfile {
@@ -78,6 +90,71 @@ function backtestRun(over: Partial<StrategyBacktestRun>): StrategyBacktestRun {
   };
 }
 
+/** Seeds a real wfo PAPER_CANDIDATE champion (profile, bundle artifact, baseline + wfo experiments,
+ *  holdout members, holdout runs) into in-memory services and returns the assembled bundle. Call
+ *  BEFORE installing any artifacts.put spy so the bundle-artifact put isn't counted. */
+async function seedChampion(services: AppServices): Promise<{ bundle: Awaited<ReturnType<typeof assembleStrategyBundle>> }> {
+  await services.strategyProfiles.create(profile());
+
+  const builder = new FakeStrategyBuilder();
+  const built = await builder.build({ spec: { description: 'test' }, authoringDoc: '' });
+  const bundle = await assembleStrategyBundle(built);
+
+  const bundleArtifactRef = await services.artifacts.put(
+    JSON.stringify({ source: bundle.source, manifest: bundle.manifest, bundleHash: bundle.bundleHash }),
+    { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test' },
+  );
+
+  const baseline: ResearchExperiment = {
+    id: 'exp-base', experimentKey: 'key-exp-base', experimentType: 'strategy_baseline_validation',
+    strategyProfileId: 'prof-1', bundleHash: bundle.bundleHash, bundleArtifactRef,
+    datasetScope: DATASET_SCOPE, holdoutPolicy: HOLDOUT_POLICY, status: 'completed', createdAt: NOW, updatedAt: NOW,
+  };
+  const wfo: ResearchExperiment = {
+    id: 'exp-wfo', experimentKey: 'key-exp-wfo', experimentType: 'walk_forward_optimization',
+    strategyProfileId: 'prof-1', bundleHash: bundle.bundleHash,
+    datasetScope: DATASET_SCOPE, holdoutPolicy: HOLDOUT_POLICY, status: 'completed',
+    verdict: 'PAPER_CANDIDATE', verdictReason: 'wfo champion', createdAt: NOW, updatedAt: NOW,
+  };
+  await services.experiments.createExperiment(baseline);
+  await services.experiments.createExperiment(wfo);
+
+  const baseHoldout: ExperimentRunMember = {
+    id: 'm-base-holdout', experimentId: 'exp-base', strategyBacktestRunId: 'run-base',
+    role: 'holdout', periodFrom: DATASET_SCOPE.period.from, periodTo: DATASET_SCOPE.period.to,
+    symbols: DATASET_SCOPE.symbols, paramsHash: 'ph-base', bundleHash: bundle.bundleHash, createdAt: NOW,
+  };
+  const wfoHoldout: ExperimentRunMember = {
+    id: 'm-wfo-holdout', experimentId: 'exp-wfo', strategyBacktestRunId: 'run-var',
+    role: 'holdout', oos: true, periodFrom: DATASET_SCOPE.period.from, periodTo: DATASET_SCOPE.period.to,
+    symbols: DATASET_SCOPE.symbols, paramsHash: 'ph-wfo', params: { dumpPct: 8 },
+    bundleHash: bundle.bundleHash, createdAt: NOW,
+    resultSummary: { decision: 'PAPER_CANDIDATE', totalTrades: 42, netPnlUsd: 500, maxDrawdownPct: 3.2, sharpe: 1.4 },
+  };
+  await services.experiments.addMember(baseHoldout);
+  await services.experiments.addMember(wfoHoldout);
+
+  await services.strategyBacktests.createSubmitted(
+    backtestRun({ id: 'run-base', platformRunId: 'plat-run-base', bundleHash: bundle.bundleHash }),
+  );
+  await services.strategyBacktests.createSubmitted(
+    backtestRun({ id: 'run-var', platformRunId: 'plat-run-var', bundleHash: bundle.bundleHash }),
+  );
+
+  return { bundle };
+}
+
+/** Records every event appended after the spy is installed. */
+function spyEvents(services: AppServices): { type: string; payload: Record<string, unknown> }[] {
+  const events: { type: string; payload: Record<string, unknown> }[] = [];
+  const original = services.events.append.bind(services.events);
+  services.events.append = async (evt) => {
+    events.push({ type: evt.type, payload: evt.payload });
+    return original(evt);
+  };
+  return events;
+}
+
 describe('signed-evidence flow (079): champion -> fixture signedEvidence -> verify -> CAS -> submitProvenCandidate', () => {
   it('provides evidence matching the champion scope, verifies it, puts it in the CAS, and submits it admitted with a resolvable artifactRefs entry', async () => {
     const intakeCalls: SubmitProvenCandidateArgs[] = [];
@@ -112,16 +189,7 @@ describe('signed-evidence flow (079): champion -> fixture signedEvidence -> veri
     };
 
     const services = makeServices({ paperIntake, signedEvidence, trustedSigners, paperEvidenceRequired: false });
-    await services.strategyProfiles.create(profile());
-
-    const builder = new FakeStrategyBuilder();
-    const built = await builder.build({ spec: { description: 'test' }, authoringDoc: '' });
-    const bundle = await assembleStrategyBundle(built);
-
-    const bundleArtifactRef = await services.artifacts.put(
-      JSON.stringify({ source: bundle.source, manifest: bundle.manifest, bundleHash: bundle.bundleHash }),
-      { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test' },
-    );
+    await seedChampion(services);
 
     const puts: { content_hash: string; kind: string }[] = [];
     const originalPut = services.artifacts.put.bind(services.artifacts);
@@ -131,55 +199,9 @@ describe('signed-evidence flow (079): champion -> fixture signedEvidence -> veri
       return ref;
     };
 
-    const baseline: ResearchExperiment = {
-      id: 'exp-base', experimentKey: 'key-exp-base', experimentType: 'strategy_baseline_validation',
-      strategyProfileId: 'prof-1', bundleHash: bundle.bundleHash, bundleArtifactRef,
-      datasetScope: DATASET_SCOPE, holdoutPolicy: HOLDOUT_POLICY, status: 'completed', createdAt: NOW, updatedAt: NOW,
-    };
-    const wfo: ResearchExperiment = {
-      id: 'exp-wfo', experimentKey: 'key-exp-wfo', experimentType: 'walk_forward_optimization',
-      strategyProfileId: 'prof-1', bundleHash: bundle.bundleHash,
-      datasetScope: DATASET_SCOPE, holdoutPolicy: HOLDOUT_POLICY, status: 'completed',
-      verdict: 'PAPER_CANDIDATE', verdictReason: 'wfo champion', createdAt: NOW, updatedAt: NOW,
-    };
-    await services.experiments.createExperiment(baseline);
-    await services.experiments.createExperiment(wfo);
+    const events = spyEvents(services);
 
-    const baseHoldout: ExperimentRunMember = {
-      id: 'm-base-holdout', experimentId: 'exp-base', strategyBacktestRunId: 'run-base',
-      role: 'holdout', periodFrom: DATASET_SCOPE.period.from, periodTo: DATASET_SCOPE.period.to,
-      symbols: DATASET_SCOPE.symbols, paramsHash: 'ph-base', bundleHash: bundle.bundleHash, createdAt: NOW,
-    };
-    const wfoHoldout: ExperimentRunMember = {
-      id: 'm-wfo-holdout', experimentId: 'exp-wfo', strategyBacktestRunId: 'run-var',
-      role: 'holdout', oos: true, periodFrom: DATASET_SCOPE.period.from, periodTo: DATASET_SCOPE.period.to,
-      symbols: DATASET_SCOPE.symbols, paramsHash: 'ph-wfo', params: { dumpPct: 8 },
-      bundleHash: bundle.bundleHash, createdAt: NOW,
-      resultSummary: { decision: 'PAPER_CANDIDATE', totalTrades: 42, netPnlUsd: 500, maxDrawdownPct: 3.2, sharpe: 1.4 },
-    };
-    await services.experiments.addMember(baseHoldout);
-    await services.experiments.addMember(wfoHoldout);
-
-    await services.strategyBacktests.createSubmitted(
-      backtestRun({ id: 'run-base', platformRunId: 'plat-run-base', bundleHash: bundle.bundleHash }),
-    );
-    await services.strategyBacktests.createSubmitted(
-      backtestRun({ id: 'run-var', platformRunId: 'plat-run-var', bundleHash: bundle.bundleHash }),
-    );
-
-    const events: { type: string; payload: Record<string, unknown> }[] = [];
-    const originalAppend = services.events.append.bind(services.events);
-    services.events.append = async (evt) => {
-      events.push({ type: evt.type, payload: evt.payload });
-      return originalAppend(evt);
-    };
-
-    const task: ResearchTask = {
-      id: 't1', taskType: 'paper.start', source: 'operator', correlationId: 'c1', status: 'running',
-      payload: { experimentId: 'exp-wfo', baselineExperimentId: 'exp-base' }, createdAt: NOW, updatedAt: NOW,
-    };
-
-    await paperStartHandler(task, services);
+    await paperStartHandler(CHAMPION_TASK, services);
 
     // Evidence verified: no rejection/required event, submission actually happened.
     expect(events.map((e) => e.type)).not.toContain('paper.evidence_rejected');
@@ -206,5 +228,71 @@ describe('signed-evidence flow (079): champion -> fixture signedEvidence -> veri
       type: 'paper.candidate_submitted',
       payload: { experimentId: 'exp-wfo', candidateId: 'cand-079', admissionStatus: 'admitted', idempotentReplay: false },
     });
+  });
+});
+
+describe('signed-evidence flow (079): composition wiring — real selectSignedEvidence(fixture) reaches submit', () => {
+  function admittingIntake(calls: SubmitProvenCandidateArgs[]): PaperIntakePort {
+    return {
+      enabled: true,
+      submitProvenCandidate: async (args) => {
+        calls.push(args);
+        return { ok: true, candidateId: 'cand-fix', admissionStatus: 'admitted', admissionReasonCode: null, idempotentReplay: false };
+      },
+    };
+  }
+
+  it('wiring provider.trustedSigners (as composeRuntime does) lets the fixture source submit an admitted candidate — even under LAB_PAPER_EVIDENCE_REQUIRED', async () => {
+    const intakeCalls: SubmitProvenCandidateArgs[] = [];
+    // The exact object composeRuntime constructs from LAB_SIGNED_EVIDENCE_SOURCE=fixture.
+    const signedEvidence = selectSignedEvidence({
+      LAB_SIGNED_EVIDENCE_SOURCE: 'fixture', NODE_ENV: 'test',
+    } as unknown as NodeJS.ProcessEnv);
+
+    // Mirror composeRuntime's merge: provider.trustedSigners UNION env (env {} here).
+    const services = makeServices({
+      paperIntake: admittingIntake(intakeCalls),
+      signedEvidence,
+      trustedSigners: { ...(signedEvidence.trustedSigners ?? {}) },
+      paperEvidenceRequired: true,
+    });
+    await seedChampion(services);
+    const events = spyEvents(services);
+
+    await paperStartHandler(CHAMPION_TASK, services);
+
+    expect(events.map((e) => e.type)).not.toContain('paper.evidence_rejected');
+    expect(events.map((e) => e.type)).not.toContain('paper.evidence_required');
+    expect(intakeCalls).toHaveLength(1);
+    expect(intakeCalls[0]?.evidenceArtifactRef).toBeDefined();
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row?.submissionStatus).toBe('submitted');
+    expect(row?.admissionStatus).toBe('admitted');
+  });
+
+  it('control: dropping the provider signer (trustedSigners {}) fails closed — the merge is load-bearing', async () => {
+    const intakeCalls: SubmitProvenCandidateArgs[] = [];
+    const signedEvidence = selectSignedEvidence({
+      LAB_SIGNED_EVIDENCE_SOURCE: 'fixture', NODE_ENV: 'test',
+    } as unknown as NodeJS.ProcessEnv);
+
+    const services = makeServices({
+      paperIntake: admittingIntake(intakeCalls),
+      signedEvidence,
+      trustedSigners: {}, // the pre-fix wiring: provider.trustedSigners discarded
+      paperEvidenceRequired: true,
+    });
+    await seedChampion(services);
+    const events = spyEvents(services);
+
+    await paperStartHandler(CHAMPION_TASK, services);
+
+    expect(events).toContainEqual({
+      type: 'paper.evidence_rejected',
+      payload: { experimentId: 'exp-wfo', reason: 'evidence_signature_invalid' },
+    });
+    expect(intakeCalls).toHaveLength(0);
+    const row = await services.paperSubmissions.findByExperimentId('exp-wfo');
+    expect(row).toBeFalsy(); // rejected verify returns before any upsert — no submission row created
   });
 });

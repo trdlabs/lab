@@ -434,7 +434,10 @@ export function composeRuntime() {
     paperMonitorPollMs: env.PAPER_MONITOR_POLL_MS,
     paperRunLocator,
     signedEvidence,
-    trustedSigners: env.LAB_TRUSTED_SIGNERS_JSON,
+    // Effective trust anchor = the signers the selected provider vouches for (fixture self-signs
+    // and advertises its own key) UNION env-configured real signers. env is spread LAST so a real
+    // key in LAB_TRUSTED_SIGNERS_JSON can never be shadowed by a provider-supplied keyId collision.
+    trustedSigners: { ...(signedEvidence.trustedSigners ?? {}), ...env.LAB_TRUSTED_SIGNERS_JSON },
     paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
   };
 

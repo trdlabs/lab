@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { selectSignedEvidence, parseSignedEvidenceSource } from './select-signed-evidence.ts';
 import type { SignedEvidenceProvideArgs } from '../../ports/signed-evidence-provider.port.ts';
+import { verifySignedEvidence, type EvidenceCheckScope } from '../../research/verify-signed-evidence.ts';
+
+function expectedScope(args: SignedEvidenceProvideArgs): EvidenceCheckScope {
+  return {
+    bundleHash: args.bundleHash,
+    datasetRef: args.datasetRef,
+    window: { fromMs: Date.parse(args.window.from), toMs: Date.parse(args.window.to) },
+    symbols: args.symbols,
+    timeframe: args.timeframe,
+  };
+}
 
 function argsFixture(): SignedEvidenceProvideArgs {
   return {
@@ -64,6 +75,41 @@ describe('selectSignedEvidence', () => {
       fromMs: Date.parse(args.window.from),
       toMs: Date.parse(args.window.to),
     });
+  });
+
+  it('fixture provider advertises a matching signer: its evidence verifies against provider.trustedSigners, and is rejected without it (regression: provider must not discard its own signer)', async () => {
+    const provider = selectSignedEvidence({
+      LAB_SIGNED_EVIDENCE_SOURCE: 'fixture',
+      NODE_ENV: 'test',
+    } as unknown as NodeJS.ProcessEnv);
+    const args = argsFixture();
+    const evidence = await provider.provide(args);
+    expect(evidence).not.toBeNull();
+
+    // The signer the provider advertises up-front verifies exactly what provide() signs — this is
+    // what composition merges into the effective trustedSigners, so the paper.start verify passes.
+    expect(provider.trustedSigners).toBeDefined();
+    expect(verifySignedEvidence(evidence!, expectedScope(args), provider.trustedSigners!)).toEqual({
+      ok: true,
+    });
+
+    // Without the provider's signer (the pre-fix composition wiring: env {} only), the SAME
+    // evidence is fail-closed rejected — proving the merge is load-bearing, not incidental.
+    expect(verifySignedEvidence(evidence!, expectedScope(args), {})).toEqual({
+      ok: false,
+      reason: 'evidence_signature_invalid',
+    });
+  });
+
+  it('fixture provider signs every provide() with the SAME stable key (a per-call keypair would defeat the advertised signer)', async () => {
+    const provider = selectSignedEvidence({
+      LAB_SIGNED_EVIDENCE_SOURCE: 'fixture',
+      NODE_ENV: 'test',
+    } as unknown as NodeJS.ProcessEnv);
+    const a = await provider.provide(argsFixture());
+    const b = await provider.provide({ ...argsFixture(), backtesterRunId: 'run-2' });
+    expect(a?.body.keyId).toBe(b?.body.keyId);
+    expect(Object.keys(provider.trustedSigners!)).toEqual([a?.body.keyId]);
   });
 
   it('none source → available false, provide null', async () => {

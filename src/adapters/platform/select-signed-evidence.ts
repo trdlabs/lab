@@ -3,7 +3,8 @@ import type {
   SignedEvidenceProvideArgs,
 } from '../../ports/signed-evidence-provider.port.ts';
 import type { SignedBacktestEvidence } from '../../ports/backtester-strategy.port.ts';
-import { buildFixtureSignedEvidence } from '../../research/fixture-signed-evidence.ts';
+import type { TrustedSigners } from '../../research/evidence-signature.ts';
+import { createFixtureSigner, type FixtureSigner } from '../../research/fixture-signed-evidence.ts';
 
 export type SignedEvidenceSource = 'none' | 'fixture' | 'http';
 
@@ -21,12 +22,17 @@ class NoneSignedEvidenceProvider implements SignedEvidenceProviderPort {
   }
 }
 
-/** TEST/DEMO ONLY — generates its own keypair per call; only verifies against the
- * trustedSigners IT produced. Never wire this into a production source. */
+/** TEST/DEMO ONLY — self-signs with ONE stable keypair for its lifetime and advertises the
+ * matching public key via `trustedSigners`, so composition can wire a verifier that accepts what
+ * it produces. Never wire this into a production source. */
 class FixtureSignedEvidenceProvider implements SignedEvidenceProviderPort {
   readonly available = true;
+  private readonly signer: FixtureSigner = createFixtureSigner();
+  get trustedSigners(): TrustedSigners {
+    return this.signer.trustedSigners;
+  }
   async provide(args: SignedEvidenceProvideArgs): Promise<SignedBacktestEvidence | null> {
-    const { evidence } = buildFixtureSignedEvidence({
+    return this.signer.sign({
       backtesterRunId: args.backtesterRunId,
       bundleHash: args.bundleHash,
       datasetRef: args.datasetRef,
@@ -34,7 +40,6 @@ class FixtureSignedEvidenceProvider implements SignedEvidenceProviderPort {
       symbols: args.symbols,
       timeframe: args.timeframe,
     });
-    return evidence;
   }
 }
 
