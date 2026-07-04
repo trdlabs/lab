@@ -37,4 +37,39 @@ describe('verifyEvidenceSignature', () => {
     const body = { keyId: s.keyId };
     expect(verifyEvidenceSignature({ body, signature: s.signBody(body) }, {})).toBe(false);
   });
+
+  describe('malformed inputs (hardening)', () => {
+    it('returns false without throwing on malformed PEM string in trustedSigners', () => {
+      const s = makeSigner();
+      const body = { keyId: s.keyId, verdict: 'passed' };
+      const artifact = { body, signature: s.signBody(body) };
+      // Malformed PEM for the trusted signer
+      const malformedTrustedSigners: TrustedSigners = { [s.keyId]: 'not-a-pem' };
+      expect(() => verifyEvidenceSignature(artifact, malformedTrustedSigners)).not.toThrow();
+      expect(verifyEvidenceSignature(artifact, malformedTrustedSigners)).toBe(false);
+    });
+    it('returns false without throwing on garbage base64 signature', () => {
+      const s = makeSigner();
+      const body = { keyId: s.keyId, verdict: 'passed' };
+      const artifact = { body, signature: 'notbase64!!!' };
+      expect(() => verifyEvidenceSignature(artifact, { [s.keyId]: s.pem })).not.toThrow();
+      expect(verifyEvidenceSignature(artifact, { [s.keyId]: s.pem })).toBe(false);
+    });
+    it('returns false without throwing on truncated signature', () => {
+      const s = makeSigner();
+      const body = { keyId: s.keyId, verdict: 'passed' };
+      const validSig = s.signBody(body);
+      const truncatedSig = validSig.slice(0, 20); // Truncate to invalid length
+      const artifact = { body, signature: truncatedSig };
+      expect(() => verifyEvidenceSignature(artifact, { [s.keyId]: s.pem })).not.toThrow();
+      expect(verifyEvidenceSignature(artifact, { [s.keyId]: s.pem })).toBe(false);
+    });
+    it('returns false without throwing on prototype-chain keyId (constructor) with empty trustedSigners', () => {
+      const body = { keyId: 'constructor', verdict: 'passed' };
+      const artifact = { body, signature: 'anysignature' };
+      const emptyTrustedSigners: TrustedSigners = {};
+      expect(() => verifyEvidenceSignature(artifact, emptyTrustedSigners)).not.toThrow();
+      expect(verifyEvidenceSignature(artifact, emptyTrustedSigners)).toBe(false);
+    });
+  });
 });

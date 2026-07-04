@@ -11,7 +11,7 @@ export function verifyEvidenceSignature(
   trustedSigners: TrustedSigners,
 ): boolean {
   const keyId = (artifact.body as { keyId?: string } | null)?.keyId;
-  const pem = keyId ? trustedSigners[keyId] : undefined;
+  const pem = keyId && Object.hasOwn(trustedSigners, keyId) ? trustedSigners[keyId] : undefined;
   if (!pem) return false;
   try {
     return cryptoVerify(
