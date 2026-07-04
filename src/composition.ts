@@ -51,6 +51,10 @@ import { MastraStrategyBuilder } from './adapters/builder/mastra-strategy-builde
 import { createStrategyBuilderAgent } from './mastra/agents/strategy-builder.agent.ts';
 import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
 import type { StrategyBuilder } from './ports/strategy-builder.port.ts';
+import { FakeStrategyConsolidator } from './adapters/consolidator/fake-strategy-consolidator.ts';
+import { MastraStrategyConsolidator } from './adapters/consolidator/mastra-strategy-consolidator.ts';
+import { createStrategyConsolidatorAgent } from './mastra/agents/strategy-consolidator.agent.ts';
+import type { StrategyConsolidatorPort } from './ports/strategy-consolidator.port.ts';
 import { DrizzleHypothesisBuildRepository } from './adapters/repository/drizzle-hypothesis-build.repository.ts';
 import { DrizzleBacktestRunRepository } from './adapters/repository/drizzle-backtest-run.repository.ts';
 import { DrizzleStrategyBacktestRunRepository } from './adapters/repository/drizzle-strategy-backtest-run.repository.ts';
@@ -278,6 +282,21 @@ function buildStrategyBuilder(env: ReturnType<typeof loadEnv>): StrategyBuilder 
   return new FakeStrategyBuilder();
 }
 
+/**
+ * LLM-consolidation adapter seam (slice G3b). Unlike the other build* functions, CONSOLIDATOR_ADAPTER is
+ * NOT routed through resolveAdapter/LAB_AGENTS_ADAPTER — consolidation defaults OFF (null) and must be
+ * explicitly enabled, since running the fake in prod would waste a real backtest.
+ */
+export function buildConsolidator(env: ReturnType<typeof loadEnv>): StrategyConsolidatorPort | null {
+  if (env.CONSOLIDATOR_ADAPTER === 'mastra') {
+    const resolved = resolveLanguageModel(env, env.CONSOLIDATOR_MODEL);
+    const consolidatorAgent = createStrategyConsolidatorAgent({ model: resolved.model });
+    return new MastraStrategyConsolidator(consolidatorAgent, resolved.label);
+  }
+  if (env.CONSOLIDATOR_ADAPTER === 'fake') return new FakeStrategyConsolidator();
+  return null; // 'off' (default) — consolidation disabled
+}
+
 /** Operator confirmation window for a proposed chat action — policy, not deployment tuning. */
 const CHAT_PROPOSAL_TTL_MS = 10 * 60 * 1000;
 
@@ -398,6 +417,7 @@ export function composeRuntime() {
     researcher: buildResearcher(mastraRuntime),
     critic: buildCritic(env, mastraRuntime),
     strategyCritic: buildStrategyCritic(env, mastraRuntime),
+    consolidator: buildConsolidator(env),
     hypotheses,
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),

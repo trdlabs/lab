@@ -140,6 +140,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     signedEvidence: selectSignedEvidence({} as NodeJS.ProcessEnv),
     trustedSigners: {},
     paperEvidenceRequired: false,
+    consolidator: overrides.consolidator ?? null,
     ...overrides,
   };
 }

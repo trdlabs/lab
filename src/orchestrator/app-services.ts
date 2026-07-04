@@ -38,6 +38,7 @@ import type { PaperSubmissionRepository } from '../ports/paper-submission.reposi
 import type { PaperWindowPolicy } from '../domain/paper-window.ts';
 import type { PaperRunLocatorPort } from '../ports/paper-run-locator.port.ts';
 import type { SignedEvidenceProviderPort } from '../ports/signed-evidence-provider.port.ts';
+import type { StrategyConsolidatorPort } from '../ports/strategy-consolidator.port.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -66,6 +67,8 @@ export interface AppServices {
   critic: CriticPort | null;          // null when ENABLE_CRITIC_AGENT=false
   /** Pre-flight strategy critic; null when STRATEGY_PREFLIGHT_CRITIQUE=false. */
   strategyCritic: StrategyCriticPort | null;
+  /** LLM-consolidation of stacked strategy revisions (slice G3b); null when CONSOLIDATOR_ADAPTER=off (default). */
+  consolidator: StrategyConsolidatorPort | null;
   hypotheses: HypothesisProposalRepository;
   hypothesisReviews: HypothesisReviewRepository;
   similarHypotheses: SimilarHypothesisSearchPort;

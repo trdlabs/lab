@@ -488,3 +488,27 @@ describe('LAB_PAPER_EVIDENCE_REQUIRED + LAB_TRUSTED_SIGNERS_JSON via loadEnv (Ta
     ).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
   });
 });
+
+describe('CONSOLIDATOR_ADAPTER + CONSOLIDATOR_MODEL (slice G3b, Task 5)', () => {
+  it('defaults CONSOLIDATOR_ADAPTER to off (NOT routed through resolveAdapter/LAB_AGENTS_ADAPTER)', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.CONSOLIDATOR_ADAPTER).toBe('off');
+    expect(env.CONSOLIDATOR_MODEL).toBe('openrouter/anthropic/claude-opus-4-8');
+  });
+
+  it('stays off even when LAB_AGENTS_ADAPTER=mastra (consolidation is opt-in only)', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'mastra' } as unknown as NodeJS.ProcessEnv);
+    expect(env.CONSOLIDATOR_ADAPTER).toBe('off');
+  });
+
+  it('passes through CONSOLIDATOR_ADAPTER=mastra and =fake explicitly', () => {
+    expect(loadEnv({ CONSOLIDATOR_ADAPTER: 'mastra' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_ADAPTER).toBe('mastra');
+    expect(loadEnv({ CONSOLIDATOR_ADAPTER: 'fake' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_ADAPTER).toBe('fake');
+  });
+
+  it('honors a CONSOLIDATOR_MODEL override', () => {
+    expect(
+      loadEnv({ CONSOLIDATOR_MODEL: 'anthropic/claude-sonnet-4-6' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_MODEL,
+    ).toBe('anthropic/claude-sonnet-4-6');
+  });
+});
