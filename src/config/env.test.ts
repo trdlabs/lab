@@ -454,6 +454,14 @@ describe('parseTrustedSigners (Task 4)', () => {
     expect(() => parseTrustedSigners('"just a string"')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
     expect(() => parseTrustedSigners('42')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
   });
+
+  it('throws /LAB_TRUSTED_SIGNERS_JSON/ when a signer value is null', () => {
+    expect(() => parseTrustedSigners('{"bt-ed25519-abc": null}')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+  });
+
+  it('throws /LAB_TRUSTED_SIGNERS_JSON/ when a signer value is a nested object', () => {
+    expect(() => parseTrustedSigners('{"bt-ed25519-abc": {"nested":"x"}}')).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
+  });
 });
 
 describe('LAB_PAPER_EVIDENCE_REQUIRED + LAB_TRUSTED_SIGNERS_JSON via loadEnv (Task 4)', () => {
