@@ -60,7 +60,7 @@ export interface SignedEvidenceProviderPort {
 - `LAB_PAPER_EVIDENCE_REQUIRED=true` И `provide→null` (source есть, но evidence не добыт) → `paper.evidence_required` + НЕ submit (fail-closed).
 - `LAB_PAPER_EVIDENCE_REQUIRED=false` (non-079 intake) И `available=false` → старое поведение (submit без evidence).
 
-### 4. Основной поток
+### 4b. Основной поток
 
 `paperStartHandler` (расширение, не переписывание) при `services.signedEvidence.available`:
 1. После реконструкции бандла и `submitProvenCandidate`-подготовки: `evidence = await services.signedEvidence.provide({ backtesterRunId: variantRun.platformRunId, bundleHash, datasetRef, window, symbols, timeframe })` (scope = тот же, что buildChampionSubmission кладёт в evidence).
