@@ -277,7 +277,7 @@ git commit -m "feat(research): evaluateConsolidation strict full-block parity la
 
 ```ts
 import type { StrategyBuilderOutput, StrategyManifestMeta } from './strategy-builder.port.ts';
-import type { AgentCallOpts } from './strategy-builder.port.ts'; // reuse the onUsage opts type
+import type { AgentCallOpts } from './agent-call-opts.ts'; // the onUsage opts type lives here
 
 export interface StrategyConsolidateArgs {
   readonly stackedSource: string;
@@ -291,7 +291,7 @@ export interface StrategyConsolidatorPort {
   consolidate(args: StrategyConsolidateArgs, opts?: AgentCallOpts): Promise<StrategyBuilderOutput>;
 }
 ```
-(If `AgentCallOpts` is not exported from `strategy-builder.port.ts`, import it from wherever `StrategyBuilder.build`'s `opts` type lives; grep `AgentCallOpts`.)
+(`AgentCallOpts` is exported from `src/ports/agent-call-opts.ts` — from a port file use `./agent-call-opts.ts`, from an adapter use `../../ports/agent-call-opts.ts`.)
 
 - [ ] **Step 2: Write the failing test**
 
@@ -373,8 +373,17 @@ export class MastraStrategyConsolidator implements StrategyConsolidatorPort {
   constructor(agent: Agent, label: string) { this.agent = agent; this.model = label; }
   async consolidate(args: StrategyConsolidateArgs, opts?: AgentCallOpts): Promise<StrategyBuilderOutput> {
     const userMsg = renderConsolidationPrompt(args); // stacked source + mergedRuleSet as reference
-    const result = await this.agent.generate(userMsg, { structuredOutput: { schema: StrategyLlmOutputSchema } });
-    opts?.onUsage?.({ /* mirror MastraStrategyBuilder usage reporting */ });
+    const result = await this.agent.generate(userMsg, {
+      structuredOutput: { schema: StrategyLlmOutputSchema },
+      modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS }, // match MastraStrategyBuilder's constant
+    });
+    // Exact usage-reporting (token-budget kill-switch depends on this — NOT cosmetic):
+    await opts?.onUsage?.({
+      modelId: this.model,
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+      totalTokens: result.usage?.totalTokens ?? 0,
+    });
     return llmToStrategyBuilderOutput(StrategyLlmOutputSchema.parse(result.object));
   }
 }
@@ -500,7 +509,7 @@ git commit -m "feat(research): strategy.baseline ready-bundle mode + consolidate
 
 - [ ] **Step 1: env + services knob**
 
-`env.ts`: `Env` += `LAB_CONSOLIDATION_DEPTH_THRESHOLD: number;`; `loadEnv` += `LAB_CONSOLIDATION_DEPTH_THRESHOLD: parsePositiveInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),`. `env.test.ts`: default 2; parses override. `AppServices` += `consolidationDepthThreshold: number;`. `make-services.ts`: `consolidationDepthThreshold: overrides.consolidationDepthThreshold ?? 0,` (0 = disabled in tests unless opted in). `composeRuntime`: `consolidationDepthThreshold: env.LAB_CONSOLIDATION_DEPTH_THRESHOLD,`.
+`env.ts`: first add a `parseNonNegativeInt(value, fallback)` helper next to `parsePositiveInt` — `const n = Number(value); return Number.isInteger(n) && n >= 0 ? n : fallback;` — because `parsePositiveInt` requires `n > 0` and would coerce the `0` kill-switch to fallback `2`. Then `Env` += `LAB_CONSOLIDATION_DEPTH_THRESHOLD: number;`; `loadEnv` += `LAB_CONSOLIDATION_DEPTH_THRESHOLD: parseNonNegativeInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),`. `env.test.ts`: default → 2; `'3'` → 3; **`'0'` → 0** (kill-switch honored); invalid/empty → 2. `AppServices` += `consolidationDepthThreshold: number;`. `make-services.ts`: `consolidationDepthThreshold: overrides.consolidationDepthThreshold ?? 0,` (0 = disabled in tests unless opted in). `composeRuntime`: `consolidationDepthThreshold: env.LAB_CONSOLIDATION_DEPTH_THRESHOLD,`.
 
 - [ ] **Step 2: Write compositionDepth on new revisions**
 
@@ -561,7 +570,7 @@ git commit -m "feat(research): revision.build writes compositionDepth + enqueues
 
 - [ ] **Step 1: task-type + label + tolerance plumbing**
 
-`schemas.ts`: append `'revision.consolidate'` to `AGENT_TASK_TYPES`. `strategy-revision-run-executor.ts`: `label: 'candidate' | 'comparison_baseline' | 'consolidation'`. `env.ts`: `LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001)`, `LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01)` (+ `Env` fields + defaults test). `AppServices` += `consolidationTolerances: ConsolidationTolerances;`. `make-services.ts`: `consolidationTolerances: overrides.consolidationTolerances ?? DEFAULT_CONSOLIDATION_TOLERANCES,`. `composeRuntime`: `consolidationTolerances: { tolRel: env.LAB_CONSOLIDATION_TOL_REL, tolAbs: env.LAB_CONSOLIDATION_TOL_ABS },`.
+`schemas.ts`: append `'revision.consolidate'` to `AGENT_TASK_TYPES`. `strategy-revision-run-executor.ts`: `label: 'candidate' | 'comparison_baseline' | 'consolidation'` — the label is **diagnostic only**. NOTE (dedup identity, for the retry tests in Step 2): `BacktesterRevisionRunExecutor` dedups a COMPLETED run by `(strategyBundleId, paramsHash, bundleHash)`; `revisionId`/`label` ride the `resumeToken`, NOT the lookup. So the consolidation run's identity is the clean bundle's `bundleHash` — a genuinely-consolidated clean source (new bundleHash) always runs fresh, while an LLM that returned the SAME divergent bundle honestly reuses that completed run and rejects again (still fail-safe). Tests therefore drive parity via the injected `revisionRunExecutor` metrics, not by assuming a fresh submit per label. `env.ts`: `LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001)`, `LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01)` (+ `Env` fields + defaults test). `AppServices` += `consolidationTolerances: ConsolidationTolerances;`. `make-services.ts`: `consolidationTolerances: overrides.consolidationTolerances ?? DEFAULT_CONSOLIDATION_TOLERANCES,`. `composeRuntime`: `consolidationTolerances: { tolRel: env.LAB_CONSOLIDATION_TOL_REL, tolAbs: env.LAB_CONSOLIDATION_TOL_ABS },`.
 
 - [ ] **Step 2: Failing tests (reject/guard paths)**
 
@@ -718,6 +727,6 @@ git commit -m "feat(research): revision.consolidate accept path — materialize 
 - §11 tests → each task's test steps map 1:1. ✅
 - §13 prerequisite (platformRun persistence) → Task 1. ✅
 
-**Placeholder scan:** One deliberate lookup remains — the baseline `verdict` literal union in Task 6 Step 2 (map rule fully specified: PASS→passed, INCONCLUSIVE→inconclusive, else→failed; implementer reads the exact enum). `AgentCallOpts` import location (Task 4) flagged with a grep fallback. No other TBDs.
+**Placeholder scan:** One deliberate lookup remains — the baseline `verdict` literal union in Task 6 Step 2 (map rule fully specified: PASS→passed, INCONCLUSIVE→inconclusive, else→failed; implementer reads the exact enum). All imports (incl. `AgentCallOpts` → `src/ports/agent-call-opts.ts`), the `parseNonNegativeInt` helper, exact `onUsage` reporting, and the run-executor dedup identity are now spelled out. No other TBDs.
 
 **Type consistency:** `evaluateConsolidation(accepted, clean, tol)` arg order consistent across Task 3 and Task 8. `StrategyConsolidatorPort.consolidate(args, opts?)` consistent Tasks 4/5/8. `consolidationDepthThreshold`/`consolidationTolerances`/`consolidator` names consistent across AppServices, make-services, composeRuntime, Tasks 5/7/8. `label:'consolidation'` added in Task 8 before first use. `findConsolidatedOf` consistent Tasks 2/8. Revision field names (`compositionDepth`, `consolidatedFromRevisionId`, `semanticParentRevisionId`, `baselineValidationStatus`, `baselineExperimentId`, `baselineTaskId`) consistent across domain, schema, repo, Tasks 6/7/9.
