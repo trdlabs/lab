@@ -1,8 +1,8 @@
 // Research run-lifecycle vocabulary — trading-lab's own port contract.
 //
-// These types were historically re-exported from `@trading-platform/sdk/agent` (the platform
+// These types were historically re-exported from `@trdlabs/sdk/agent` (the platform
 // research-gateway 031 DTOs). After the MCP integration was retired (Инициатива #2), lab no longer
-// talks to that gateway, and `@trading-platform/sdk@0.5.0` cut the `/agent` subpath. lab now OWNS this
+// talks to that gateway, and `@trdlabs/sdk@0.5.0` cut the `/agent` subpath. lab now OWNS this
 // vocabulary: it is the shape that `ResearchPlatformPort` exposes and that the surviving mock + HTTP
 // backtester adapters translate their backends into. Shapes are kept byte-identical to the former SDK
 // `/agent` DTOs so the adapters' mapping logic is unchanged.

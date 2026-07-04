@@ -24,7 +24,7 @@ const evalContext = {
       runId: 'run-1',
       mode: 'paper',
       status: 'finished',
-      strategy: { name: 'long_oi_strategy', version: '1' },
+      bundleId: null, strategy: { name: 'long_oi_strategy', version: '1' },
       symbols: ['ESPORTSUSDT'],
       startedAtMs: 1,
       finishedAtMs: 2,

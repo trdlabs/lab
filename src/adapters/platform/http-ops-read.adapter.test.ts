@@ -9,7 +9,7 @@ import type {
   OperationalEvent,
 } from '../../ports/bot-results-read.port.ts';
 
-const RUN_A: BotRunRecord = { runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTC'] };
+const RUN_A: BotRunRecord = { runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTC'] };
 const RUN_B: BotRunRecord = { ...RUN_A, runId: 'r2' };
 const TRADE: ClosedTrade = { tradeId: 't1', runId: 'r1', symbol: 'BTC', side: 'long', openedAtMs: 1, closedAtMs: 2, realizedPnl: '1.5', pnlPct: '0.1', isWin: true, closeReason: 'take_profit_final', entryPrice: null, exitPrice: null, closeReasonRaw: null };
 const SUMMARY: RunSummary = { runId: 'r1', excludesReconcile: true, asOf: 9, closedTrades: 1, wins: 1, losses: 0, breakeven: 0, winratePct: 100, pnlUsd: '1.5', avgPnl: '1.5', exitReasons: { tp: 1 } };

@@ -1,6 +1,6 @@
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
-import { validate } from '@trading-platform/sdk/validation';
-import { platformContractContext } from '@trading-platform/sdk/research-contract';
+import { validate } from '@trdlabs/sdk/validation';
+import { platformContractContext } from '@trdlabs/sdk/research-contract';
 
 /**
  * Verdict of the lab-side pre-submit gate for a strategy bundle.

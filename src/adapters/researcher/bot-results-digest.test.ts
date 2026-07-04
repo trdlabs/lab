@@ -7,7 +7,7 @@ const detail: BotRunResultDetail = {
     runId: 'run_1',
     mode: 'paper',
     status: 'finished',
-    strategy: { name: 'long-oi', version: '1.0.0' },
+    bundleId: null, strategy: { name: 'long-oi', version: '1.0.0' },
     startedAtMs: Date.UTC(2026, 5, 1),
     finishedAtMs: Date.UTC(2026, 5, 2),
     lastSeenMs: Date.UTC(2026, 5, 2),

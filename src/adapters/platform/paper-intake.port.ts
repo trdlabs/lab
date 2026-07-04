@@ -4,13 +4,13 @@
 // Dedicated axis LAB_PAPER_INTAKE_* — ОТДЕЛЬНАЯ от research-transport и bot-results
 // (паттерн select-bot-results: своя ось, свой env, boot-safe селектор).
 
-import { submitPaperCandidate } from '@trading-platform/sdk/intake';
-import { createHttpIntakeTransport } from '@trading-platform/sdk/intake/http-transport';
+import { submitPaperCandidate } from '@trdlabs/sdk/intake';
+import { createHttpIntakeTransport } from '@trdlabs/sdk/intake/http-transport';
 import type {
   PaperCandidateIntakeRequest,
   PaperCandidateIntakeResult,
   IntakeTransport,
-} from '@trading-platform/sdk/intake';
+} from '@trdlabs/sdk/intake';
 import type { AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
 
 /** Identity, которую платформа проецирует в bot_bundle.metadata (только 'long'|'short'). */

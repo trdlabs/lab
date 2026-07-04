@@ -11,7 +11,7 @@ import type {
   OpsSeverity,
   OperationalEvent,
   DecisionLogEntry,
-} from '@trading-platform/sdk/ops-read';
+} from '@trdlabs/sdk/ops-read';
 
 // Re-export the SDK /ops-read DTOs through the port so adapters depend on lab-local port types,
 // not the SDK directly (enforced by sdk-import-boundary.guard.test.ts).
