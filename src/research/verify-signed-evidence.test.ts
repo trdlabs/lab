@@ -113,4 +113,43 @@ describe('verifySignedEvidence', () => {
     const expected = { ...baseScope, symbols: ['ETHUSDT', 'BTCUSDT'] };
     expect(verifySignedEvidence(evidence, expected, trustedSigners)).toEqual({ ok: true });
   });
+
+  it('rejects tampering of a signed field NOT in EvidenceCheckScope (backtesterRunId) as evidence_signature_invalid, proving signature gates everything', () => {
+    // backtesterRunId is signed in the evidence body but NOT checked by any downstream rung
+    // (not in EvidenceCheckScope). This test proves the signature check runs FIRST: if we tamper
+    // the backtesterRunId post-signing without re-signing, only the signature check can catch it.
+    const { evidence, trustedSigners } = buildFixtureSignedEvidence({
+      backtesterRunId: 'run-1',
+      ...baseScope,
+    });
+    const tampered = { ...evidence, body: { ...evidence.body, backtesterRunId: 'run-999' } };
+    expect(verifySignedEvidence(tampered, baseScope, trustedSigners)).toEqual({
+      ok: false,
+      reason: 'evidence_signature_invalid',
+    });
+  });
+
+  it('rejects a window.toMs-only mismatch as scope_mismatch', () => {
+    const { evidence, trustedSigners } = buildFixtureSignedEvidence({
+      backtesterRunId: 'run-1',
+      ...baseScope,
+    });
+    const expected = { ...baseScope, window: { fromMs: 1000, toMs: 2500 } };
+    expect(verifySignedEvidence(evidence, expected, trustedSigners)).toEqual({
+      ok: false,
+      reason: 'scope_mismatch',
+    });
+  });
+
+  it('rejects a symbols-length mismatch (extra symbol in expected) as scope_mismatch', () => {
+    const { evidence, trustedSigners } = buildFixtureSignedEvidence({
+      backtesterRunId: 'run-1',
+      ...baseScope,
+    });
+    const expected = { ...baseScope, symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] };
+    expect(verifySignedEvidence(evidence, expected, trustedSigners)).toEqual({
+      ok: false,
+      reason: 'scope_mismatch',
+    });
+  });
 });
