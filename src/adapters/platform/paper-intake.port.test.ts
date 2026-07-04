@@ -79,3 +79,16 @@ describe('selectPaperIntake', () => {
     expect(port.enabled).toBe(true);
   });
 });
+
+describe('buildPaperIntakeRequest — proposedRiskProfile (088)', () => {
+  it('projects proposedRiskProfile into the request when present', () => {
+    const profile = { sizing: { baseOrderUsd: 100 }, stops: { tp1Pct: 3 }, dca: { maxCount: 2 } };
+    const req = buildPaperIntakeRequest({ ...ARGS, proposedRiskProfile: profile }) as any;
+    expect(req.proposedRiskProfile).toEqual(profile);
+  });
+
+  it('omits proposedRiskProfile when absent (fingerprint-compatible)', () => {
+    const req = buildPaperIntakeRequest(ARGS);
+    expect('proposedRiskProfile' in req).toBe(false);
+  });
+});

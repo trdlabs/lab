@@ -40,6 +40,8 @@ export interface SubmitProvenCandidateArgs {
   readonly workflowId?: string;
   readonly correlationId?: string;
   readonly evidenceArtifactRef?: string;
+  /** 088 (profile-mgmt 3): proposed risk profile — platform clamps it into guardrails on promotion (087). */
+  readonly proposedRiskProfile?: Record<string, unknown>;
 }
 
 export interface PaperIntakePort {
@@ -80,6 +82,7 @@ export function buildPaperIntakeRequest(args: SubmitProvenCandidateArgs): PaperC
     strategy,
     ...(args.workflowId ? { workflowId: args.workflowId } : {}),
     ...(args.correlationId ? { correlationId: args.correlationId } : {}),
+    ...(args.proposedRiskProfile ? { proposedRiskProfile: args.proposedRiskProfile } : {}),
   };
 }
 
