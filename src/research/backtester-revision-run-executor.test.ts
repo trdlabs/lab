@@ -144,4 +144,45 @@ describe('BacktesterRevisionRunExecutor', () => {
     const persisted = await repo.findById(out.runId);
     expect(persisted?.status).toBe('submitted');
   });
+
+  it('persists platformRun (the run-context) on the submitted revision_combo row', async () => {
+    const created: StrategyBacktestRun[] = [];
+    const strategyBacktests = {
+      findByBundleAndParams: async () => null,
+      createSubmitted: async (r: StrategyBacktestRun) => { created.push(r); },
+      markCompleted: async () => {},
+      markRejected: async () => {},
+      markFailed: async () => {},
+    };
+    const testRun = { datasetId: 'ds-1', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-19' }, seed: 42 };
+    const executor = new BacktesterRevisionRunExecutor({
+      platform: {
+        submitStrategyResearchRun: async () => ({ runId: 'pr_new' }),
+        getRunStatus: async () => ({ status: 'completed' }),
+        getRunResult: async () => ({
+          kind: 'summary' as const,
+          summary: {
+            status: 'completed',
+            artifactRefs: [],
+            metrics: rawMetrics,
+            evidence: { seed: 42, contractVersion: 'platform-v1', moduleVersions: [] },
+          },
+        }),
+      } as any,
+      strategyBacktests: strategyBacktests as any,
+      poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} },
+      now: () => '2026-07-05T00:00:00.000Z',
+    });
+    await executor.execute({
+      revisionId: 'rev-1',
+      label: 'candidate',
+      strategyBundle: bundle,
+      strategyProfileId: 'prof-1',
+      run: testRun,
+      metrics: ['pnl', 'sharpe', 'max_drawdown', 'win_rate', 'total_trades', 'profit_factor', 'top_trade_contribution_pct'],
+      correlationId: 'c1',
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0]!.platformRun).toEqual(testRun);
+  });
 });
