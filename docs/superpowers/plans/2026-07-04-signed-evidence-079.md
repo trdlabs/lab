@@ -18,7 +18,7 @@
 - **Symbols alignment:** the signed `body.symbols` is SORTED (backtester `buildEvidenceBody` does `[...symbols].sort()`); lab's `scope.symbols` is UNSORTED — scope-match MUST sort both sides before comparing. `body.window.{fromMs,toMs}` === `Date.parse(scope.period.from/to)`.
 - **Three acceptance invariants (each an explicit test):** (I1) `LAB_PAPER_EVIDENCE_REQUIRED=true` NEVER submits without evidence; (I2) `source=fixture` impossible in production without explicit override; (I3) `paper.start` appends the evidence artifact ref ONLY after local verify passes, never merely after `provide()`.
 - **Additive only:** `paper-intake.port.ts` (#127) extended with an OPTIONAL `evidenceArtifactRef` — the no-evidence path stays byte-identical. NO TS parameter properties.
-- Gates per task: focused vitest; before each task-completing commit `npm run typecheck` clean + FULL `npm test` 0 failed (baseline on this branch: 3143 passed).
+- Gates per task: focused vitest; before each task-completing commit `pnpm typecheck` clean + FULL `pnpm test` 0 failed (baseline on this branch: 3143 passed).
 
 ---
 
@@ -122,14 +122,39 @@ export function verifyEvidenceSignature(artifact: { body: unknown; signature: st
 
 ---
 
-### Task 2: `SignedEvidenceProviderPort` + `selectSignedEvidence` (env axis + fixture boot-guard) [I2]
+### Task 2: Pre-flight verify `verifySignedEvidence` (pure) + fixture builder
+
+**Files:**
+- Create: `src/research/verify-signed-evidence.ts`, `src/research/fixture-signed-evidence.ts` (test-support signer)
+- Test: `src/research/verify-signed-evidence.test.ts`
+
+**Interfaces:**
+- Consumes: Task 1 `verifyEvidenceSignature`/`TrustedSigners`, `SignedBacktestEvidence` from `src/ports/backtester-strategy.port.ts:5`.
+- Produces:
+
+```ts
+export interface EvidenceCheckScope { bundleHash: string; datasetRef: string; window: { fromMs: number; toMs: number }; symbols: string[]; timeframe: string; }
+export type EvidenceVerifyResult = { ok: true } | { ok: false; reason: 'evidence_signature_invalid' | 'backtest_not_passed' | 'bundle_hash_mismatch' | 'scope_mismatch' };
+export function verifySignedEvidence(evidence: SignedBacktestEvidence, expected: EvidenceCheckScope, trustedSigners: TrustedSigners): EvidenceVerifyResult;
+// fixture-signed-evidence.ts (test/demo only — generates a keypair, returns { evidence, trustedSigners })
+export function buildFixtureSignedEvidence(scope: { backtesterRunId: string } & EvidenceCheckScope, verdict?: 'passed' | 'failed'): { evidence: SignedBacktestEvidence; trustedSigners: TrustedSigners };
+```
+
+Ladder (mirror platform matrix): signature first (`verifyEvidenceSignature` false → `evidence_signature_invalid`) → `body.verdict!=='passed'` → `backtest_not_passed` → `body.bundleHash!==expected.bundleHash` → `bundle_hash_mismatch` → scope: `body.datasetRef/timeframe` !== expected, OR `body.window.{fromMs,toMs}` !== expected, OR `[...body.symbols].sort()` deep-neq `[...expected.symbols].sort()` → `scope_mismatch` → else `{ok:true}`.
+
+- [ ] **Step 1: Failing tests** — happy (fixture passed+matching scope → ok); each reject branch: tampered signature; `verdict:'failed'`; bundleHash mismatch; datasetRef mismatch; timeframe mismatch; window mismatch; symbols mismatch (and: symbols in DIFFERENT ORDER but same set → still ok, proving sort-compare). Use `buildFixtureSignedEvidence` for the base and mutate.
+- [ ] **Step 2: RED** → **Step 3: Implement** the ladder + the fixture builder (keypair via `generateKeyPairSync('ed25519')`, keyId via `'bt-ed25519-'+sha256(spki-der).hex.slice(0,16)`, sign via `cryptoSign(null, canonicalizeEvidenceBody(body), priv).toString('base64')`, symbols sorted per backtester). **Step 4:** gates. **Step 5: Commit** `feat(research): verifySignedEvidence pre-flight ladder (signature/verdict/hash-pin/scope) + fixture signer`
+
+---
+
+### Task 3: `SignedEvidenceProviderPort` + `selectSignedEvidence` (env axis + fixture boot-guard) [I2]
 
 **Files:**
 - Create: `src/ports/signed-evidence-provider.port.ts`, `src/adapters/platform/select-signed-evidence.ts`
 - Test: `src/adapters/platform/select-signed-evidence.test.ts`
 
 **Interfaces:**
-- Consumes: `SignedBacktestEvidence` from `src/ports/backtester-strategy.port.ts:5` (reuse the existing type).
+- Consumes: `SignedBacktestEvidence` from `src/ports/backtester-strategy.port.ts:5`; Task 2's `buildFixtureSignedEvidence` (for the fixture provider) + `EvidenceCheckScope`.
 - Produces:
 
 ```ts
@@ -148,7 +173,7 @@ export function parseSignedEvidenceSource(raw: string | undefined): SignedEviden
 export function selectSignedEvidence(source: NodeJS.ProcessEnv): SignedEvidenceProviderPort;
 ```
 
-Behaviors (mirror `select-bot-results.ts`): `none`→`{available:false, provide: async()=>null}`. `fixture`→a `FixtureSignedEvidenceProvider` (Task 3 provides the fixture artifact builder; here return a provider that yields a fixture-signed evidence matching the args' scope/hash — **but gated**: `selectSignedEvidence` throws unless `source.NODE_ENV==='test' || source.LAB_ALLOW_FIXTURE_EVIDENCE==='true'` [I2]). `http`→a thin `HttpSignedEvidenceProvider` stub with a header comment `// TODO(079-followup): wire to backtester GET /v1/runs/:id/evidence once Deliverable A ships` whose `provide` returns `null` (available:true, not-yet-fetchable) — do NOT implement HTTP fetching in this slice.
+Behaviors (mirror `select-bot-results.ts`): `none`→`{available:false, provide: async()=>null}`. `fixture`→a `FixtureSignedEvidenceProvider` whose `provide(args)` calls Task 2's `buildFixtureSignedEvidence` (already available) with the args' scope (converting `window.{from,to}` ISO → `{fromMs,toMs}` via `Date.parse`) and returns its `evidence` — **but gated**: `selectSignedEvidence` throws unless `source.NODE_ENV==='test' || source.LAB_ALLOW_FIXTURE_EVIDENCE==='true'` [I2]. NOTE: the fixture provider generates its OWN keypair per call, so its `evidence` only verifies against the trustedSigners IT produced — fine for the selector's own tests (they check `available`, not verify); the paper.start integration test (Task 7) uses `buildFixtureSignedEvidence` directly to get the matching `trustedSigners`. `http`→a thin `HttpSignedEvidenceProvider` stub with a header comment `// TODO(079-followup): wire to backtester GET /v1/runs/:id/evidence once Deliverable A ships` whose `provide` returns `null` (available:true, not-yet-fetchable) — do NOT implement HTTP fetching in this slice.
 
 - [ ] **Step 1: Failing tests**:
 
@@ -173,32 +198,7 @@ it('none source → available false, provide null', async () => {
 });
 ```
 
-- [ ] **Step 2: RED** → **Step 3: Implement** (fixture provider builds a signed evidence via Task 3's `buildFixtureSignedEvidence` — if Task 3 not yet present, inline a minimal in-test signer here and refactor in Task 3; prefer implementing Task 3's builder first if executing in order). **Step 4:** gates. **Step 5: Commit** `feat(research): SignedEvidenceProviderPort + selectSignedEvidence env axis with fixture prod-guard`
-
----
-
-### Task 3: Pre-flight verify `verifySignedEvidence` (pure) + fixture builder
-
-**Files:**
-- Create: `src/research/verify-signed-evidence.ts`, `src/research/fixture-signed-evidence.ts` (test-support signer)
-- Test: `src/research/verify-signed-evidence.test.ts`
-
-**Interfaces:**
-- Consumes: Task 1 `verifyEvidenceSignature`/`TrustedSigners`, `SignedBacktestEvidence`.
-- Produces:
-
-```ts
-export interface EvidenceCheckScope { bundleHash: string; datasetRef: string; window: { fromMs: number; toMs: number }; symbols: string[]; timeframe: string; }
-export type EvidenceVerifyResult = { ok: true } | { ok: false; reason: 'evidence_signature_invalid' | 'backtest_not_passed' | 'bundle_hash_mismatch' | 'scope_mismatch' };
-export function verifySignedEvidence(evidence: SignedBacktestEvidence, expected: EvidenceCheckScope, trustedSigners: TrustedSigners): EvidenceVerifyResult;
-// fixture-signed-evidence.ts (test/demo only — generates a keypair, returns { evidence, trustedSigners })
-export function buildFixtureSignedEvidence(scope: { backtesterRunId: string } & EvidenceCheckScope, verdict?: 'passed' | 'failed'): { evidence: SignedBacktestEvidence; trustedSigners: TrustedSigners };
-```
-
-Ladder (mirror platform matrix): signature first (`verifyEvidenceSignature` false → `evidence_signature_invalid`) → `body.verdict!=='passed'` → `backtest_not_passed` → `body.bundleHash!==expected.bundleHash` → `bundle_hash_mismatch` → scope: `body.datasetRef/timeframe` !== expected, OR `body.window.{fromMs,toMs}` !== expected, OR `[...body.symbols].sort()` deep-neq `[...expected.symbols].sort()` → `scope_mismatch` → else `{ok:true}`.
-
-- [ ] **Step 1: Failing tests** — happy (fixture passed+matching scope → ok); each reject branch: tampered signature; `verdict:'failed'`; bundleHash mismatch; datasetRef mismatch; timeframe mismatch; window mismatch; symbols mismatch (and: symbols in DIFFERENT ORDER but same set → still ok, proving sort-compare). Use `buildFixtureSignedEvidence` for the base and mutate.
-- [ ] **Step 2: RED** → **Step 3: Implement** the ladder + the fixture builder (keypair via `generateKeyPairSync('ed25519')`, keyId via `deriveKeyId`, sign via `cryptoSign(null, canonical, priv).toString('base64')`, symbols sorted per backtester). **Step 4:** gates. **Step 5: Commit** `feat(research): verifySignedEvidence pre-flight ladder (signature/verdict/hash-pin/scope) + fixture signer`
+- [ ] **Step 2: RED** → **Step 3: Implement** (fixture provider delegates to Task 2's `buildFixtureSignedEvidence` — already implemented). **Step 4:** gates. **Step 5: Commit** `feat(research): SignedEvidenceProviderPort + selectSignedEvidence env axis with fixture prod-guard`
 
 ---
 
@@ -252,7 +252,9 @@ it('omits it → artifactRefs byte-identical to prior behavior', () => {
 - Test: `src/orchestrator/handlers/paper-start.handler.test.ts` (extend)
 
 **Interfaces:**
-- Consumes: `services.signedEvidence` (Task 2/4), `verifySignedEvidence` (Task 3), `services.trustedSigners`, `services.paperEvidenceRequired`, `services.artifacts.put`.
+- Consumes: `services.signedEvidence` (Task 3), `verifySignedEvidence` (Task 2), `services.trustedSigners`, `services.paperEvidenceRequired`, `services.artifacts.put`.
+
+**Placement (review fix #3):** the existing handler already early-returns when `!services.paperIntake.enabled` (the G2b disabled-intake skip, near the top of `paperStartHandler`). The ENTIRE evidence block below sits AFTER that guard and after `args = buildChampionSubmission(...)` — so a disabled intake never calls `provide`/`verify`. A back-compat test asserts a disabled intake touches neither the provider nor the verifier.
 
 Flow (after `args = buildChampionSubmission(...)`, before submit):
 
@@ -297,7 +299,8 @@ const res = await services.paperIntake.submitProvenCandidate({ ...args, ...(evid
   - **[I1b]** `paperEvidenceRequired=true` + provide→null → `paper.evidence_required`, no submit.
   - **[I3a]** provide returns evidence but verify FAILS (tampered/wrong scope) → `paper.evidence_rejected`, NO artifacts.put of evidence (assert no `signed_backtest_evidence` put), NO submit.
   - **[I3b]** provide + verify OK → evidence put to CAS (content_hash captured), `submitProvenCandidate` called with `evidenceArtifactRef === that content_hash`, submission proceeds.
-  - **back-compat**: `available=false` + `paperEvidenceRequired=false` → submit called WITHOUT evidenceArtifactRef (old behavior byte-identical).
+  - **back-compat (disabled intake) [review fix #3]**: `services.paperIntake.enabled=false` → handler early-returns BEFORE the evidence block; assert the fake `signedEvidence.provide` and `verifySignedEvidence` are NOT called (spy counters === 0), no submit.
+  - **back-compat (enabled, no evidence)**: `paperIntake.enabled=true` + `available=false` + `paperEvidenceRequired=false` → submit called WITHOUT evidenceArtifactRef (old behavior byte-identical).
 - [ ] **Step 2: RED** → **Step 3: Implement** → **Step 4:** gates (paper-start tests numerous — all green). **Step 5: Commit** `feat(orchestrator): paper.start attaches signed evidence only after local verify (fail-closed when required)`
 
 ---
@@ -313,14 +316,15 @@ const res = await services.paperIntake.submitProvenCandidate({ ...args, ...(evid
 
 **Integration test**: on in-memory infra — seed a champion (wfo PAPER_CANDIDATE + baseline + members + runs, as paper-start tests do) + a fixture `signedEvidence` provider (via `buildFixtureSignedEvidence` matching the champion scope) + matching `trustedSigners` → run `paperStartHandler` → assert: evidence verified, evidence JSON in the CAS, `submitProvenCandidate` (fake transport) received `evidence.artifactRefs` containing the evidence content-hash ref, submission admitted.
 
-- [ ] **Step 1:** integration test (may pass on first run — say so honestly). **Step 2:** handoff doc + env/docker. **Step 3:** FULL gates (`npm run typecheck` + `npm test` 0 failed). **Step 4: Commit** `feat(research): signed-evidence integration test + backtester handoff (sign real run, publish pubkey, export SDK canonicalizer) + env docs`
+- [ ] **Step 1:** integration test (may pass on first run — say so honestly). **Step 2:** handoff doc + env/docker. **Step 3:** FULL gates (`pnpm typecheck` + `pnpm test` 0 failed). **Step 4: Commit** `feat(research): signed-evidence integration test + backtester handoff (sign real run, publish pubkey, export SDK canonicalizer) + env docs`
 
 ---
 
 ## Self-review notes
 
-- Spec coverage: §2 Deliverable A→Task 7; §3 provider+guards→Tasks 2/4; §4.3 canonicalizer/verify→Tasks 1/3; §4a fail-closed→Tasks 4/6; §4b flow→Task 6; §4.5 artifactRefs→Task 5; §5 tests→embedded; §6 acceptance→Tasks 6/7.
-- Three acceptance invariants explicitly tested: I1 (Task 4 boot guard + Task 6 handler tests I1a/I1b), I2 (Task 2 fixture prod-guard), I3 (Task 6 I3a/I3b — ref only after verify).
-- Verify-at-implement flagged: whether composeRuntime is unit-testable or needs an extracted `assertEvidenceReadiness` (Task 4); Task 2/3 ordering (fixture builder lives in Task 3 — implement Task 3's builder before Task 2's fixture provider, or inline+refactor).
+- Spec coverage: §2 Deliverable A→Task 7; §3 provider+guards→Tasks 3/4; §4.3 canonicalizer/verify→Tasks 1/2; §4a fail-closed→Tasks 4/6; §4b flow→Task 6; §4.5 artifactRefs→Task 5; §5 tests→embedded; §6 acceptance→Tasks 6/7.
+- Three acceptance invariants explicitly tested: I1 (Task 4 boot guard + Task 6 handler tests I1a/I1b), I2 (Task 3 fixture prod-guard), I3 (Task 6 I3a/I3b — ref only after verify).
+- Task order = dependency order: Task 1 (crypto) → Task 2 (verify + fixture builder) → Task 3 (provider consumes Task 2's builder) → Task 4 (config/boot) → Task 5 (additive ref) → Task 6 (integration) → Task 7 (handoff). No forward dependency.
+- Verify-at-implement flagged: whether composeRuntime is unit-testable or needs an extracted `assertEvidenceReadiness` (Task 4); Task 6 evidence block sits strictly after the existing `!paperIntake.enabled` early-return (review fix #3).
 - Type consistency: `EvidenceCheckScope`/`SignedEvidenceProvideArgs` window shapes intentionally differ — provider takes `{from,to}` ISO (matches DatasetScope.period), verify takes `{fromMs,toMs}` epoch (matches signed body); paper.start converts via `Date.parse`. Documented in Task 6.
 - No migration: evidenceArtifactRef rides the request, not the ledger (YAGNI).
