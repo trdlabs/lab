@@ -30,15 +30,17 @@ G3b закрывает оба: в точке промоушена схлопыв
 
 - `kind text NOT NULL DEFAULT 'composed'` — `'composed' | 'consolidated'`. Backfill всех существующих = `'composed'`.
 - `consolidated_from_revision_id text NULL` — на consolidated-ревизии: id ревизии R, которую она материализует. NULL на composed.
-- `semantic_parent_revision_id text NULL` — логический предок в цепочке смысла (§8). NULL допустим (bootstrap v1).
+- `semantic_parent_revision_id text NULL` — id ревизии, ЧЬЮ доказанную семантику эта строка материализует: composed → `base_revision_id` (accepted-ревизия, на которую добавили гипотезы); consolidated → `R.id` (§8). NULL только на bootstrap v1.
 - `composition_depth int NOT NULL DEFAULT 1` — §2; backfill = длина `baseRevisionId`-цепочки.
-- `baseline_validation_status text NULL` — `'pending' | 'passed' | 'failed'`, только на consolidated-ревизии; отражает исход re-baseline через G1 (§7). NULL на composed.
+- `baseline_validation_status text NULL` — `'pending' | 'passed' | 'inconclusive' | 'failed'`, только на consolidated-ревизии; исход re-baseline через G1 (§7). `inconclusive` ≠ `failed`: G1 мог просто не собрать evidence (short/data-gated) — это НЕ провал clean-source. NULL на composed.
+- `baseline_experiment_id text NULL` — id `strategy.baseline`-эксперимента, валидировавшего clean-bundle (§7); доказуемая связка consolidated↔baseline. NULL на composed / до запуска.
+- `baseline_task_id text NULL` — id task’а re-baseline (опционально, для трейсинга). NULL на composed / до запуска.
 
-Доменный тип `StrategyRevision` расширяется теми же полями (`kind: 'composed' | 'consolidated'`, `consolidatedFromRevisionId?`, `semanticParentRevisionId?`, `compositionDepth: number`, `baselineValidationStatus?`). Repo `StrategyRevisionRepository` получает `updateStatus`-расширение (патч baselineValidationStatus) — аддитивно.
+Доменный тип `StrategyRevision` расширяется теми же полями (`kind: 'composed' | 'consolidated'`, `consolidatedFromRevisionId?`, `semanticParentRevisionId?`, `compositionDepth: number`, `baselineValidationStatus?: 'pending' | 'passed' | 'inconclusive' | 'failed'`, `baselineExperimentId?`, `baselineTaskId?`). Repo `StrategyRevisionRepository`: `updateStatus`-расширение (патч `baselineValidationStatus` + `baselineExperimentId` + `baselineTaskId`) + запрос `findConsolidatedOf(revisionId)` (есть ли consolidated-ревизия с `consolidatedFromRevisionId=revisionId` — для идемпотентности §4) — аддитивно.
 
 ## 4. Хендлер `revision.consolidate`
 
-Вход: `{ revisionId, strategyProfileId }`. Идемпотентен (dedupeKey; повторный запуск при уже-consolidated или rejected — no-op с событием). Последовательность:
+Вход: `{ revisionId, strategyProfileId }` (revisionId = R.id). **Идемпотентность — retryable fail-safe (правка 4):** на входе `revisions.findConsolidatedOf(R.id)`; если consolidated-ревизия для R уже есть → no-op (`revision.consolidation_skipped {reason: already_consolidated}`). Иначе — выполнять, ДАЖЕ если прошлая попытка была отклонена: rejected-консолидация НЕ персистит строку/статус (§9), поэтому retryable by design (повторная доставка задачи заново вызовет LLM+бэктест — принятый trade-off; дешевле attempt-ledger). Последовательность:
 
 1. **Загрузка R.** `revisions.findById(revisionId)`; guard: существует, `status==='accepted'`, `kind==='composed'`, `bundleArtifactRef` есть. Иначе `revision.consolidation_skipped {reason}`.
 2. **Run-context — source of truth `[правка 4]`.** `run = await strategyBacktests.findById(R.comboBacktestRunId)`; `ctx = run?.platformRun`. Если `run` отсутствует ИЛИ `ctx == null` → **REJECT** `missing_run_context`, событие `revision.consolidation_rejected`, стоп. **Без fallback на `defaultPlatformRun`** — default мог дрейфовать с момента accept R, тогда сравнение с сохранёнными `R.metrics` было бы невалидным.
@@ -48,7 +50,7 @@ G3b закрывает оба: в точке промоушена схлопыв
 6. **Гейт эквивалентности `[развилка 2]`.** Прогон S_clean через `revisionRunExecutor.execute({ revisionId: R.id, label: 'consolidation', strategyBundle: S_clean, strategyProfileId, run: ctx, metrics: RESEARCH_RUN_METRICS, correlationId })` на ТОМ ЖЕ `ctx` (`RevisionRunRequest.label`-union аддитивно расширяется `'consolidation'`; dedup-ключ revisionId+label не пересекается с 'candidate'/'comparison_baseline' ранами R). `evaluateConsolidation(clean.metrics, R.metrics, tol)` (§6). REJECT → `revision.consolidation_rejected {reasons, deltas}`, stacked R остаётся accepted/source-of-truth, **без re-baseline**, стоп. Run не completed → REJECT `consolidation_run_unavailable`.
 7. **ACCEPT → материализация + re-baseline.**
    - `putBundleWrapper(S_clean)` → `bundleArtifactRef`.
-   - Создать consolidated-ревизию (§8): `version = R.version + 1`, `kind='consolidated'`, `baseRevisionId=R.id`, `consolidatedFromRevisionId=R.id`, `semanticParentRevisionId=R.semanticParentRevisionId ?? R.baseRevisionId ?? R.id`, `hypothesisIds=[...R.hypothesisIds]` (verbatim), `mergedRuleSet=R.mergedRuleSet` (verbatim), `bundleArtifactRef`/`bundleHash`, `comboBacktestRunId` = id рана из шага 6, `metrics` = clean.metrics, `compositionDepth=1`, `status='accepted'`, `baselineValidationStatus='pending'`, `verdictReason='consolidated_parity_ok'`. Гварда UNIQUE(profileId, version) как в revision.build (concurrent → skip).
+   - Создать consolidated-ревизию (§8): `version = R.version + 1`, `kind='consolidated'`, `baseRevisionId=R.id`, `consolidatedFromRevisionId=R.id`, `semanticParentRevisionId=R.id` (материализует доказанную семантику именно R), `hypothesisIds=[...R.hypothesisIds]` (verbatim), `mergedRuleSet=R.mergedRuleSet` (verbatim), `bundleArtifactRef`/`bundleHash`, `comboBacktestRunId` = id рана из шага 6, `metrics` = clean.metrics, `compositionDepth=1`, `status='accepted'`, `baselineValidationStatus='pending'`, `verdictReason='consolidated_parity_ok'`. Гварда UNIQUE(profileId, version) как в revision.build (concurrent → skip).
    - Энкьюит `strategy.baseline` в режиме готового бандла (§7) с `payload: { strategyProfileId, bundleArtifactRef, consolidatedRevisionId: <new id> }`, `dedupeKey: strategy.baseline:consolidated:${newId}`.
    - События: `revision.consolidated { fromRevisionId: R.id, newRevisionId, version, bundleHash }`.
 
@@ -74,18 +76,17 @@ interface StrategyConsolidatorPort {
 
 ## 6. `evaluateConsolidation` — строгий parity `[развилка 2]`
 
-Чистая функция (зеркалит `evaluateRevision`), лестница first-match над `BacktestMetricBlock`:
+Чистая функция (зеркалит `evaluateRevision`), first-match над **всем скалярным набором `BacktestMetricBlock`** — не тремя полями. Обоснование (правка 2): совпадение только по `totalTrades/netPnl/maxDrawdown` НЕ доказывает идентичность семантики — можно совпасть по ним, но разойтись по win-rate / profit-factor / распределению сделок. Faithful-переписывание на том же детерминированном ctx даёт тот же набор сделок ⇒ идентичные метрики с точностью до float-reassociation; поэтому материальное расхождение в ЛЮБОМ поле = семантика изменилась.
 
 ```
 evaluateConsolidation(clean, accepted, tol): { decision: 'ACCEPT'|'REJECT', reasons, deltas }
 ```
 
-1. `clean.totalTrades !== accepted.totalTrades` → **REJECT** `trade_count_changed` (любой сдвиг числа сделок = поведенческое расхождение; для детерминированного бэктеста faithful-переписывание даёт тот же набор сделок).
-2. `|clean.netPnlUsd - accepted.netPnlUsd| > max(tolAbsUsd, tolRel * |accepted.netPnlUsd|)` → REJECT `netpnl_divergence` (epsilon поглощает лишь float-reassociation).
-3. `|clean.maxDrawdownPct - accepted.maxDrawdownPct| > tolDdPct` → REJECT `drawdown_divergence`.
-4. иначе → **ACCEPT** `parity_ok`.
+1. `clean.totalTrades !== accepted.totalTrades` (EXACT) → **REJECT** `trade_count_changed`.
+2. Для каждого скалярного поля блока — `netPnlUsd`, `netPnlPct`, `winRate`, `profitFactor`, `expectancyUsd`, `maxDrawdownPct`, `sharpe`, `topTradeContributionPct` (и любое иное числовое поле, присутствующее в блоке) — `|clean.f - accepted.f| > max(tolAbs, tolRel * |accepted.f|)` → **REJECT** `metric_divergence:${f}` (с дельтой).
+3. иначе → **ACCEPT** `parity_ok`.
 
-Дефолты (env-конфигурируемы, консервативные): `tolRel=0.001` (0.1%), `tolAbsUsd=0.01`, `tolDdPct=0.05`. Бар — «совпало», НЕ «не хуже»: улучшение метрик тоже REJECT (значит семантика изменилась). `deltas` в событии для аудита.
+Сравниваются только поля, реально присутствующие в ОБОИХ блоках (отсутствующее/undefined поле пропускается — не ложный REJECT). Дефолты (env, консервативные): `tolRel=0.001` (0.1%), `tolAbs=0.01`. Бар — «совпало», НЕ «не хуже»: улучшение любой метрики тоже REJECT (семантика изменилась). Все дельты — в событии для аудита.
 
 ## 7. Re-baseline — режим strategy.baseline с готовым бандлом `[правка 3]`
 
@@ -93,18 +94,18 @@ evaluateConsolidation(clean, accepted, tol): { decision: 'ACCEPT'|'REJECT', reas
 
 - `StrategyBaselinePayloadSchema` += опциональные `bundleArtifactRef?` (ArtifactRef готового `strategy_bundle`-артефакта) и `consolidatedRevisionId?` (string).
 - В хендлере: если `bundleArtifactRef` задан → `bundle = reconstructStrategyBundle(artifacts, bundleArtifactRef)` (пропустить `strategyBuilder.build`; hash-pin из артефакта). Иначе — существующий build-путь без изменений. `runStrategyBaselineValidation({ strategyBundle: bundle, bundleArtifactRef, ... })` и wfo-автоцепочка неизменны; контекст baseline-валидации — штатный `defaultPlatformRun` (свежая независимая G1-валидация; parity уже доказал faithfulness на ctx R).
-- **Writeback baselineValidationStatus:** если `consolidatedRevisionId` задан, при завершении baseline-валидации (в точке `strategy.baseline.completed`) хендлер патчит `revisions.updateStatus(consolidatedRevisionId, { baselineValidationStatus: verdict PASS ? 'passed' : 'failed' })`. Аддитивная опциональная связка; для не-G3b baseline’ов поле не трогается.
+- **Writeback (правки 1,3):** если `consolidatedRevisionId` задан, при завершении baseline-валидации (в точке `strategy.baseline.completed`, где известны `experimentId` и `verdict`) хендлер патчит `revisions.updateStatus(consolidatedRevisionId, { baselineValidationStatus: map(verdict), baselineExperimentId: experimentId, baselineTaskId: task.id })`, где `map`: PASS→`passed`, INCONCLUSIVE→`inconclusive`, FAIL/ошибка→`failed` (INCONCLUSIVE ≠ FAILED — G1 мог просто не собрать evidence). Аддитивная опциональная связка; для не-G3b baseline’ов поля не трогаются.
 - «paper/WFO через clean baseline — только после G1» удовлетворяется by construction: `paper.start` требует WFO-эксперимент `PAPER_CANDIDATE` с `bundleHash === baseline.bundleHash`, который существует лишь после завершения baseline→wfo. `baselineValidationStatus` — обозреваемость/аудит, не отдельный гейт.
 
 ## 8. Lineage и наследование consolidated-ревизии `[правки 1,2,5]`
 
-- **kind + связи `[правка 1]`.** Consolidated-ревизия НЕ добавляет гипотез — это эквивалентная материализация R. Поля `kind='consolidated'`, `consolidatedFromRevisionId=R.id` (какую R материализует), `semanticParentRevisionId` (§4 шаг 7) делают цепочку версий однозначной: обычная composed-ревизия — «R + новые гипотезы», consolidated — «чистая форма R».
+- **kind + связи `[правка 1]`.** Consolidated-ревизия НЕ добавляет гипотез — это эквивалентная материализация R. `kind='consolidated'`, `consolidatedFromRevisionId=R.id` (какую R материализует), `semanticParentRevisionId=R.id` (чью доказанную семантику несёт — однозначно R, НЕ дальний корень). Composed-ревизия: `semanticParentRevisionId=baseRevisionId`. Цепочка версий однозначна: composed — «R + новые гипотезы», consolidated — «чистая форма R».
 - **Наследование от R verbatim `[правка 2]`.** `hypothesisIds` и `mergedRuleSet` copied **без изменений** из R (source of truth = accepted R). НЕ пересобирать «всю цепочку» ad hoc. Следствие: `activeOverlayRules` для researcher из consolidated-ревизии = те же правила R, только source чище — семантически идентично, регрессий в researcher-контексте нет.
 - **Usable для стекинга сразу, baseline — асинхронно `[правка 5]`.** parity OK → `status='accepted'` немедленно → `findLatestAccepted` возвращает consolidated → следующий цикл стекается на чистое. Независимо `baselineValidationStatus` идёт `pending→passed|failed` по мере G1. Выбран мягкий вариант (не «accepted только после G1 PASS»): тот переблокировал бы стекинг и дублировал parity-доказательство. Если G1-baseline упадёт (`failed`) — это сигнал в ledger о рассинхроне окружения, а не откат consolidated-ревизии (parity уже доказал эквивалентность на ctx R).
 
 ## 9. Обработка ошибок — fail-safe матрица
 
-Любой из: `missing_run_context`, `consolidator_error`, `bundle_invalid`, `trade_count_changed`/`netpnl_divergence`/`drawdown_divergence`, `consolidation_run_unavailable`, `concurrent_revision` → **stacked R остаётся accepted/source-of-truth**, событие `revision.consolidation_rejected {reason[, deltas]}`, **без re-baseline**, без новой ревизии. Depth продолжит расти (расхождение видно в ledger; на следующем пороговом accept консолидация ретрайнется на новой R). Консолидация НИКОГДА не fail-closed.
+Любой из: `missing_run_context`, `consolidator_error`, `bundle_invalid`, `trade_count_changed`/`metric_divergence:*`, `consolidation_run_unavailable`, `concurrent_revision` → **stacked R остаётся accepted/source-of-truth**, событие `revision.consolidation_rejected {reason[, deltas]}`, **без re-baseline**, без новой ревизии. Depth продолжит расти (расхождение видно в ledger; на следующем пороговом accept консолидация ретрайнется на новой R). Консолидация НИКОГДА не fail-closed.
 
 ## 10. Оркестрация
 
@@ -113,15 +114,15 @@ evaluateConsolidation(clean, accepted, tol): { decision: 'ACCEPT'|'REJECT', reas
 
 ## 11. Тесты (контур)
 
-1. `evaluateConsolidation`: exact→ACCEPT; trade-count drift→REJECT; netPnl вне epsilon→REJECT; dd вне epsilon→REJECT; улучшение метрик (меньше DD, больше PnL, но иной trade-count)→REJECT (бар «совпало», не «лучше»).
+1. `evaluateConsolidation`: полное совпадение→ACCEPT; trade-count drift→REJECT `trade_count_changed`; расхождение вне epsilon в ЛЮБОМ поле (netPnl / winRate / profitFactor / expectancyUsd / dd / sharpe)→REJECT `metric_divergence:${f}`; **win-rate/profit-factor разошлись при тех же total/net/dd→REJECT** (доказывает, что трёх метрик мало); отсутствующее в блоке поле пропускается (не ложный REJECT); улучшение метрики→REJECT (бар «совпало», не «лучше»).
 2. Триггер: `revision.build` энкьюит `revision.consolidate` при depth≥threshold на accept, НЕ ниже; dedupe; depth растёт по цепочке; backfill depth корректен.
-3. Happy: fake-эквивалент → parity ACCEPT → consolidated-ревизия (kind, links, depth=1, hypothesisIds/mergedRuleSet == R verbatim) + `strategy.baseline` энкьюится с `bundleArtifactRef`+`consolidatedRevisionId` + события.
+3. Happy: fake-эквивалент → parity ACCEPT → consolidated-ревизия (`kind='consolidated'`, `baseRevisionId=consolidatedFromRevisionId=semanticParentRevisionId=R.id`, depth=1, hypothesisIds/mergedRuleSet == R verbatim) + `strategy.baseline` энкьюится с `bundleArtifactRef`+`consolidatedRevisionId` + события.
 4. Fail-safe: fake-дивергент (сдвиг trades) → REJECT → stacked R остаётся accepted, `consolidation_rejected` с deltas, baseline НЕ энкьюится, новой ревизии нет.
 5. `missing_run_context`: combo-ран null/`platformRun==null` → REJECT без fallback на default.
 6. Невалидный бандл от консолидатора → REJECT.
 7. Style-A `[развилка 3]`: R с unsupported Style-A в `dropped` → consolidated.hypothesisIds ⊆ R.hypothesisIds (Style-A не подтягивается).
-8. strategy.baseline ready-bundle режим: `bundleArtifactRef` задан → build пропущен, bundleHash стабилен (детерминизм: повтор → тот же hash); writeback `baselineValidationStatus` при completed.
-9. Идемпотентность `revision.consolidate` (повтор при consolidated/rejected → no-op).
+8. strategy.baseline ready-bundle режим: `bundleArtifactRef` задан → build пропущен, bundleHash стабилен (повтор → тот же hash); writeback при completed патчит `baselineValidationStatus` (map PASS/INCONCLUSIVE/FAIL → passed/inconclusive/failed) + `baselineExperimentId` на consolidated-ревизии.
+9. Идемпотентность (правка 4): повтор при уже-существующей consolidated-ревизии для R → no-op (`already_consolidated`); повтор ПОСЛЕ rejection (consolidated-строки нет) → retryable, снова выполняет — тест обеих ветвей.
 10. Token-budget kill-switch honored; аддитивные миграции + доменные типы.
 
 ## 12. Вне scope G3b
