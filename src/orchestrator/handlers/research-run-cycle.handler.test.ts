@@ -929,6 +929,7 @@ describe('two-pass research', () => {
         async findLatestAccepted() { throw new Error('db down'); },
         async updateStatus() { throw new Error('db down'); },
         async listByProfile() { throw new Error('db down'); },
+        async findConsolidatedOf() { throw new Error('db down'); },
       };
       const services = makeServices({ researcher: cap.port, revisions: throwing });
       await seedProfile(services);

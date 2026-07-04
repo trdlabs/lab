@@ -370,6 +370,13 @@ export const strategyRevision = pgTable('strategy_revision', {
   status: text('status').notNull().$type<RevisionStatus>(),
   metrics: jsonb('metrics').$type<Record<string, unknown>>(),
   verdictReason: text('verdict_reason'),
+  kind: text('kind').notNull().default('composed').$type<'composed' | 'consolidated'>(),
+  consolidatedFromRevisionId: text('consolidated_from_revision_id'),
+  semanticParentRevisionId: text('semantic_parent_revision_id'),
+  compositionDepth: integer('composition_depth').notNull().default(1),
+  baselineValidationStatus: text('baseline_validation_status').$type<'pending' | 'passed' | 'inconclusive' | 'failed'>(),
+  baselineExperimentId: text('baseline_experiment_id'),
+  baselineTaskId: text('baseline_task_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({

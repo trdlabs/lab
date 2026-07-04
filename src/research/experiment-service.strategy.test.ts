@@ -486,6 +486,7 @@ describe('runStrategyBaselineValidation — bootstrap strategy_revision v1', () 
       findLatestAccepted: async () => null,
       updateStatus: async () => {},
       listByProfile: async () => [],
+      findConsolidatedOf: async () => null,
     };
     const experiments = new InMemoryResearchExperimentRepository();
     const runTrades = new FakeRunTradesAdapter({ 'plat-sanity': trades(90) });

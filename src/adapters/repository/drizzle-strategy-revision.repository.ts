@@ -20,6 +20,13 @@ export function strategyRevisionToDomain(r: StrategyRevisionRow): StrategyRevisi
     status: r.status,
     metrics: r.metrics ?? undefined,
     verdictReason: r.verdictReason ?? undefined,
+    kind: r.kind ?? 'composed',
+    consolidatedFromRevisionId: r.consolidatedFromRevisionId ?? undefined,
+    semanticParentRevisionId: r.semanticParentRevisionId ?? undefined,
+    compositionDepth: r.compositionDepth ?? 1,
+    baselineValidationStatus: r.baselineValidationStatus ?? undefined,
+    baselineExperimentId: r.baselineExperimentId ?? undefined,
+    baselineTaskId: r.baselineTaskId ?? undefined,
     createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
   };
 }
@@ -41,6 +48,13 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
       status: r.status,
       metrics: r.metrics ?? null,
       verdictReason: r.verdictReason ?? null,
+      kind: r.kind ?? 'composed',
+      consolidatedFromRevisionId: r.consolidatedFromRevisionId ?? null,
+      semanticParentRevisionId: r.semanticParentRevisionId ?? null,
+      compositionDepth: r.compositionDepth ?? 1,
+      baselineValidationStatus: r.baselineValidationStatus ?? null,
+      baselineExperimentId: r.baselineExperimentId ?? null,
+      baselineTaskId: r.baselineTaskId ?? null,
       createdAt: new Date(r.createdAt), updatedAt: new Date(r.updatedAt),
     });
   }
@@ -59,7 +73,7 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
   }
 
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt'>>): Promise<void> {
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
     const set: Record<string, unknown> = {};
     if (patch.status !== undefined) set.status = patch.status;
     if (patch.comboBacktestRunId !== undefined) set.comboBacktestRunId = patch.comboBacktestRunId;
@@ -71,6 +85,9 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
     if (patch.bundleArtifactRef !== undefined) set.bundleArtifactRef = patch.bundleArtifactRef;
     if (patch.bundleHash !== undefined) set.bundleHash = patch.bundleHash;
     if (patch.updatedAt !== undefined) set.updatedAt = new Date(patch.updatedAt);
+    if (patch.baselineValidationStatus !== undefined) set.baselineValidationStatus = patch.baselineValidationStatus;
+    if (patch.baselineExperimentId !== undefined) set.baselineExperimentId = patch.baselineExperimentId;
+    if (patch.baselineTaskId !== undefined) set.baselineTaskId = patch.baselineTaskId;
 
     const result = await this.db.update(strategyRevision).set(set).where(eq(strategyRevision.id, id)).returning({ id: strategyRevision.id });
     if (result.length === 0) throw new Error(`strategy revision not found for id: ${id}`);
@@ -81,5 +98,12 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
       .where(eq(strategyRevision.strategyProfileId, strategyProfileId))
       .orderBy(asc(strategyRevision.version));
     return rows.map(strategyRevisionToDomain);
+  }
+
+  async findConsolidatedOf(revisionId: string): Promise<StrategyRevision | null> {
+    const rows = await this.db.select().from(strategyRevision)
+      .where(and(eq(strategyRevision.consolidatedFromRevisionId, revisionId), eq(strategyRevision.kind, 'consolidated')))
+      .limit(1);
+    return rows[0] ? strategyRevisionToDomain(rows[0]) : null;
   }
 }

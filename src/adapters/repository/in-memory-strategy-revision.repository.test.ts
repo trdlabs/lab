@@ -100,4 +100,40 @@ describe('InMemoryStrategyRevisionRepository', () => {
     const repo = new InMemoryStrategyRevisionRepository();
     expect(await repo.listByProfile('nope')).toEqual([]);
   });
+
+  it('round-trips kind/compositionDepth/consolidatedFromRevisionId/baselineValidationStatus', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    await repo.create(row({
+      kind: 'consolidated',
+      compositionDepth: 1,
+      consolidatedFromRevisionId: 'rev-source',
+      baselineValidationStatus: 'passed',
+    }));
+    const got = await repo.findById('rev-1');
+    expect(got?.kind).toBe('consolidated');
+    expect(got?.compositionDepth).toBe(1);
+    expect(got?.consolidatedFromRevisionId).toBe('rev-source');
+    expect(got?.baselineValidationStatus).toBe('passed');
+  });
+
+  it('findConsolidatedOf returns the consolidated materialization of R', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    await repo.create(row({ id: 'R', kind: 'composed', version: 3 }));
+    expect(await repo.findConsolidatedOf('R')).toBeNull();
+    await repo.create(row({ id: 'C', kind: 'consolidated', consolidatedFromRevisionId: 'R', version: 4 }));
+    expect((await repo.findConsolidatedOf('R'))?.id).toBe('C');
+  });
+
+  it('updateStatus patches baselineValidationStatus and baselineExperimentId', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    await repo.create(row({ baselineValidationStatus: 'pending' }));
+    await repo.updateStatus('rev-1', {
+      baselineValidationStatus: 'passed',
+      baselineExperimentId: 'exp-1',
+      updatedAt: '2026-07-04T00:00:00.000Z',
+    });
+    const got = await repo.findById('rev-1');
+    expect(got?.baselineValidationStatus).toBe('passed');
+    expect(got?.baselineExperimentId).toBe('exp-1');
+  });
 });
