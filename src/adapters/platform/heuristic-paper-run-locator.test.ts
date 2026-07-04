@@ -7,7 +7,7 @@ function makeRun(overrides: Partial<BotRunRecord>): BotRunRecord {
     runId: 'run-default',
     mode: 'paper',
     status: 'running',
-    strategy: { name: 'long_oi', version: '1' },
+    bundleId: null, strategy: { name: 'long_oi', version: '1' },
     startedAtMs: 1_000,
     finishedAtMs: null,
     lastSeenMs: 1_000,
@@ -24,7 +24,7 @@ function fakeBotResults(runs: readonly BotRunRecord[]): Pick<BotResultsReadPort,
 
 describe('HeuristicPaperRunLocator', () => {
   it('matches a run with the same strategy name started after submission', async () => {
-    const run = makeRun({ runId: 'run-1', strategy: { name: 'long_oi', version: '1' }, startedAtMs: 2_000 });
+    const run = makeRun({ runId: 'run-1', bundleId: null, strategy: { name: 'long_oi', version: '1' }, startedAtMs: 2_000 });
     const locator = new HeuristicPaperRunLocator(fakeBotResults([run]));
 
     const result = await locator.locate({ strategyName: 'long_oi', submittedAtMs: 1_000 });
@@ -33,7 +33,7 @@ describe('HeuristicPaperRunLocator', () => {
   });
 
   it('ignores runs that started before the submission time', async () => {
-    const run = makeRun({ runId: 'run-early', strategy: { name: 'long_oi', version: '1' }, startedAtMs: 500 });
+    const run = makeRun({ runId: 'run-early', bundleId: null, strategy: { name: 'long_oi', version: '1' }, startedAtMs: 500 });
     const locator = new HeuristicPaperRunLocator(fakeBotResults([run]));
 
     const result = await locator.locate({ strategyName: 'long_oi', submittedAtMs: 1_000 });
@@ -42,7 +42,7 @@ describe('HeuristicPaperRunLocator', () => {
   });
 
   it('ignores runs with a different strategy name', async () => {
-    const run = makeRun({ runId: 'run-other', strategy: { name: 'short_oi', version: '1' }, startedAtMs: 2_000 });
+    const run = makeRun({ runId: 'run-other', bundleId: null, strategy: { name: 'short_oi', version: '1' }, startedAtMs: 2_000 });
     const locator = new HeuristicPaperRunLocator(fakeBotResults([run]));
 
     const result = await locator.locate({ strategyName: 'long_oi', submittedAtMs: 1_000 });
@@ -59,8 +59,8 @@ describe('HeuristicPaperRunLocator', () => {
   });
 
   it('picks the newest startedAtMs when two candidates match', async () => {
-    const older = makeRun({ runId: 'run-older', strategy: { name: 'long_oi', version: '1' }, startedAtMs: 2_000 });
-    const newer = makeRun({ runId: 'run-newer', strategy: { name: 'long_oi', version: '1' }, startedAtMs: 3_000 });
+    const older = makeRun({ runId: 'run-older', bundleId: null, strategy: { name: 'long_oi', version: '1' }, startedAtMs: 2_000 });
+    const newer = makeRun({ runId: 'run-newer', bundleId: null, strategy: { name: 'long_oi', version: '1' }, startedAtMs: 3_000 });
     const locator = new HeuristicPaperRunLocator(fakeBotResults([older, newer]));
 
     const result = await locator.locate({ strategyName: 'long_oi', submittedAtMs: 1_000 });

@@ -1,4 +1,4 @@
-import type { CanonicalRowV2 } from '@trading-platform/sdk/historical';
+import type { CanonicalRowV2 } from '@trdlabs/sdk/historical';
 export type { CanonicalRowV2 };
 
 export interface MarketHistoryWindow {

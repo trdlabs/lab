@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CONTRACT_VERSION } from '@trading-platform/sdk';
+import { CONTRACT_VERSION } from '@trdlabs/sdk';
 import { MockResearchPlatformAdapter } from './mock-research-platform.adapter.ts';
 import { assembleBundle, SDK_CONTRACT_VERSION, type ModuleManifest } from '../../domain/module-bundle.ts';
 

@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { CONTRACT_VERSION } from '@trading-platform/sdk';
+import { CONTRACT_VERSION } from '@trdlabs/sdk';
 import { stableStringify } from '../../orchestrator/handlers/backtest-support.ts';
 import type {
   ResearchPlatformPort,

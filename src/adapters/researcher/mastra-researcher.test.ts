@@ -35,7 +35,7 @@ const baseInput: ResearcherInput = {
 };
 
 const detail: BotRunResultDetail = {
-  run: { runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] },
+  run: { runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] },
   summary: { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 2, wins: 1, losses: 1, breakeven: 0, winratePct: 50, pnlUsd: '7.5', avgPnl: '3.75', exitReasons: { tp: 1, stop_loss: 1 } },
   trades: [
     { tradeId: 't1', runId: 'r1', symbol: 'BTCUSDT', side: 'long', openedAtMs: 1, closedAtMs: 60_001, realizedPnl: '-5', pnlPct: '-0.5', isWin: false, closeReason: 'stop_loss', entryPrice: null, exitPrice: null, closeReasonRaw: null },

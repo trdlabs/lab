@@ -219,3 +219,26 @@ describe('buildChampionSubmission', () => {
     expect(() => buildChampionSubmission(mutate(fixture()))).toThrow(re);
   });
 });
+
+describe('buildChampionSubmission — proposedRiskProfile (088, Option B)', () => {
+  it('omits proposedRiskProfile when the champion exposes no tuned stop param', () => {
+    const args = buildChampionSubmission(fixture()); // holdout params = { dumpPct: 8 } — not a stop
+    expect('proposedRiskProfile' in args).toBe(false);
+  });
+
+  it('projects a full clamp-ready proposal from tuned stops over neutral defaults', () => {
+    const f = fixture();
+    const withStops: ChampionSubmissionInput = {
+      ...f,
+      wfoMembers: f.wfoMembers.map((m) =>
+        m.role === 'holdout' && m.oos ? { ...m, params: { 'tpLadder.tp1Pct': 4, hardStopPct: 9 } } : m,
+      ),
+    };
+    const args = buildChampionSubmission(withStops) as any;
+    expect(args.proposedRiskProfile).toBeDefined();
+    expect(Object.keys(args.proposedRiskProfile).sort()).toEqual(['dca', 'sizing', 'stops']);
+    expect(args.proposedRiskProfile.stops.tp1Pct).toBe(4);
+    expect(args.proposedRiskProfile.stops.hardStopPct).toBe(9);
+    expect(args.proposedRiskProfile.sizing.baseOrderUsd).toBe(100); // runner-owned → neutral default
+  });
+});

@@ -12,7 +12,7 @@ import type {
 
 const RUN: BotRunRecord = {
   runId: 'mock_run_001', mode: 'paper', status: 'finished',
-  strategy: { name: 'mock-strategy', version: '1.0.0' },
+  bundleId: null, strategy: { name: 'mock-strategy', version: '1.0.0' },
   startedAtMs: 1_700_000_000_000, finishedAtMs: 1_700_000_600_000, lastSeenMs: 1_700_000_600_000,
   symbols: ['ESPORTSUSDT'],
 };

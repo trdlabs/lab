@@ -2,6 +2,7 @@ import type { ExperimentRunMember, ResearchExperiment } from '../domain/research
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { StrategyBacktestRun } from '../domain/strategy-backtest-run.ts';
 import type { SubmitProvenCandidateArgs } from '../adapters/platform/paper-intake.port.ts';
+import { deriveProposedRiskProfile } from './proposed-risk-profile.ts';
 
 /**
  * Pure mapper: lab research artifacts (WFO + baseline experiments, their run members, run rows,
@@ -49,6 +50,10 @@ export function buildChampionSubmission(input: ChampionSubmissionInput): SubmitP
 
   const scope = wfoExperiment.datasetScope;
 
+  // 088 (profile-mgmt 3): full risk proposal = WFO-tuned stops over neutral defaults (sizing/dca
+  // runner-owned). Absent when no tuned stop recognized. Platform clamps into guardrails on promotion.
+  const proposedRiskProfile = deriveProposedRiskProfile({ tunedParams: wfoHoldout.params, profileParams: profile.profile.parameters });
+
   return {
     bundle: { bundleHash: wfoExperiment.bundleHash },
     identity: {
@@ -74,5 +79,6 @@ export function buildChampionSubmission(input: ChampionSubmissionInput): SubmitP
     idempotencyKey: `wfo-champion:${wfoExperiment.id}`,
     workflowId: wfoExperiment.id,
     correlationId: input.correlationId,
+    ...(proposedRiskProfile ? { proposedRiskProfile } : {}),
   };
 }

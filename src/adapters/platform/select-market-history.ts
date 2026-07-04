@@ -1,4 +1,4 @@
-import { HistoricalClient } from '@trading-platform/sdk/historical';
+import { HistoricalClient } from '@trdlabs/sdk/historical';
 import { HttpMarketHistoryAdapter, type HistoricalRowsSource } from './http-market-history.adapter.ts';
 import type { MarketHistoryReadPort } from '../../ports/market-history-read.port.ts';
 

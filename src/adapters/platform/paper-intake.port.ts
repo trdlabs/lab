@@ -4,13 +4,13 @@
 // Dedicated axis LAB_PAPER_INTAKE_* — ОТДЕЛЬНАЯ от research-transport и bot-results
 // (паттерн select-bot-results: своя ось, свой env, boot-safe селектор).
 
-import { submitPaperCandidate } from '@trading-platform/sdk/intake';
-import { createHttpIntakeTransport } from '@trading-platform/sdk/intake/http-transport';
+import { submitPaperCandidate } from '@trdlabs/sdk/intake';
+import { createHttpIntakeTransport } from '@trdlabs/sdk/intake/http-transport';
 import type {
   PaperCandidateIntakeRequest,
   PaperCandidateIntakeResult,
   IntakeTransport,
-} from '@trading-platform/sdk/intake';
+} from '@trdlabs/sdk/intake';
 import type { AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
 
 /** Identity, которую платформа проецирует в bot_bundle.metadata (только 'long'|'short'). */
@@ -40,6 +40,8 @@ export interface SubmitProvenCandidateArgs {
   readonly workflowId?: string;
   readonly correlationId?: string;
   readonly evidenceArtifactRef?: string;
+  /** 088 (profile-mgmt 3): proposed risk profile — platform clamps it into guardrails on promotion (087). */
+  readonly proposedRiskProfile?: Record<string, unknown>;
 }
 
 export interface PaperIntakePort {
@@ -80,6 +82,7 @@ export function buildPaperIntakeRequest(args: SubmitProvenCandidateArgs): PaperC
     strategy,
     ...(args.workflowId ? { workflowId: args.workflowId } : {}),
     ...(args.correlationId ? { correlationId: args.correlationId } : {}),
+    ...(args.proposedRiskProfile ? { proposedRiskProfile: args.proposedRiskProfile } : {}),
   };
 }
 

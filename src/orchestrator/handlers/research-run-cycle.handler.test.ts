@@ -260,7 +260,7 @@ describe('researchRunCycleHandler', () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis BR4')], researchSummary: 's' });
     const midThrow: BotResultsReadPort = {
       async listBotRuns() {
-        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
       },
       async getRunSummary() { throw new Error('summary down'); },
       async getClosedTrades() { return []; },
@@ -277,7 +277,7 @@ describe('researchRunCycleHandler', () => {
   it('includes the monitored paper run via paperRunId even though it is running (excluded by the finished filter)', async () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis PR1')], researchSummary: 's' });
     const runningPaperRun = {
-      runId: 'paper-1', mode: 'paper' as const, status: 'running' as const, strategy: { name: 's', version: '1' },
+      runId: 'paper-1', mode: 'paper' as const, status: 'running' as const, bundleId: null, strategy: { name: 's', version: '1' },
       startedAtMs: 1, finishedAtMs: 0, lastSeenMs: 5, symbols: ['BTCUSDT'],
     };
     const botResults: BotResultsReadPort = {
@@ -378,7 +378,7 @@ describe('researchRunCycleHandler', () => {
     };
     const botResults: BotResultsReadPort = {
       async listBotRuns() {
-        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
       },
       async getRunSummary() {
         return { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 3, wins: 1, losses: 2, breakeven: 0, winratePct: 33.33, pnlUsd: '-20', avgPnl: '-6.66', exitReasons: { stop_loss: 2, take_profit: 1 } };
@@ -581,7 +581,7 @@ describe('researchRunCycleHandler per-trade context', () => {
   function losingBotResults(): BotResultsReadPort {
     return {
       async listBotRuns() {
-        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
       },
       async getRunSummary() {
         return { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 1, wins: 0, losses: 1, breakeven: 0, winratePct: 0, pnlUsd: '-15', avgPnl: '-15', exitReasons: { stop_loss: 1 } };
@@ -604,7 +604,7 @@ describe('researchRunCycleHandler per-trade context', () => {
   function malformedBotResults(): BotResultsReadPort {
     return {
       async listBotRuns() {
-        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
       },
       async getRunSummary() {
         return { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 1, wins: 0, losses: 1, breakeven: 0, winratePct: 0, pnlUsd: '-Inf', avgPnl: '-Inf', exitReasons: { stop_loss: 1 } };
@@ -781,7 +781,7 @@ describe('two-pass research', () => {
   function twoPassBotResults(trades: import('../../ports/bot-results-read.port.ts').ClosedTrade[]): BotResultsReadPort {
     return {
       async listBotRuns() {
-        return [{ runId: 'r1', mode: 'paper', status: 'finished', strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
+        return [{ runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] }];
       },
       async getRunSummary() {
         return { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: trades.length, wins: 0, losses: 0, breakeven: 0, winratePct: 0, pnlUsd: '0', avgPnl: '0', exitReasons: {} };
