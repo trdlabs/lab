@@ -6,7 +6,7 @@ export const AGENT_TASK_TYPES = [
   'sweep.run', 'paper.start', 'paper.monitor', 'performance.review',
   'research.pause', 'research.wake_check',
   'strategy.baseline', 'strategy.wfo',
-  'revision.build',
+  'revision.build', 'revision.consolidate',
 ] as const;
 
 export const TASK_SOURCES = ['telegram', 'web', 'crawler', 'cron', 'platform', 'operator'] as const;

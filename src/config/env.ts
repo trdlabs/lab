@@ -136,6 +136,10 @@ export interface Env {
   CONSOLIDATOR_MODEL: string;
   /** Nesting-depth threshold that triggers revision.consolidate (slice G3b); 0 = kill-switch (default 2). */
   LAB_CONSOLIDATION_DEPTH_THRESHOLD: number;
+  /** Consolidation parity-gate relative tolerance (slice G3b Task 8; default 0.001). */
+  LAB_CONSOLIDATION_TOL_REL: number;
+  /** Consolidation parity-gate absolute tolerance (slice G3b Task 8; default 0.01). */
+  LAB_CONSOLIDATION_TOL_ABS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -282,6 +286,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       source.CONSOLIDATOR_ADAPTER === 'mastra' ? 'mastra' : source.CONSOLIDATOR_ADAPTER === 'fake' ? 'fake' : 'off',
     CONSOLIDATOR_MODEL: source.CONSOLIDATOR_MODEL ?? 'openrouter/anthropic/claude-opus-4-8',
     LAB_CONSOLIDATION_DEPTH_THRESHOLD: parseNonNegativeInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),
+    LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001),
+    LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01),
     ...loadRagEnv(source),
   };
 }

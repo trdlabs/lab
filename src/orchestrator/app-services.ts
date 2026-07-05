@@ -39,6 +39,7 @@ import type { PaperWindowPolicy } from '../domain/paper-window.ts';
 import type { PaperRunLocatorPort } from '../ports/paper-run-locator.port.ts';
 import type { SignedEvidenceProviderPort } from '../ports/signed-evidence-provider.port.ts';
 import type { StrategyConsolidatorPort } from '../ports/strategy-consolidator.port.ts';
+import type { ConsolidationTolerances } from '../validation/consolidation-evaluator.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -71,6 +72,8 @@ export interface AppServices {
   consolidator: StrategyConsolidatorPort | null;
   /** compositionDepth threshold that triggers revision.consolidate (env LAB_CONSOLIDATION_DEPTH_THRESHOLD); 0 = kill-switch. */
   consolidationDepthThreshold: number;
+  /** Parity-gate tolerances for the revision.consolidate equivalence check (slice G3b Task 8). */
+  consolidationTolerances: ConsolidationTolerances;
   hypotheses: HypothesisProposalRepository;
   hypothesisReviews: HypothesisReviewRepository;
   similarHypotheses: SimilarHypothesisSearchPort;

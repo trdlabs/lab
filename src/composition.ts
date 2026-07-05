@@ -18,6 +18,7 @@ import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseli
 import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.ts';
 import { revisionBuildHandler } from './orchestrator/handlers/revision-build.handler.ts';
+import { revisionConsolidateHandler } from './orchestrator/handlers/revision-consolidate.handler.ts';
 import { paperMonitorHandler } from './orchestrator/handlers/paper-monitor.handler.ts';
 import { HeuristicPaperRunLocator } from './adapters/platform/heuristic-paper-run-locator.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
@@ -419,6 +420,7 @@ export function composeRuntime() {
     strategyCritic: buildStrategyCritic(env, mastraRuntime),
     consolidator: buildConsolidator(env),
     consolidationDepthThreshold: env.LAB_CONSOLIDATION_DEPTH_THRESHOLD,
+    consolidationTolerances: { tolRel: env.LAB_CONSOLIDATION_TOL_REL, tolAbs: env.LAB_CONSOLIDATION_TOL_ABS },
     hypotheses,
     hypothesisReviews: new DrizzleHypothesisReviewRepository(db),
     similarHypotheses: new InMemoryLexicalSimilarHypothesisSearch(hypotheses),
@@ -473,6 +475,7 @@ export function composeRuntime() {
   router.register('paper.start', paperStartHandler);
   router.register('paper.monitor', paperMonitorHandler);
   router.register('revision.build', revisionBuildHandler);
+  router.register('revision.consolidate', revisionConsolidateHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),

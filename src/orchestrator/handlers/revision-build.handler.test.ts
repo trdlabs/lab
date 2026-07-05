@@ -635,7 +635,7 @@ describe('revisionBuildHandler — compositionDepth + consolidation trigger (sli
     expect(v2.compositionDepth).toBe(2);
 
     const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    const consolidateJobs = queued.filter((q) => (q.taskType as string) === 'revision.consolidate');
+    const consolidateJobs = queued.filter((q) => q.taskType === 'revision.consolidate');
     expect(consolidateJobs).toHaveLength(1);
     expect(consolidateJobs[0]!.dedupeKey).toBe(`revision.consolidate:${v2.id}`);
   });
@@ -652,7 +652,7 @@ describe('revisionBuildHandler — compositionDepth + consolidation trigger (sli
     await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
 
     const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    expect(queued.some((q) => (q.taskType as string) === 'revision.consolidate')).toBe(false);
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
   });
 
   it('does not enqueue revision.consolidate when consolidationDepthThreshold is the 0 kill-switch', async () => {
@@ -667,7 +667,7 @@ describe('revisionBuildHandler — compositionDepth + consolidation trigger (sli
     await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
 
     const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    expect(queued.some((q) => (q.taskType as string) === 'revision.consolidate')).toBe(false);
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
   });
 
   it('does not enqueue revision.consolidate when the accepted revision is below the depth threshold', async () => {
@@ -682,6 +682,6 @@ describe('revisionBuildHandler — compositionDepth + consolidation trigger (sli
     await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
 
     const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    expect(queued.some((q) => (q.taskType as string) === 'revision.consolidate')).toBe(false);
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
   });
 });

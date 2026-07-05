@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { WorkflowHandler, HandlerDeps } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
-import type { AgentTaskType, ResearchTask } from '../../domain/types.ts';
+import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
@@ -381,15 +381,12 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     // G3b consolidation trigger: fire revision.consolidate once the accepted revision's
     // composition depth crosses the configured threshold. `services.consolidator !== null`
     // and `consolidationDepthThreshold > 0` gate this off by default (null consolidator / 0
-    // threshold both keep every existing revision.build test inert). The task type itself is
-    // not yet registered on the WorkflowRouter (that lands with the revision.consolidate
-    // handler) — enqueuing an as-yet-unhandled type is fine here since this only asserts the
-    // enqueue call, not execution.
+    // threshold both keep every existing revision.build test inert).
     const newDepth = (accepted.compositionDepth ?? 1) + 1;
     if (services.consolidator !== null && services.consolidationDepthThreshold > 0 && newDepth >= services.consolidationDepthThreshold) {
       await createAndEnqueueTask(
         {
-          taskType: 'revision.consolidate' as AgentTaskType, source: task.source,
+          taskType: 'revision.consolidate', source: task.source,
           payload: { revisionId, strategyProfileId }, correlationId: task.correlationId,
           dedupeKey: `revision.consolidate:${revisionId}`,
         },

@@ -41,6 +41,7 @@ import type { PaperIntakePort } from '../../src/adapters/platform/paper-intake.p
 import type { StrategyRevisionRunExecutor } from '../../src/ports/strategy-revision-run-executor.ts';
 import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
 import { selectSignedEvidence } from '../../src/adapters/platform/select-signed-evidence.ts';
+import { DEFAULT_CONSOLIDATION_TOLERANCES } from '../../src/validation/consolidation-evaluator.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -142,6 +143,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     paperEvidenceRequired: false,
     consolidator: overrides.consolidator ?? null,
     consolidationDepthThreshold: overrides.consolidationDepthThreshold ?? 0,
+    consolidationTolerances: overrides.consolidationTolerances ?? DEFAULT_CONSOLIDATION_TOLERANCES,
     ...overrides,
   };
 }

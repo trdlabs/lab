@@ -531,3 +531,23 @@ describe('LAB_CONSOLIDATION_DEPTH_THRESHOLD (slice G3b, Task 7)', () => {
     expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '-3' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
   });
 });
+
+describe('LAB_CONSOLIDATION_TOL_REL / LAB_CONSOLIDATION_TOL_ABS (slice G3b, Task 8)', () => {
+  it('defaults to 0.001 / 0.01', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.001);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.01);
+  });
+
+  it('reads overrides', () => {
+    const env = loadEnv({ LAB_CONSOLIDATION_TOL_REL: '0.02', LAB_CONSOLIDATION_TOL_ABS: '0.5' } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.02);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.5);
+  });
+
+  it('falls back to the default on an invalid value', () => {
+    const env = loadEnv({ LAB_CONSOLIDATION_TOL_REL: 'abc', LAB_CONSOLIDATION_TOL_ABS: 'xyz' } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.001);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.01);
+  });
+});
