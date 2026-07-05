@@ -450,4 +450,40 @@ describe('revisionConsolidateHandler — accept path (slice G3b, Task 9)', () =>
     expect(events[events.length - 1]!.payload['reason']).toBe('already_consolidated');
     expect((services.taskQueue as InMemoryQueueAdapter).queued.length).toBe(beforeQueued);
   });
+
+  it('UNIQUE(strategyProfileId, version) collision: concurrent consolidation claims the version first — skipped, no baseline enqueued, R not persisted as consolidated', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+
+    // Pre-seed a competing revision at version R.version + 1 with the same strategyProfileId,
+    // so when the handler tries to create the consolidated revision at that version,
+    // the repository will throw a UNIQUE collision error.
+    const competitor: StrategyRevision = {
+      id: 'rev-competitor', strategyProfileId: R.strategyProfileId, version: R.version + 1,
+      hypothesisIds: [], mergedRuleSet: {}, status: 'accepted', kind: 'composed',
+      compositionDepth: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await services.revisions.create(competitor);
+
+    services.consolidator = new FakeStrategyConsolidator();
+    const { executor } = fakeExecutor({ metrics: acceptedMetrics() });
+    services.revisionRunExecutor = executor;
+
+    await revisionConsolidateHandler(task(), services);
+
+    // Assert: (a) consolidation_skipped event with reason 'concurrent_revision'
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe('revision.consolidation_skipped');
+    expect(events[0]!.payload['reason']).toBe('concurrent_revision');
+    expect(events[0]!.payload['detail']).toBeDefined();
+
+    // Assert: (b) ZERO strategy.baseline tasks enqueued
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    const baselineTasks = queued.filter((q) => q.taskType === 'strategy.baseline');
+    expect(baselineTasks).toHaveLength(0);
+
+    // Assert: (c) findConsolidatedOf(R.id) still returns null (consolidated not persisted)
+    expect(await services.revisions.findConsolidatedOf(R.id)).toBeNull();
+  });
 });
