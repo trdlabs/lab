@@ -33,28 +33,48 @@ function renderConsolidationPrompt(args: StrategyConsolidateArgs): string {
   return sections.join('\n');
 }
 
+const DEFAULT_MAX_ATTEMPTS = 3;
+
+export class ConsolidatorError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConsolidatorError';
+  }
+}
+
 export class MastraStrategyConsolidator implements StrategyConsolidatorPort {
   readonly adapter = 'mastra' as const;
   readonly model: string;
   private readonly agent: Agent;
+  private readonly maxAttempts: number;
 
-  constructor(agent: Agent, label: string) {
+  constructor(agent: Agent, label: string, opts?: { maxAttempts?: number }) {
     this.agent = agent;
     this.model = label;
+    this.maxAttempts = opts?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   }
 
   async consolidate(args: StrategyConsolidateArgs, opts?: AgentCallOpts): Promise<StrategyBuilderOutput> {
     const userMsg = renderConsolidationPrompt(args);
-    const result = await this.agent.generate(userMsg, {
-      structuredOutput: { schema: StrategyLlmOutputSchema },
-      modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS },
-    });
-    await opts?.onUsage?.({
-      modelId: this.model,
-      inputTokens: result.usage?.inputTokens ?? 0,
-      outputTokens: result.usage?.outputTokens ?? 0,
-      totalTokens: result.usage?.totalTokens ?? 0,
-    });
-    return llmToStrategyBuilderOutput(StrategyLlmOutputSchema.parse(result.object));
+
+    for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
+      const result = await this.agent.generate(userMsg, {
+        structuredOutput: { schema: StrategyLlmOutputSchema },
+        modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+      });
+      await opts?.onUsage?.({
+        modelId: this.model,
+        inputTokens: result.usage?.inputTokens ?? 0,
+        outputTokens: result.usage?.outputTokens ?? 0,
+        totalTokens: result.usage?.totalTokens ?? 0,
+      });
+      try {
+        return llmToStrategyBuilderOutput(StrategyLlmOutputSchema.parse(result.object));
+      } catch {
+        continue;
+      }
+    }
+
+    throw new ConsolidatorError(`schema-parse exhausted after ${this.maxAttempts} attempts`);
   }
 }

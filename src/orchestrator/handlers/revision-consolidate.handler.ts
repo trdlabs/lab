@@ -6,6 +6,7 @@ import type { ResearchTask } from '../../domain/types.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
+import { makeOnUsage } from '../make-on-usage.ts';
 import type { StrategyRevision } from '../../domain/strategy-revision.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
@@ -58,6 +59,10 @@ async function acceptConsolidation(
     return;
   }
 
+  await services.events.append(event(task.id, 'revision.consolidated', {
+    fromRevisionId: R.id, newRevisionId: newId, version: consolidated.version, bundleHash: assembled.bundleHash,
+  }));
+
   await createAndEnqueueTask(
     {
       taskType: 'strategy.baseline', source: task.source,
@@ -66,10 +71,6 @@ async function acceptConsolidation(
     },
     { repo: services.researchTasks, queue: services.taskQueue },
   );
-
-  await services.events.append(event(task.id, 'revision.consolidated', {
-    fromRevisionId: R.id, newRevisionId: newId, version: consolidated.version, bundleHash: assembled.bundleHash,
-  }));
 }
 
 /**
@@ -111,7 +112,7 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
     out = await services.consolidator.consolidate({
       stackedSource: stacked.source, manifestMeta: stacked.manifest as StrategyManifestMeta,
       mergedRuleSet: R.mergedRuleSet, theses: (R.mergedRuleSet as { theses?: Record<string, string> }).theses,
-    });
+    }, makeOnUsage(task, services));
   } catch (err) { await reject('consolidator_error', { detail: errMsg(err) }); return; }
 
   const assembled = await assembleStrategyBundle(out);

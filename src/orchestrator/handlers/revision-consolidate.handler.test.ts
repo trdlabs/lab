@@ -10,9 +10,11 @@ import type { StrategyManifestMeta } from '../../ports/strategy-builder.port.ts'
 import type { BacktestMetricBlock } from '../../ports/platform-gateway.port.ts';
 import type { RevisionRunRequest, RevisionRunResult, StrategyRevisionRunExecutor } from '../../ports/strategy-revision-run-executor.ts';
 import type { StrategyConsolidatorPort, StrategyConsolidateArgs } from '../../ports/strategy-consolidator.port.ts';
+import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
 import { assembleStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { FakeStrategyConsolidator } from '../../adapters/consolidator/fake-strategy-consolidator.ts';
 import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
+import { InMemoryTokenUsageRepository } from '../../adapters/repository/in-memory-token-usage.repository.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -284,6 +286,27 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(events[0]!.payload['reason']).toBe('consolidator_error');
     expect(events[0]!.payload['detail']).toBe('llm blew up');
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
+  });
+
+  it('wires the token-budget onUsage into consolidator.consolidate (spec §4 step 4 / §5 / §11 #10)', async () => {
+    const tokenUsage = new InMemoryTokenUsageRepository();
+    const services = makeServices({ tokenUsage });
+    await seedConsolidatableRevision(services);
+    let receivedOpts: AgentCallOpts | undefined;
+    services.consolidator = {
+      adapter: 'fake', model: 'test',
+      consolidate: async (_args, opts) => {
+        receivedOpts = opts;
+        await opts?.onUsage?.({ modelId: 'test', inputTokens: 700, outputTokens: 77, totalTokens: 777 });
+        return { source: STACK_SOURCE, manifestMeta: STACK_MANIFEST_META };
+      },
+    };
+
+    const t = task();
+    await revisionConsolidateHandler(t, services);
+
+    expect(receivedOpts?.onUsage).toBeTypeOf('function');
+    expect(await tokenUsage.get(t.correlationId)).toBe(777);
   });
 
   it('bundle_invalid: consolidator output fails validateStrategyBundle — rejected', async () => {
