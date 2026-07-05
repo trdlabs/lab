@@ -23,6 +23,13 @@ export interface StrategyRevision {
   status: RevisionStatus;
   metrics?: Record<string, unknown>;      // BacktestMetricBlock of the accepted run
   verdictReason?: string;
+  kind?: 'composed' | 'consolidated';        // default 'composed' when absent
+  consolidatedFromRevisionId?: string;       // consolidated: the R it materializes
+  semanticParentRevisionId?: string;         // composed: baseRevisionId; consolidated: R.id
+  compositionDepth?: number;                 // default 1; consolidation resets to 1
+  baselineValidationStatus?: 'pending' | 'passed' | 'inconclusive' | 'failed';
+  baselineExperimentId?: string;
+  baselineTaskId?: string;
   createdAt: string;
   updatedAt: string;
 }

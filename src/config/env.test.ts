@@ -488,3 +488,66 @@ describe('LAB_PAPER_EVIDENCE_REQUIRED + LAB_TRUSTED_SIGNERS_JSON via loadEnv (Ta
     ).toThrow(/LAB_TRUSTED_SIGNERS_JSON/);
   });
 });
+
+describe('CONSOLIDATOR_ADAPTER + CONSOLIDATOR_MODEL (slice G3b, Task 5)', () => {
+  it('defaults CONSOLIDATOR_ADAPTER to off (NOT routed through resolveAdapter/LAB_AGENTS_ADAPTER)', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.CONSOLIDATOR_ADAPTER).toBe('off');
+    expect(env.CONSOLIDATOR_MODEL).toBe('openrouter/anthropic/claude-opus-4-8');
+  });
+
+  it('stays off even when LAB_AGENTS_ADAPTER=mastra (consolidation is opt-in only)', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'mastra' } as unknown as NodeJS.ProcessEnv);
+    expect(env.CONSOLIDATOR_ADAPTER).toBe('off');
+  });
+
+  it('passes through CONSOLIDATOR_ADAPTER=mastra and =fake explicitly', () => {
+    expect(loadEnv({ CONSOLIDATOR_ADAPTER: 'mastra' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_ADAPTER).toBe('mastra');
+    expect(loadEnv({ CONSOLIDATOR_ADAPTER: 'fake' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_ADAPTER).toBe('fake');
+  });
+
+  it('honors a CONSOLIDATOR_MODEL override', () => {
+    expect(
+      loadEnv({ CONSOLIDATOR_MODEL: 'anthropic/claude-sonnet-4-6' } as unknown as NodeJS.ProcessEnv).CONSOLIDATOR_MODEL,
+    ).toBe('anthropic/claude-sonnet-4-6');
+  });
+});
+
+describe('LAB_CONSOLIDATION_DEPTH_THRESHOLD (slice G3b, Task 7)', () => {
+  it('defaults to 2', () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+  });
+
+  it('reads an override', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '3' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(3);
+  });
+
+  it('honors 0 as a kill-switch (NOT coerced to the default)', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '0' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(0);
+  });
+
+  it('falls back to the default on an invalid value', () => {
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: 'abc' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+    expect(loadEnv({ LAB_CONSOLIDATION_DEPTH_THRESHOLD: '-3' } as unknown as NodeJS.ProcessEnv).LAB_CONSOLIDATION_DEPTH_THRESHOLD).toBe(2);
+  });
+});
+
+describe('LAB_CONSOLIDATION_TOL_REL / LAB_CONSOLIDATION_TOL_ABS (slice G3b, Task 8)', () => {
+  it('defaults to 0.001 / 0.01', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.001);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.01);
+  });
+
+  it('reads overrides', () => {
+    const env = loadEnv({ LAB_CONSOLIDATION_TOL_REL: '0.02', LAB_CONSOLIDATION_TOL_ABS: '0.5' } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.02);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.5);
+  });
+
+  it('falls back to the default on an invalid value', () => {
+    const env = loadEnv({ LAB_CONSOLIDATION_TOL_REL: 'abc', LAB_CONSOLIDATION_TOL_ABS: 'xyz' } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_CONSOLIDATION_TOL_REL).toBe(0.001);
+    expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.01);
+  });
+});

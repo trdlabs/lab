@@ -14,6 +14,8 @@ import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../doma
 import { computeStrategyParamsHash } from '../../research/strategy-run-identity.ts';
 import { DEFAULT_HOLDOUT_POLICY, type ResearchExperiment, type ExperimentRunMember } from '../../domain/research-experiment.ts';
 import type { StrategyBacktestRun } from '../../domain/strategy-backtest-run.ts';
+import { FakeStrategyConsolidator } from '../../adapters/consolidator/fake-strategy-consolidator.ts';
+import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -185,11 +187,17 @@ async function setup(opts: {
    * Defaults to 'corr-1' (matching every test's triggering task()) — override to simulate a
    * hypothesis whose build happened in a different (foreign) research cycle. */
   hypothesisCorrelationIds?: Record<string, string>;
+  /** slice G3b Task 7: consolidation-trigger overrides; default to makeServices' own defaults
+   * (consolidator null, consolidationDepthThreshold 0) so every pre-existing test stays inert. */
+  consolidator?: AppServices['consolidator'];
+  consolidationDepthThreshold?: number;
 } = {}): Promise<Setup> {
   const { executor, calls } = makeFakeExecutor({ comparison: opts.comparison, candidateResults: opts.candidateResults });
   const services = makeServices({
     revisionRunExecutor: executor,
     revisionBatchMax: opts.revisionBatchMax ?? 5,
+    consolidator: opts.consolidator ?? null,
+    consolidationDepthThreshold: opts.consolidationDepthThreshold ?? 0,
   });
 
   const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
@@ -583,5 +591,97 @@ describe('revisionBuildHandler', () => {
     expect(foreignAfter?.status).toBe('proxy_passed');
     expect(v2!.hypothesisIds).not.toContain('h2');
     expect((v2!.dropped ?? []).map((d) => d.hypothesisId)).not.toContain('h2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// slice G3b Task 7: compositionDepth writes + revision.consolidate trigger
+// ---------------------------------------------------------------------------
+
+describe('revisionBuildHandler — compositionDepth + consolidation trigger (slice G3b, Task 7)', () => {
+  it('writes kind:composed + compositionDepth (parent+1) + semanticParentRevisionId on the accepted candidate', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const { services, accepted } = await setup({
+      hypotheses: [h1],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2)!;
+    expect(v2.kind).toBe('composed');
+    expect(v2.compositionDepth).toBe((accepted.compositionDepth ?? 1) + 1);
+    expect(v2.semanticParentRevisionId).toBe(accepted.id);
+  });
+
+  it('enqueues revision.consolidate when the accepted revision reaches the depth threshold', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const h2 = proposal('h2', { ruleAction: ruleAction('long', 'tighten_stop', { pct: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 200, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h2' } });
+    // seed accepted base at compositionDepth 1 (seedAcceptedV1 default) so the new candidate
+    // lands at depth 2 and ACCEPTs — matching the plan's trigger fixture.
+    const { services } = await setup({
+      hypotheses: [h1, h2],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+      consolidator: new FakeStrategyConsolidator(),
+      consolidationDepthThreshold: 2,
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2)!;
+    expect(v2.status).toBe('accepted');
+    expect(v2.compositionDepth).toBe(2);
+
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    const consolidateJobs = queued.filter((q) => q.taskType === 'revision.consolidate');
+    expect(consolidateJobs).toHaveLength(1);
+    expect(consolidateJobs[0]!.dedupeKey).toBe(`revision.consolidate:${v2.id}`);
+  });
+
+  it('does not enqueue revision.consolidate when the consolidator is null', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const { services } = await setup({
+      hypotheses: [h1],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+      consolidator: null,
+      consolidationDepthThreshold: 2,
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
+  });
+
+  it('does not enqueue revision.consolidate when consolidationDepthThreshold is the 0 kill-switch', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const { services } = await setup({
+      hypotheses: [h1],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+      consolidator: new FakeStrategyConsolidator(),
+      consolidationDepthThreshold: 0,
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
+  });
+
+  it('does not enqueue revision.consolidate when the accepted revision is below the depth threshold', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const { services } = await setup({
+      hypotheses: [h1],
+      candidateResults: [{ status: 'completed', metrics: acceptMetrics() }],
+      consolidator: new FakeStrategyConsolidator(),
+      consolidationDepthThreshold: 3, // seedAcceptedV1 has no compositionDepth (defaults 1) -> newDepth 2 < 3
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    expect(queued.some((q) => q.taskType === 'revision.consolidate')).toBe(false);
   });
 });

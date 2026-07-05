@@ -2,7 +2,9 @@ import type { StrategyBuilder, StrategyBuilderInput, StrategyBuilderOutput, Stra
 import type { AgentCallOpts } from '../../ports/agent-call-opts.ts';
 import { SHORT_AFTER_PUMP_SOURCE } from './fixtures/short-after-pump.strategy-source.ts';
 
-const SHORT_AFTER_PUMP_META: StrategyManifestMeta = {
+export { SHORT_AFTER_PUMP_SOURCE };
+
+export const SHORT_AFTER_PUMP_META: StrategyManifestMeta = {
   id: 'short_after_pump',
   version: '0.1.0',
   name: 'Short after pump',

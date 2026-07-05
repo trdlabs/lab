@@ -27,7 +27,7 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
   }
 
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt'>>): Promise<void> {
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
     const existing = this.byId.get(id);
     if (!existing) throw new Error(`strategy revision not found for id: ${id}`);
     const next: StrategyRevision = { ...existing };
@@ -41,6 +41,9 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
     if (patch.bundleArtifactRef !== undefined) next.bundleArtifactRef = patch.bundleArtifactRef;
     if (patch.bundleHash !== undefined) next.bundleHash = patch.bundleHash;
     if (patch.updatedAt !== undefined) next.updatedAt = patch.updatedAt;
+    if (patch.baselineValidationStatus !== undefined) next.baselineValidationStatus = patch.baselineValidationStatus;
+    if (patch.baselineExperimentId !== undefined) next.baselineExperimentId = patch.baselineExperimentId;
+    if (patch.baselineTaskId !== undefined) next.baselineTaskId = patch.baselineTaskId;
     this.byId.set(id, next);
   }
 
@@ -48,5 +51,12 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
     return [...this.byId.values()]
       .filter((r) => r.strategyProfileId === strategyProfileId)
       .sort((a, b) => a.version - b.version);
+  }
+
+  async findConsolidatedOf(revisionId: string): Promise<StrategyRevision | null> {
+    const found = [...this.byId.values()].find(
+      (r) => r.kind === 'consolidated' && r.consolidatedFromRevisionId === revisionId,
+    );
+    return found ?? null;
   }
 }

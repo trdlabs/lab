@@ -130,6 +130,16 @@ export interface Env {
   LAB_PAPER_EVIDENCE_REQUIRED: boolean;
   /** keyId -> SPKI PEM map for verifying signed backtest evidence; parsed from JSON (default: {}). */
   LAB_TRUSTED_SIGNERS_JSON: Record<string, string>;
+  /** LLM-consolidation adapter (slice G3b); OFF unless explicitly enabled — never routed through resolveAdapter's fake/mastra default. */
+  CONSOLIDATOR_ADAPTER: 'off' | 'fake' | 'mastra';
+  /** Model for the consolidator agent when CONSOLIDATOR_ADAPTER=mastra. */
+  CONSOLIDATOR_MODEL: string;
+  /** Nesting-depth threshold that triggers revision.consolidate (slice G3b); 0 = kill-switch (default 2). */
+  LAB_CONSOLIDATION_DEPTH_THRESHOLD: number;
+  /** Consolidation parity-gate relative tolerance (slice G3b Task 8; default 0.001). */
+  LAB_CONSOLIDATION_TOL_REL: number;
+  /** Consolidation parity-gate absolute tolerance (slice G3b Task 8; default 0.01). */
+  LAB_CONSOLIDATION_TOL_ABS: number;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -271,6 +281,13 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     REVISION_BATCH_MAX: parsePositiveInt(source.REVISION_BATCH_MAX, 5),
     LAB_PAPER_EVIDENCE_REQUIRED: source.LAB_PAPER_EVIDENCE_REQUIRED === 'true',
     LAB_TRUSTED_SIGNERS_JSON: parseTrustedSigners(source.LAB_TRUSTED_SIGNERS_JSON),
+    // NOT resolveAdapter: consolidation must default OFF (running the fake in prod wastes a real backtest).
+    CONSOLIDATOR_ADAPTER:
+      source.CONSOLIDATOR_ADAPTER === 'mastra' ? 'mastra' : source.CONSOLIDATOR_ADAPTER === 'fake' ? 'fake' : 'off',
+    CONSOLIDATOR_MODEL: source.CONSOLIDATOR_MODEL ?? 'openrouter/anthropic/claude-opus-4-8',
+    LAB_CONSOLIDATION_DEPTH_THRESHOLD: parseNonNegativeInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),
+    LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001),
+    LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01),
     ...loadRagEnv(source),
   };
 }

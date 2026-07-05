@@ -11,7 +11,7 @@ import type { BacktestMetricBlock } from './platform-gateway.port.ts';
  */
 export interface RevisionRunRequest {
   readonly revisionId: string;
-  readonly label: 'candidate' | 'comparison_baseline';
+  readonly label: 'candidate' | 'comparison_baseline' | 'consolidation';
   readonly strategyBundle: AssembledStrategyBundle;
   readonly strategyProfileId: string;
   readonly run: PlatformRunConfig;

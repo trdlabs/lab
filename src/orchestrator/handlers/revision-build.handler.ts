@@ -4,6 +4,7 @@ import type { WorkflowHandler, HandlerDeps } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -61,6 +62,7 @@ async function bootstrapFromBaseline(
       id: randomUUID(), strategyProfileId, version: 1,
       hypothesisIds: [], mergedRuleSet: { order: [], rules: [] }, status: 'accepted',
       bundleArtifactRef: baseline.bundleArtifactRef, comboBacktestRunId,
+      kind: 'composed', compositionDepth: 1, semanticParentRevisionId: undefined,
       ...(baseline.bundleHash !== undefined ? { bundleHash: baseline.bundleHash } : {}),
       ...(run?.metrics ? { metrics: run.metrics as unknown as Record<string, unknown> } : {}),
       createdAt: ts, updatedAt: ts,
@@ -247,6 +249,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     id: revisionId, strategyProfileId, version, baseRevisionId: accepted.id,
     hypothesisIds: [...compose.included], dropped: [...dropped], mergedRuleSet: compose.mergedRuleSet,
     bundleArtifactRef, bundleHash: assembled.bundleHash, status: 'candidate',
+    kind: 'composed', compositionDepth: (accepted.compositionDepth ?? 1) + 1, semanticParentRevisionId: accepted.id,
     createdAt: now(), updatedAt: now(),
   };
   // Guarded: create() can throw on a UNIQUE(strategyProfileId, version) race with a concurrent
@@ -374,6 +377,22 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.accepted', {
       revisionId, version, included: currentIds, metrics: acceptedMetrics,
     }));
+
+    // G3b consolidation trigger: fire revision.consolidate once the accepted revision's
+    // composition depth crosses the configured threshold. `services.consolidator !== null`
+    // and `consolidationDepthThreshold > 0` gate this off by default (null consolidator / 0
+    // threshold both keep every existing revision.build test inert).
+    const newDepth = (accepted.compositionDepth ?? 1) + 1;
+    if (services.consolidator !== null && services.consolidationDepthThreshold > 0 && newDepth >= services.consolidationDepthThreshold) {
+      await createAndEnqueueTask(
+        {
+          taskType: 'revision.consolidate', source: task.source,
+          payload: { revisionId, strategyProfileId }, correlationId: task.correlationId,
+          dedupeKey: `revision.consolidate:${revisionId}`,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
+    }
   } else {
     await services.revisions.updateStatus(revisionId, {
       status: 'rejected', verdictReason: allRejectReasons.join(', '), updatedAt: now(),

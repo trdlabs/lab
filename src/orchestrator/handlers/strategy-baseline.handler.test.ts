@@ -2,9 +2,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import { strategyBaselineHandler } from './strategy-baseline.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
+import { FakeStrategyBuilder } from '../../adapters/builder/fake-strategy-builder.ts';
+import { assembleStrategyBundle } from '../../domain/strategy-bundle.ts';
+import { InMemoryStrategyRevisionRepository } from '../../adapters/repository/in-memory-strategy-revision.repository.ts';
+import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
+import type { StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { RunStrategyBaselineValidationInput } from '../../research/experiment-service.ts';
 
 function profile(): StrategyProfile {
@@ -21,14 +26,22 @@ function taskOf(payload: Record<string, unknown>): ResearchTask {
   return { id: 't1', taskType: 'strategy.baseline', source: 'operator', correlationId: 'c1', status: 'running', payload, createdAt: now, updatedAt: now };
 }
 
-async function makeFakeServices(opts: { baselineThrows?: boolean } = {}): Promise<{
+async function makeFakeServices(opts: {
+  baselineThrows?: boolean;
+  strategyBuilder?: AppServices['strategyBuilder'];
+  revisions?: AppServices['revisions'];
+  verdict?: 'PASS' | 'FAIL' | 'MODIFY' | 'INCONCLUSIVE' | 'PAPER_CANDIDATE';
+} = {}): Promise<{
   services: AppServices;
   queued: AppServices['taskQueue'] extends { queued: infer Q } ? Q : never;
   puts: { content: string; meta: { kind: string; mime_type: string; producer: string } }[];
   experimentCalls: (RunStrategyBaselineValidationInput & { returnedExperimentId?: string })[];
 }> {
   const puts: { content: string; meta: { kind: string; mime_type: string; producer: string } }[] = [];
-  const services = makeServices();
+  const services = makeServices({
+    ...(opts.strategyBuilder ? { strategyBuilder: opts.strategyBuilder } : {}),
+    ...(opts.revisions ? { revisions: opts.revisions } : {}),
+  });
   const originalPut = services.artifacts.put.bind(services.artifacts);
   services.artifacts.put = async (content, meta) => {
     puts.push({ content: content.toString(), meta });
@@ -43,7 +56,7 @@ async function makeFakeServices(opts: { baselineThrows?: boolean } = {}): Promis
     if (opts.baselineThrows) throw new Error('baseline lane boom');
     const returnedExperimentId = `exp-${++counter}`;
     experimentCalls.push({ ...input, returnedExperimentId });
-    return { experimentId: returnedExperimentId, verdict: 'PAPER_CANDIDATE' as const };
+    return { experimentId: returnedExperimentId, verdict: opts.verdict ?? ('PAPER_CANDIDATE' as const) };
   });
 
   return {
@@ -78,5 +91,77 @@ describe('strategyBaselineHandler', () => {
   it('rejects an invalid payload', async () => {
     const { services } = await makeFakeServices();
     await expect(strategyBaselineHandler(taskOf({}), services)).rejects.toThrow(/invalid strategy\.baseline payload/);
+  });
+
+  it('ready-bundle mode reconstructs the given bundle and skips the builder', async () => {
+    // Build a realistic AssembledStrategyBundle via the same builder+assemble path the handler's
+    // build-mode uses, so `persistedBundleJson` round-trips through reconstructStrategyBundle
+    // (which re-assembles and hash-compares) without drift.
+    const out = await new FakeStrategyBuilder().build({
+      spec: { description: 'consolidated clean source' },
+      authoringDoc: getAuthoringDoc('strategy'),
+      profile: profile(),
+    });
+    const built = await assembleStrategyBundle(out);
+    const persistedBundleJson = { source: built.source, manifest: built.manifest, bundleHash: built.bundleHash };
+
+    const throwingBuilder: AppServices['strategyBuilder'] = {
+      adapter: 'throws',
+      model: 'throws',
+      build: vi.fn(async () => {
+        throw new Error('strategyBuilder.build must not be called in ready-bundle mode');
+      }),
+    };
+
+    const { services, experimentCalls } = await makeFakeServices({ strategyBuilder: throwingBuilder });
+    const ref = await services.artifacts.put(JSON.stringify(persistedBundleJson), {
+      kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test',
+    });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', bundleArtifactRef: ref }), services);
+
+    expect(throwingBuilder.build).not.toHaveBeenCalled();
+    expect(experimentCalls[0]?.bundleArtifactRef).toEqual(ref);
+    expect(experimentCalls[0]?.strategyBundle.bundleHash).toBe(built.bundleHash);
+  });
+
+  it('patches consolidated revision baseline status on completion', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    const consolidatedRevision: StrategyRevision = {
+      id: 'C', strategyProfileId: 'prof-1', version: 1, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'consolidated', baselineValidationStatus: 'pending',
+      createdAt: now, updatedAt: now,
+    };
+    await revisions.create(consolidatedRevision);
+
+    const { services } = await makeFakeServices({ revisions, verdict: 'PASS' });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', consolidatedRevisionId: 'C' }), services);
+
+    const patched = await revisions.findById('C');
+    expect(patched?.baselineValidationStatus).toBe('passed');
+    expect(patched?.baselineExperimentId).toBe('exp-1');
+    expect(patched?.baselineTaskId).toBe('t1');
+  });
+
+  it('maps PAPER_CANDIDATE verdict to passed status', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    const consolidatedRevision: StrategyRevision = {
+      id: 'C', strategyProfileId: 'prof-1', version: 1, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'consolidated', baselineValidationStatus: 'pending',
+      createdAt: now, updatedAt: now,
+    };
+    await revisions.create(consolidatedRevision);
+
+    const { services } = await makeFakeServices({ revisions, verdict: 'PAPER_CANDIDATE' });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', consolidatedRevisionId: 'C' }), services);
+
+    const patched = await revisions.findById('C');
+    expect(patched?.baselineValidationStatus).toBe('passed');
+    expect(patched?.baselineExperimentId).toBe('exp-1');
+    expect(patched?.baselineTaskId).toBe('t1');
   });
 });

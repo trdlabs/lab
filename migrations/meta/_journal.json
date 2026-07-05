@@ -141,6 +141,13 @@
       "when": 1783094949192,
       "tag": "0019_hypothesis_proposal_proxy_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783204973379,
+      "tag": "0020_cynical_thor",
+      "breakpoints": true
     }
   ]
 }
