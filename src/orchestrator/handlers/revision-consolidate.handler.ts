@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import type { StrategyRevision } from '../../domain/strategy-revision.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
@@ -22,16 +24,52 @@ export const RevisionConsolidatePayloadSchema = z.object({
 const now = (): string => new Date().toISOString();
 
 /**
- * ACCEPT path stub — replaced by Task 9. Task 8's guard/reject tests never reach here (every
- * fixture either short-circuits earlier or is engineered to diverge at the parity gate); the
- * `retryable` test asserts it got PAST the parity gate precisely by observing this throw.
+ * ACCEPT path (slice G3b Task 9) — strict-parity success: materialize an equivalent,
+ * depth-reset `kind:'consolidated'` revision from R and enqueue a ready-bundle
+ * `strategy.baseline` re-baseline. hypothesisIds/mergedRuleSet are inherited VERBATIM from R
+ * (no recompute) — R.dropped hypotheses are never rescued into the consolidated revision.
  */
 async function acceptConsolidation(
-  _task: ResearchTask,
-  _services: AppServices,
-  _ctx: { R: StrategyRevision; assembled: AssembledStrategyBundle; cleanRun: RevisionRunResult },
+  task: ResearchTask,
+  services: AppServices,
+  { R, assembled, cleanRun }: { R: StrategyRevision; assembled: AssembledStrategyBundle; cleanRun: RevisionRunResult },
 ): Promise<void> {
-  throw new Error('acceptConsolidation not implemented until Task 9');
+  const cleanRef = await services.artifacts.put(
+    JSON.stringify({ source: assembled.source, manifest: assembled.manifest, bundleHash: assembled.bundleHash }),
+    { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'revision-consolidate-handler' },
+  );
+  const newId = randomUUID();
+  const consolidated: StrategyRevision = {
+    id: newId, strategyProfileId: R.strategyProfileId, version: R.version + 1,
+    baseRevisionId: R.id, kind: 'consolidated', consolidatedFromRevisionId: R.id, semanticParentRevisionId: R.id,
+    hypothesisIds: [...R.hypothesisIds], mergedRuleSet: R.mergedRuleSet,
+    bundleArtifactRef: cleanRef, bundleHash: assembled.bundleHash,
+    comboBacktestRunId: cleanRun.runId, metrics: cleanRun.metrics as unknown as Record<string, unknown>,
+    compositionDepth: 1, status: 'accepted', baselineValidationStatus: 'pending',
+    verdictReason: 'consolidated_parity_ok', createdAt: now(), updatedAt: now(),
+  };
+
+  // UNIQUE(profileId, version) race guard: another concurrent consolidation already claimed
+  // this version — fail-safe skip rather than overwrite/duplicate. R stays the source of truth.
+  try {
+    await services.revisions.create(consolidated);
+  } catch (err) {
+    await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId: R.id, reason: 'concurrent_revision', detail: errMsg(err) }));
+    return;
+  }
+
+  await createAndEnqueueTask(
+    {
+      taskType: 'strategy.baseline', source: task.source,
+      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: cleanRef, consolidatedRevisionId: newId },
+      correlationId: task.correlationId, dedupeKey: `strategy.baseline:consolidated:${newId}`,
+    },
+    { repo: services.researchTasks, queue: services.taskQueue },
+  );
+
+  await services.events.append(event(task.id, 'revision.consolidated', {
+    fromRevisionId: R.id, newRevisionId: newId, version: consolidated.version, bundleHash: assembled.bundleHash,
+  }));
 }
 
 /**
@@ -63,7 +101,10 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
   const ctx = comboRun?.platformRun ?? null;
   if (!comboRun || !ctx) { await reject('missing_run_context'); return; }
 
-  const stacked = await reconstructStrategyBundle(services.artifacts, R.bundleArtifactRef);
+  let stacked;
+  try {
+    stacked = await reconstructStrategyBundle(services.artifacts, R.bundleArtifactRef);
+  } catch (err) { await reject('reconstruct_failed', { detail: errMsg(err) }); return; }
   if (!services.consolidator) { await reject('consolidator_disabled'); return; }
   let out;
   try {
@@ -85,6 +126,6 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
   const verdict = evaluateConsolidation(R.metrics as unknown as BacktestMetricBlock, cleanRun.metrics, services.consolidationTolerances);
   if (verdict.decision === 'REJECT') { await reject(verdict.reasons.join(','), { reasons: verdict.reasons, deltas: verdict.deltas }); return; }
 
-  // ACCEPT path → Task 9 fills this in.
+  // ACCEPT path (Task 9): materialize the consolidated revision + re-baseline.
   await acceptConsolidation(task, services, { R, assembled, cleanRun });
 };

@@ -186,6 +186,7 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
 
     expect(calls).toHaveLength(0);
     const events = await services.events.listByTask('task-consolidate-1');
+    expect(events).toHaveLength(1);
     expect(events[0]!.payload['reason']).toBe('not_consolidatable');
   });
 
@@ -199,7 +200,29 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
 
     expect(calls).toHaveLength(0);
     const events = await services.events.listByTask('task-consolidate-1');
+    expect(events).toHaveLength(1);
     expect(events[0]!.payload['reason']).toBe('not_consolidatable');
+  });
+
+  it('reconstruct_failed: corrupt bundleArtifactRef payload — rejected, R stays accepted, no consolidated revision', async () => {
+    const services = makeServices();
+    const corruptRef = await services.artifacts.put('not-valid-json{{{', {
+      kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test-fixture',
+    });
+    await seedConsolidatableRevision(services, { revisionOverrides: { bundleArtifactRef: corruptRef } });
+    const { consolidator, calls } = spyConsolidator(new FakeStrategyConsolidator());
+    services.consolidator = consolidator;
+
+    await revisionConsolidateHandler(task(), services);
+
+    expect(calls).toHaveLength(0);
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.type).toBe('revision.consolidation_rejected');
+    expect(events[0]!.payload['reason']).toBe('reconstruct_failed');
+    expect(events[0]!.payload['detail']).toBeDefined();
+    expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
+    expect(await services.revisions.findConsolidatedOf('rev-1')).toBeNull();
   });
 
   it('missing_run_context: comboBacktestRunId absent — rejected, no fallback to defaultPlatformRun', async () => {
@@ -330,14 +353,101 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(consolidatorCalls).toHaveLength(1);
 
     // Swap in an executor that reports parity-equivalent metrics: the retry proceeds PAST the
-    // parity gate and reaches the (Task 9) accept stub, which throws by design.
+    // parity gate and reaches the (Task 9) accept path, which materializes the consolidated
+    // revision instead of throwing.
     const equivalent = fakeExecutor({ metrics: acceptedMetrics() });
     services.revisionRunExecutor = equivalent.executor;
 
-    await expect(revisionConsolidateHandler(task(), services)).rejects.toThrow(
-      'acceptConsolidation not implemented until Task 9',
-    );
+    await revisionConsolidateHandler(task(), services);
     expect(consolidatorCalls).toHaveLength(2);
     expect(equivalent.calls).toHaveLength(1);
+    expect(await services.revisions.findConsolidatedOf('rev-1')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ACCEPT path (slice G3b Task 9): materialize consolidated revision + re-baseline
+// ---------------------------------------------------------------------------
+
+describe('revisionConsolidateHandler — accept path (slice G3b, Task 9)', () => {
+  async function runHappyPath(services: AppServices, revisionOverrides: Partial<StrategyRevision> = {}): Promise<StrategyRevision> {
+    const R = await seedConsolidatableRevision(services, { revisionOverrides });
+    services.consolidator = new FakeStrategyConsolidator();
+    const { executor } = fakeExecutor({ metrics: acceptedMetrics() });
+    services.revisionRunExecutor = executor;
+
+    await revisionConsolidateHandler(task(), services);
+    return R;
+  }
+
+  it('materializes a consolidated revision with verbatim-inherited fields + reset depth', async () => {
+    const services = makeServices();
+    const R = await runHappyPath(services);
+
+    const consolidated = await services.revisions.findConsolidatedOf(R.id);
+    expect(consolidated).not.toBeNull();
+    expect(consolidated!.kind).toBe('consolidated');
+    expect(consolidated!.baseRevisionId).toBe(R.id);
+    expect(consolidated!.consolidatedFromRevisionId).toBe(R.id);
+    expect(consolidated!.semanticParentRevisionId).toBe(R.id);
+    expect(consolidated!.compositionDepth).toBe(1);
+    expect(consolidated!.version).toBe(R.version + 1);
+    expect(consolidated!.status).toBe('accepted');
+    expect(consolidated!.baselineValidationStatus).toBe('pending');
+    expect(consolidated!.hypothesisIds).toEqual(R.hypothesisIds);
+    expect(consolidated!.mergedRuleSet).toEqual(R.mergedRuleSet);
+  });
+
+  it('enqueues exactly one ready-bundle strategy.baseline task and emits revision.consolidated', async () => {
+    const services = makeServices();
+    const R = await runHappyPath(services);
+
+    const consolidated = await services.revisions.findConsolidatedOf(R.id);
+    expect(consolidated).not.toBeNull();
+
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    const baselineEnvelopes = queued.filter((q) => q.taskType === 'strategy.baseline');
+    expect(baselineEnvelopes).toHaveLength(1);
+
+    const baselineTask = await services.researchTasks.findByDedupeKey(`strategy.baseline:consolidated:${consolidated!.id}`);
+    expect(baselineTask).not.toBeNull();
+    expect(baselineTask!.payload['strategyProfileId']).toBe(R.strategyProfileId);
+    expect(baselineTask!.payload['bundleArtifactRef']).toBeDefined();
+    expect(baselineTask!.payload['consolidatedRevisionId']).toBe(consolidated!.id);
+
+    const events = await services.events.listByTask('task-consolidate-1');
+    const consolidatedEvent = events.find((e) => e.type === 'revision.consolidated');
+    expect(consolidatedEvent).toBeDefined();
+    expect(consolidatedEvent!.payload['fromRevisionId']).toBe(R.id);
+    expect(consolidatedEvent!.payload['newRevisionId']).toBe(consolidated!.id);
+    expect(consolidatedEvent!.payload['version']).toBe(consolidated!.version);
+  });
+
+  it('Style-A: a dropped unsupported_module_shape hypothesis is NOT rescued into hypothesisIds', async () => {
+    const services = makeServices();
+    const R = await runHappyPath(services, {
+      hypothesisIds: ['h1'],
+      dropped: [{ hypothesisId: 'h-dropped-style-a', reason: 'unsupported_module_shape', detail: 'unsupported module shape' }],
+    });
+
+    const consolidated = await services.revisions.findConsolidatedOf(R.id);
+    expect(consolidated).not.toBeNull();
+    expect(consolidated!.hypothesisIds).toEqual(R.hypothesisIds);
+    expect(consolidated!.hypothesisIds).not.toContain('h-dropped-style-a');
+  });
+
+  it('findConsolidatedOf(R.id) after success returns the new consolidated revision (retry is a no-op)', async () => {
+    const services = makeServices();
+    const R = await runHappyPath(services);
+    const consolidated = await services.revisions.findConsolidatedOf(R.id);
+    expect(consolidated).not.toBeNull();
+
+    // Retry: already_consolidated short-circuit — no new consolidated revision, no new baseline task.
+    const beforeQueued = (services.taskQueue as InMemoryQueueAdapter).queued.length;
+    await revisionConsolidateHandler(task(), services);
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events[events.length - 1]!.type).toBe('revision.consolidation_skipped');
+    expect(events[events.length - 1]!.payload['reason']).toBe('already_consolidated');
+    expect((services.taskQueue as InMemoryQueueAdapter).queued.length).toBe(beforeQueued);
   });
 });
