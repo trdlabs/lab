@@ -441,7 +441,7 @@ export function composeRuntime() {
     platformPoll,
     backtestCallbackUrl,
     baselineVersion: env.TRADING_PLATFORM_BASELINE_VERSION,
-    defaultPlatformRun: { datasetId: 'ESPORTSUSDT:1h', symbols: ['ESPORTSUSDT'], timeframe: '1h', period: { from: '2026-06-12', to: '2026-06-19' }, seed: 42 },
+    defaultPlatformRun: { datasetId: 'ESPORTSUSDT:1m', symbols: ['ESPORTSUSDT'], timeframe: '1m', period: { from: '2026-06-16', to: '2026-06-18' }, seed: 42 },
     researchDefaultSymbol: 'ESPORTSUSDT',
     experiments,
     runTrades,
