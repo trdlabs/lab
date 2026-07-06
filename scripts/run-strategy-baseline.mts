@@ -15,7 +15,7 @@
  * → services.artifacts.put(...) (audit anchor, same shape as authorStrategyBundleHandler's
  * 'strategy_bundle' persist) → services.experimentService.runStrategyBaselineValidation({
  * strategyProfileId, strategyBundle, datasetScope, runConfig, metrics, taskId, bundleArtifactRef })
- * using composeRuntime()'s services.defaultPlatformRun (ESPORTSUSDT:1h, 2026-06-12..19, seed 42 —
+ * using composeRuntime()'s services.defaultPlatformRun (ESPORTSUSDT:1m, 2026-06-16..18, seed 42 —
  * src/composition.ts) and the RESEARCH_RUN_METRICS 7-metric catalog (038 catalog:
  * pnl, sharpe, max_drawdown, win_rate, total_trades, profit_factor, top_trade_contribution_pct —
  * src/domain/platform-comparison.ts; the SDK's own METRIC_CATALOG is not publicly exported).
@@ -180,16 +180,26 @@ try {
   // ── 4) run the baseline validation experiment against the real backtester ──────
 
   const defaultRun = services.defaultPlatformRun;
+  // Baseline dataset override (env) — defaults to composeRuntime's defaultPlatformRun
+  // (ESPORTSUSDT:1m, extended fixture window). Override only for ad-hoc experiments.
+  const dsDatasetId = process.env['BASELINE_DATASET_ID'] ?? defaultRun.datasetId;
+  const dsTimeframe = process.env['BASELINE_TIMEFRAME'] ?? defaultRun.timeframe;
+  const dsSymbols = process.env['BASELINE_SYMBOLS']
+    ? process.env['BASELINE_SYMBOLS'].split(',').map((s) => s.trim()).filter(Boolean)
+    : defaultRun.symbols;
+  const dsPeriod = (process.env['BASELINE_PERIOD_FROM'] && process.env['BASELINE_PERIOD_TO'])
+    ? { from: process.env['BASELINE_PERIOD_FROM'], to: process.env['BASELINE_PERIOD_TO'] }
+    : defaultRun.period;
   const datasetScope: DatasetScope = {
-    datasetId: defaultRun.datasetId,
-    symbols: defaultRun.symbols,
-    timeframe: defaultRun.timeframe,
-    period: defaultRun.period,
+    datasetId: dsDatasetId,
+    symbols: dsSymbols,
+    timeframe: dsTimeframe,
+    period: dsPeriod,
   };
   const runConfig: Omit<PlatformRunConfig, 'period'> = {
-    datasetId: defaultRun.datasetId,
-    symbols: defaultRun.symbols,
-    timeframe: defaultRun.timeframe,
+    datasetId: dsDatasetId,
+    symbols: dsSymbols,
+    timeframe: dsTimeframe,
     seed: defaultRun.seed,
   };
   const taskId = `run-strategy-baseline-${randomUUID()}`;
