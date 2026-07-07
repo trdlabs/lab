@@ -15,7 +15,7 @@ services:
 
   # ── mock-platform (Ops Read + snapshot replay) ─────────────────────────────
   mock-platform:
-    image: ghcr.io/alexnikolskiy/trading-mock-platform:${MOCK_PLATFORM_IMAGE_TAG:-latest}
+    image: ghcr.io/trdlabs/mock-platform:${MOCK_PLATFORM_IMAGE_TAG:-latest}
     environment:
       MOCK_OPS_BIND: "0.0.0.0"
       MOCK_OPS_PORT: "8839"
