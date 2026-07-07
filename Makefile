@@ -1,5 +1,12 @@
 # Thin wrappers around the documented docker compose commands.
-.PHONY: demo local vps dev down smoke e2e cross-repo-e2e config
+.PHONY: demo local vps dev down smoke e2e cross-repo-e2e config ghcr-login
+
+# One-time per machine when trdlabs GHCR packages are private (org blocks public visibility):
+#   gh auth refresh -h github.com -s read:packages
+#   make ghcr-login
+ghcr-login:
+	chmod +x scripts/ghcr-login.sh
+	./scripts/ghcr-login.sh
 
 # demo pulls every first-party image (lab / mock-platform / backtester / office)
 # from GHCR — built on CI, nothing compiled locally — then `up`. --ignore-buildable
