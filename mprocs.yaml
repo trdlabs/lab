@@ -4,7 +4,7 @@
 # its sandbox `docker run` hits the host daemon natively — no DooD in dev.
 #
 # Run via `make dev` (installs deps, starts infra detached, migrates, then launches mprocs).
-# Requires sibling repos present: ../trading-backtester (pnpm) and ../trading-office (npm).
+# Requires sibling repos present: ../backtester (pnpm) and ../office (npm).
 procs:
   ingress:
     shell: "set -a && . ./.env.dev && exec node --watch --experimental-transform-types src/ingress/server.ts"
