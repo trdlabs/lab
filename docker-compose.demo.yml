@@ -30,7 +30,7 @@ services:
       # taker_buy/sell + funding) — the 3-day span gives commitXTermMath enough 1h bars to
       # render the Long (1h) term too, not just the sub-hour terms. The single-day
       # 2026-06-18-real-all source is unchanged and still selectable.
-      MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-16-to-18-extended}"
+      MOCK_SNAPSHOT_REF: "${MOCK_SNAPSHOT_REF:-fixtures/2026-06-22-to-2026-06-28-vps}"
       MOCK_REPLAY_MODE: "${MOCK_REPLAY_MODE:-loop}"
       MOCK_REPLAY_SPEED: "${MOCK_REPLAY_SPEED:-1}"
     expose:
