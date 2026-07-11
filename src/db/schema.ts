@@ -228,6 +228,7 @@ export const evaluation = pgTable('evaluation', {
   reasons: jsonb('reasons').notNull().$type<string[]>(),
   metricsSnapshot: jsonb('metrics_snapshot').notNull().$type<ComparisonSummary>(),
   thresholds: jsonb('thresholds').notNull().$type<EvaluatorThresholds>(),
+  preservationGate: jsonb('preservation_gate').$type<PreservationMetadata>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   backtestRunIdx: index('evaluation_backtest_run_idx').on(t.backtestRunId),

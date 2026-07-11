@@ -6,6 +6,7 @@ import type { Evaluation } from '../../domain/evaluation.ts';
 import type { ComparisonSummary } from '../../ports/platform-gateway.port.ts';
 import type { EvaluationDecision, EvaluatorThresholds } from '../../validation/evaluator.ts';
 import type { EvaluationRepository } from '../../ports/evaluation.repository.ts';
+import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
 
 type Row = typeof evaluation.$inferSelect;
 
@@ -15,6 +16,7 @@ function toDomain(row: Row): Evaluation {
     decision: row.decision as EvaluationDecision, reasons: row.reasons,
     metricsSnapshot: row.metricsSnapshot as ComparisonSummary, thresholds: row.thresholds as EvaluatorThresholds,
     createdAt: row.createdAt.toISOString(),
+    preservationGate: row.preservationGate as PreservationMetadata | undefined,
   };
 }
 
@@ -26,6 +28,7 @@ export class DrizzleEvaluationRepository implements EvaluationRepository {
     await this.db.insert(evaluation).values({
       id: e.id, backtestRunId: e.backtestRunId, hypothesisId: e.hypothesisId, decision: e.decision,
       reasons: e.reasons, metricsSnapshot: e.metricsSnapshot, thresholds: e.thresholds, createdAt: new Date(e.createdAt),
+      preservationGate: e.preservationGate,
     });
   }
 
