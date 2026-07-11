@@ -30,12 +30,13 @@ R2's trade-level veto needs BOTH runs' per-trade records. So 1b makes the backte
 
 ### 3.1 Persist baseline-trades artifact
 `apps/backtester/src/artifacts/overlay-store.ts::persistOverlayArtifacts`:
-- Add an `ArtifactSpec` for baseline trades **only when a variant exists** (`outcome.variant != null` — i.e. a real baseline-vs-variant comparison run):
+- Add an `ArtifactSpec` for baseline trades **gated on `outcome.comparison != null`** — the SAME signal the existing `comparison` artifact is already gated on in this function. Do NOT introduce a second source of truth (`outcome.variant != null`): in `runner.ts::runBacktest`, `variant` and `comparison` are set together (`comparison = computeComparison(baseline, variant)` runs in the same `if (overlays)` block), so `outcome.variant != null ⇔ outcome.comparison != null`. Reuse `comparison != null` for consistency with the sibling artifact; the plan adds an invariant test asserting the equivalence so a future divergence is caught.
   ```
+  // inside the same `outcome.comparison != null ? [...] : []` block as the `comparison` artifact:
   { artifactType: BASELINE_TRADES, payload: outcome.baseline.trades, itemCount: outcome.baseline.trades.length }
   ```
 - **Exact artifactType value: `'baseline-trades'`** — declared as a named constant `BASELINE_TRADES` (do NOT inline the bare string; both write-side and any read-side keying reference the constant to prevent drift). Place it beside the other artifact-type usages / in the artifact-type module.
-- **Descriptor creation rule (exact):** the baseline-trades descriptor is created **iff** `outcome.variant != null`. When there is no variant (non-comparison run), the headline IS the baseline and the existing `trades` artifact already carries baseline trades — do NOT emit a separate baseline-trades artifact. When `outcome.variant != null`, always emit it, **even if `outcome.baseline.trades` is empty**. Semantics for the consumer: **descriptor absent = feature/comparison unavailable** (old backtester or non-comparison run); **empty `[]` payload = artifact present, baseline genuinely produced zero trades**. Never emit an empty artifact to mean "unavailable".
+- **Descriptor creation rule (exact):** the baseline-trades descriptor is created **iff** `outcome.comparison != null`. When there is no comparison (non-comparison run), the headline IS the baseline and the existing `trades` artifact already carries baseline trades — do NOT emit a separate baseline-trades artifact. When `outcome.comparison != null`, always emit it, **even if `outcome.baseline.trades` is empty**. Semantics for the consumer: **descriptor absent = feature/comparison unavailable** (old backtester or non-comparison run); **empty `[]` payload = artifact present, baseline genuinely produced zero trades**. Never emit an empty artifact to mean "unavailable".
 - `closeReason` (incl. `end_of_data`) is already serialized into each trade row (engine `Trade.closeReason`); baseline trade rows carry it identically to variant rows. No writer change for that.
 - Each artifact is content-hash addressed independently (`store.write(payload)`), so existing artifacts' `contentHash`es are unchanged. The new descriptor joins the manifest (which sorts specs by `artifactType`).
 
@@ -44,6 +45,7 @@ R2's trade-level veto needs BOTH runs' per-trade records. So 1b makes the backte
 
 ### 3.3 Backtester tests
 - New: comparison run emits a `baseline-trades` descriptor; non-comparison run does NOT; empty-baseline comparison emits an empty (`[]`) baseline-trades artifact (present, not absent).
+- New invariant test: `outcome.variant != null ⇔ outcome.comparison != null` (guards against a future divergence that would desync the two comparison-run signals).
 - Update: `comparison-wire.test.ts` and any artifact/manifest test asserting the exact descriptor set/count (the new descriptor is additive — adjust expected sets).
 - **⚠️ byte-proof / golden guard:** verify no golden or byte-identity test asserts the exact manifest descriptor list in a way the additive descriptor breaks. If one does, update it as an intended additive change (document why). Existing per-artifact `contentHash`es must be unchanged.
 
@@ -111,7 +113,7 @@ After `const outcome = evaluateBacktest(c, services.evaluatorThresholds)`:
 ## 7. Rollout & version compatibility (critical)
 
 - **Ship order:** `slice 1b-backtester` first (additive, backward-compatible), then `slice 1b-lab`. lab with new code against an old (not-yet-redeployed) backtester must be a no-op skip — see the acceptance invariant below.
-- **⚠️ Version-compat check (backtester plan MUST resolve):** `ARTIFACT_CONTRACT_VERSION` is bumped `022.1 → 022.2`. lab consumes the backtester SDK as a **pinned release tarball (`@trading-backtester/sdk` v0.7.0)**. Confirm lab's pinned SDK client does NOT reject a manifest carrying the bumped `artifactContractVersion` (a minor bump should be tolerated; verify the client compares major, not exact). If the pinned client version-locks strictly: either (a) keep `022.1` and rely on additive-descriptor ignore semantics (consumers already iterate descriptors and ignore unknowns), or (b) re-pin lab's SDK (adds a lab task). Resolve and record which, before merging the backtester slice.
+- **⚠️ Version-compat check (backtester plan's MANDATORY FIRST block — "contract/version compatibility audit"):** `ARTIFACT_CONTRACT_VERSION` is bumped `022.1 → 022.2`. lab consumes the backtester SDK as a **pinned release tarball (`@trading-backtester/sdk` v0.7.0)**. Preliminary check (user-verified): lab's pinned `BacktesterClient.getArtifactManifest()` just returns the manifest JSON with no visible strict `artifactContractVersion` gate → `022.1 → 022.2` looks safe for lab. **The plan must still LOCK this** with a test or mini-script (parse a `022.2` manifest through the pinned client and assert it does not reject) — this is a rollout gate, not a code comment. If a strict version-lock is found after all: either (a) keep `022.1` and rely on additive-descriptor ignore semantics (consumers already iterate descriptors and ignore unknowns), or (b) re-pin lab's SDK (adds a lab task). Resolve and record which, before merging the backtester slice.
 
 ---
 
