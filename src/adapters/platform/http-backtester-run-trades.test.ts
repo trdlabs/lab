@@ -43,4 +43,13 @@ describe('HttpBacktesterRunTradesAdapter', () => {
     } as never;
     await expect(new HttpBacktesterRunTradesAdapter(client).getRunTrades('r')).rejects.toThrow(/entryTs/);
   });
+
+  it('parseTrade keeps closeReason from the artifact row', async () => {
+    const client = {
+      getArtifactManifest: async () => ({ descriptors: [{ artifactType: 'trades', contentHash: 'h1', availability: 'available', approxItemCount: 1 }] }),
+      readArtifact: async () => ({ page: [{ entryTs: 1000, exitTs: 2000, side: 'long', realizedPnl: 5, closeReason: 'end_of_data' }], total: 1, offset: 0 }),
+    } as never;
+    const trades = await new HttpBacktesterRunTradesAdapter(client).getRunTrades('run1');
+    expect(trades[0]!.closeReason).toBe('end_of_data');
+  });
 });

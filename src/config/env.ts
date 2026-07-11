@@ -1,5 +1,6 @@
 import { DEFAULT_EVALUATOR_THRESHOLDS, type EvaluatorThresholds } from '../validation/evaluator.ts';
 import { MODEL_PROVIDERS, type ModelProvider } from '../adapters/llm/model-provider.ts';
+import { DEFAULT_PRESERVATION_THRESHOLDS, type PreservationThresholds } from '../validation/trade-preservation.ts';
 
 export interface Env {
   DATABASE_URL?: string;
@@ -37,6 +38,10 @@ export interface Env {
   BUILDER_ADAPTER: 'fake' | 'mastra';
   BUILDER_MODEL: string;
   evaluatorThresholds: EvaluatorThresholds;
+  /** Trade-preservation gate kill-switch (env LAB_TRADE_PRESERVATION_GATE); false only when explicitly set to 'off' (default on). */
+  preservationGateEnabled: boolean;
+  /** Trade-level preservation-check thresholds (env LAB_TRADE_PRESERVATION_*); default DEFAULT_PRESERVATION_THRESHOLDS. */
+  preservationThresholds: PreservationThresholds;
   MODEL_PROVIDER: ModelProvider;
   OPENAI_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
@@ -243,6 +248,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
       fragilityTopTradePct: parseFloatOr(source.EVAL_FRAGILITY_TOP_TRADE_PCT, DEFAULT_EVALUATOR_THRESHOLDS.fragilityTopTradePct),
       strongPnlDeltaUsd: parseFloatOr(source.EVAL_STRONG_PNL_DELTA_USD, DEFAULT_EVALUATOR_THRESHOLDS.strongPnlDeltaUsd),
       minProfitFactor: parseFloatOr(source.EVAL_MIN_PROFIT_FACTOR, DEFAULT_EVALUATOR_THRESHOLDS.minProfitFactor),
+    },
+    preservationGateEnabled: source.LAB_TRADE_PRESERVATION_GATE !== 'off',
+    preservationThresholds: {
+      winnerRetention: parseFloatOr(source.LAB_TRADE_PRESERVATION_WINNER_RETENTION, DEFAULT_PRESERVATION_THRESHOLDS.winnerRetention),
+      maxTradeDropPct: parseFloatOr(source.LAB_TRADE_PRESERVATION_MAX_TRADE_DROP_PCT, DEFAULT_PRESERVATION_THRESHOLDS.maxTradeDropPct),
+      abstentionShare: parseFloatOr(source.LAB_TRADE_PRESERVATION_ABSTENTION_SHARE, DEFAULT_PRESERVATION_THRESHOLDS.abstentionShare),
+      eodShare: parseFloatOr(source.LAB_TRADE_PRESERVATION_EOD_SHARE, DEFAULT_PRESERVATION_THRESHOLDS.eodShare),
+      matchToleranceMs: parseFloatOr(source.LAB_TRADE_PRESERVATION_MATCH_TOLERANCE_MS, DEFAULT_PRESERVATION_THRESHOLDS.matchToleranceMs),
+      minWinnerSample: parseFloatOr(source.LAB_TRADE_PRESERVATION_MIN_WINNER_SAMPLE, DEFAULT_PRESERVATION_THRESHOLDS.minWinnerSample),
     },
     MODEL_PROVIDER: parseModelProvider(source.MODEL_PROVIDER),
     OPENAI_API_KEY: source.OPENAI_API_KEY,

@@ -52,6 +52,8 @@ export interface TradeRecord {
   exitTs: number;
   side: 'long' | 'short';
   realizedPnl: number;
+  /** Raw engine close reason as serialized in the trades artifact (e.g. 'end_of_data', 'stop_hit', 'time_exit'); undefined on legacy/fake rows. */
+  closeReason?: string;
 }
 
 export interface ExperimentFlags {

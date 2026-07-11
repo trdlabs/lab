@@ -433,6 +433,8 @@ export function composeRuntime() {
     backtests,
     evaluations: new DrizzleEvaluationRepository(db),
     evaluatorThresholds: env.evaluatorThresholds,
+    preservationGateEnabled: env.preservationGateEnabled,
+    preservationThresholds: env.preservationThresholds,
     chatSessions: new DrizzleChatSessionRepository(db),
     chatPlans: new DrizzleChatPlanRepository(db),
     actionProposals: new DrizzleActionProposalRepository(db),

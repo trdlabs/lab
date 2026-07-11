@@ -1,0 +1,1 @@
+ALTER TABLE "strategy_revision" ADD COLUMN "preservation_gate" jsonb;

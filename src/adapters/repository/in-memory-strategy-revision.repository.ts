@@ -27,7 +27,7 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
   }
 
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId' | 'preservationGate'>>): Promise<void> {
     const existing = this.byId.get(id);
     if (!existing) throw new Error(`strategy revision not found for id: ${id}`);
     const next: StrategyRevision = { ...existing };
@@ -44,6 +44,7 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
     if (patch.baselineValidationStatus !== undefined) next.baselineValidationStatus = patch.baselineValidationStatus;
     if (patch.baselineExperimentId !== undefined) next.baselineExperimentId = patch.baselineExperimentId;
     if (patch.baselineTaskId !== undefined) next.baselineTaskId = patch.baselineTaskId;
+    if (patch.preservationGate !== undefined) next.preservationGate = patch.preservationGate;
     this.byId.set(id, next);
   }
 
