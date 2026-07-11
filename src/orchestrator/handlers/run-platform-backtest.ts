@@ -97,7 +97,7 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
     return;
   }
 
-  const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId }, outcome);
+  const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId, platformRunId: again.platformRunId }, outcome);
   if (result.kind === 'completed') {
     await enqueueBacktestCompleted(services, task, {
       backtestRunId: runId,

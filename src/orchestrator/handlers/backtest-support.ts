@@ -10,6 +10,8 @@ import type { Evaluation } from '../../domain/evaluation.ts';
 import type { PlatformRunConfig, Ref } from '../../ports/research-platform.port.ts';
 import { evaluateBacktest } from '../../validation/evaluator.ts';
 import type { EvaluationDecision } from '../../validation/evaluator.ts';
+import { applyBacktestPreservationGate } from '../../validation/apply-preservation-gate.ts';
+import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
 
 export function event(taskId: string, type: string, payload: Record<string, unknown>): AgentEvent {
   return { id: randomUUID(), taskId, type, payload, createdAt: new Date().toISOString() };
@@ -62,7 +64,7 @@ export interface BacktestCompletionResult {
 export async function finalizeBacktestCompletion(
   services: AppServices,
   task: ResearchTask,
-  args: { runId: string; hypothesisId: string; comparison: ComparisonSummary; artifactRefs: string[] },
+  args: { runId: string; hypothesisId: string; platformRunId: string; comparison: ComparisonSummary; artifactRefs: string[] },
 ): Promise<BacktestCompletionResult> {
   const now = () => new Date().toISOString();
   const c = args.comparison;
@@ -77,16 +79,43 @@ export async function finalizeBacktestCompletion(
   await services.events.append(event(task.id, 'backtest.completed', { runId: args.runId, deltaNetPnlUsd: completion.deltaNetPnlUsd }));
 
   const outcome = evaluateBacktest(c, services.evaluatorThresholds);
+
+  let finalDecision = outcome.decision;
+  let finalReasons = outcome.reasons;
+  let preservationGate: PreservationMetadata | undefined;
+  if (services.preservationGateEnabled && (outcome.decision === 'PASS' || outcome.decision === 'PAPER_CANDIDATE')) {
+    try {
+      const baselineTrades = await services.runTrades.getBaselineRunTrades(args.platformRunId);
+      if (baselineTrades === null) {
+        await services.events.append(event(task.id, 'evaluation.preservation_skipped', { runId: args.runId, reason: 'artifact_unavailable' }));
+      } else {
+        const variantTrades = await services.runTrades.getRunTrades(args.platformRunId);
+        const gated = applyBacktestPreservationGate(
+          outcome, baselineTrades, variantTrades,
+          { baseline: { netPnlUsd: c.baseline.netPnlUsd, totalTrades: c.baseline.totalTrades },
+            variant: { netPnlUsd: c.variant.netPnlUsd, totalTrades: c.variant.totalTrades } },
+          services.preservationThresholds,
+        );
+        finalDecision = gated.outcome.decision;
+        finalReasons = gated.outcome.reasons;
+        if (gated.preservation) preservationGate = gated.preservation;
+      }
+    } catch (err) {
+      await services.events.append(event(task.id, 'evaluation.preservation_skipped', { runId: args.runId, reason: 'fetch_failed', detail: errMsg(err) }));
+    }
+  }
+
   const evaluation: Evaluation = {
     id: randomUUID(), backtestRunId: args.runId, hypothesisId: args.hypothesisId,
-    decision: outcome.decision, reasons: outcome.reasons, metricsSnapshot: c,
+    decision: finalDecision, reasons: finalReasons, metricsSnapshot: c,
     thresholds: services.evaluatorThresholds, createdAt: now(),
+    ...(preservationGate !== undefined ? { preservationGate } : {}),
   };
   await services.evaluations.create(evaluation);
   await services.backtests.markEvaluated(args.runId);
-  await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: outcome.decision, reasons: outcome.reasons }));
+  await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: finalDecision, reasons: finalReasons }));
   return {
-    decision: outcome.decision, reasons: outcome.reasons,
+    decision: finalDecision, reasons: finalReasons,
     deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,
   };
 }
@@ -142,10 +171,10 @@ export type PlatformTerminalResult =
 export async function applyPlatformTerminalOutcome(
   services: AppServices,
   task: ResearchTask,
-  args: { runId: string; hypothesisId: string },
+  args: { runId: string; hypothesisId: string; platformRunId: string },
   outcome: Exclude<PlatformRunOutcome, { status: 'pending' }>,
 ): Promise<PlatformTerminalResult> {
-  const { runId, hypothesisId } = args;
+  const { runId, hypothesisId, platformRunId } = args;
   if (outcome.status === 'rejected') {
     await services.backtests.markRejected(runId);
     await services.events.append(event(task.id, 'backtest.failed', {
@@ -165,7 +194,7 @@ export async function applyPlatformTerminalOutcome(
     }
     throw err;
   }
-  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, comparison, artifactRefs: [...outcome.artifactIds] });
+  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, platformRunId, comparison, artifactRefs: [...outcome.artifactIds] });
   return {
     kind: 'completed', decision: completion.decision, reasons: completion.reasons,
     deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,

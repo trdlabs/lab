@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryEvaluationRepository } from './in-memory-evaluation.repository.ts';
 import { DEFAULT_EVALUATOR_THRESHOLDS } from '../../validation/evaluator.ts';
+import { DEFAULT_PRESERVATION_THRESHOLDS } from '../../validation/trade-preservation.ts';
 import type { Evaluation } from '../../domain/evaluation.ts';
 import type { ComparisonSummary } from '../../ports/platform-gateway.port.ts';
 
@@ -32,5 +33,20 @@ describe('InMemoryEvaluationRepository', () => {
     await repo.create(evaluation('e1'));
     expect(await repo.listByBacktestRun('r1')).toHaveLength(1);
     expect(await repo.listByBacktestRun('other')).toHaveLength(0);
+  });
+
+  it('round-trips preservationGate through create/findById', async () => {
+    const repo = new InMemoryEvaluationRepository();
+    const ev: Evaluation = {
+      ...evaluation('e2'),
+      preservationGate: {
+        fired: true, reason: 'abstention_gaming',
+        metrics: { totalDelta: 60, matchedCount: 3, disappearedCount: 2, newCount: 0, baselineWinnerCount: 3 },
+        thresholds: DEFAULT_PRESERVATION_THRESHOLDS,
+      },
+    };
+    await repo.create(ev);
+    const got = await repo.findById(ev.id);
+    expect(got?.preservationGate?.reason).toBe('abstention_gaming');
   });
 });

@@ -337,16 +337,20 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     if (result.status === 'completed' && result.metrics) {
       verdict = evaluateRevision({ accepted: baselineMetrics, candidate: result.metrics, minTrades: 20 });
       if (gateOn && verdict.decision === 'ACCEPT') {
-        if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
-        const variantTrades = await services.runTrades.getRunTrades(result.platformRunId);
-        const gated = applyRevisionPreservationGate(
-          verdict, baselineTrades, variantTrades,
-          { baseline: { netPnlUsd: baselineMetrics.netPnlUsd, totalTrades: baselineMetrics.totalTrades },
-            variant: { netPnlUsd: result.metrics.netPnlUsd, totalTrades: result.metrics.totalTrades } },
-          services.preservationThresholds,
-        );
-        verdict = gated.verdict;
-        if (gated.preservation) firedPreservation = gated.preservation;
+        try {
+          if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
+          const variantTrades = await services.runTrades.getRunTrades(result.platformRunId);
+          const gated = applyRevisionPreservationGate(
+            verdict, baselineTrades, variantTrades,
+            { baseline: { netPnlUsd: baselineMetrics.netPnlUsd, totalTrades: baselineMetrics.totalTrades },
+              variant: { netPnlUsd: result.metrics.netPnlUsd, totalTrades: result.metrics.totalTrades } },
+            services.preservationThresholds,
+          );
+          verdict = gated.verdict;
+          if (gated.preservation) firedPreservation = gated.preservation;
+        } catch (err) {
+          await services.events.append(event(task.id, 'revision.preservation_skipped', { revisionId, reason: 'fetch_failed', detail: errMsg(err) }));
+        }
       }
     } else {
       verdict = { decision: 'REJECT', reasons: ['candidate_run_unavailable'] };

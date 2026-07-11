@@ -426,6 +426,9 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterSt
 
 // ── RunTradesPort implementation ────────────────────────────────────────────
 
+/** Backtester artifact type for the baseline leg's per-trade records on a comparison run (slice 1b). */
+export const BASELINE_TRADES = 'baseline-trades';
+
 function parseTrade(row: unknown): TradeRecord {
   const r = row as Record<string, unknown>;
   if (typeof r.entryTs !== 'number' || typeof r.exitTs !== 'number') {
@@ -458,6 +461,26 @@ export class HttpBacktesterRunTradesAdapter implements RunTradesPort {
     const limit = 500;
     for (;;) {
       const pageRes = await this.client.readArtifact(runId, tradesDesc.contentHash, { offset, limit });
+      for (const row of pageRes.page) out.push(parseTrade(row));
+      const consumed = offset + pageRes.page.length;
+      if (pageRes.page.length === 0 || consumed >= pageRes.total) break;
+      offset = consumed;
+    }
+    return out;
+  }
+
+  async getBaselineRunTrades(comparisonRunId: string): Promise<TradeRecord[] | null> {
+    const manifest = await this.client.getArtifactManifest(comparisonRunId);
+    const desc = manifest.descriptors.find(
+      (d) => d.artifactType === BASELINE_TRADES && d.availability === 'available',
+    );
+    if (!desc) return null; // absent descriptor = comparison/feature unavailable
+
+    const out: TradeRecord[] = [];
+    let offset = 0;
+    const limit = 500;
+    for (;;) {
+      const pageRes = await this.client.readArtifact(comparisonRunId, desc.contentHash, { offset, limit });
       for (const row of pageRes.page) out.push(parseTrade(row));
       const consumed = offset + pageRes.page.length;
       if (pageRes.page.length === 0 || consumed >= pageRes.total) break;

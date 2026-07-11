@@ -342,7 +342,7 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
 
   it('kill-switch off: same combo is accepted and runTrades is never called', async () => {
     const getRunTrades = vi.fn(async () => []);
-    const runTrades = { getRunTrades };
+    const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
     const services = makeServices({
       revisionRunExecutor: makeVetoExecutor(), researcher: cap.port, runTrades, preservationGateEnabled: false,
@@ -366,7 +366,7 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     // reaches an ACCEPT verdict must trigger NO trade fetch — the baseline fetch is lazy, gated on
     // a would-accept verdict — so a trades-read failure can't abort an aggregate-reject build.
     const getRunTrades = vi.fn(async () => []);
-    const runTrades = { getRunTrades };
+    const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
     const services = makeServices({ revisionRunExecutor: makeRejectExecutor(), researcher: cap.port, runTrades }); // gate ON (default)
 
@@ -381,5 +381,28 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     expect(v2).toBeDefined();
     expect(v2!.status).toBe('rejected');
     expect(getRunTrades).not.toHaveBeenCalled();
+  });
+
+  it('revision lane fail-open: a getRunTrades throw skips the veto and emits revision.preservation_skipped', async () => {
+    // baseline runs (comparison_baseline) fine; the candidate variant fetch throws.
+    const runTrades = {
+      getRunTrades: vi.fn(async (id: string) => { if (id === 'cand-pr') throw new Error('boom'); return []; }),
+      getBaselineRunTrades: vi.fn(async () => null),
+    };
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeVetoExecutor(), researcher: cap.port, runTrades });
+    const events: string[] = [];
+    const orig = services.events.append.bind(services.events);
+    services.events.append = async (e: any) => { events.push(e.type); return orig(e); };
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    // veto skipped → the combo's evaluateRevision ACCEPT stands → revision accepted
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2?.status).toBe('accepted');
+    expect(events).toContain('revision.preservation_skipped');
   });
 });
