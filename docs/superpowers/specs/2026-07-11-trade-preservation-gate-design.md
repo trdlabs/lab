@@ -3,7 +3,7 @@
 **Дата:** 2026-07-11
 **Родительский отчёт:** `docs/research/2026-07-11-hypothesis-evaluation-workflow-review.md` (рекомендация **R2**, приоритет P0).
 **Scope:** ТОЛЬКО R2. R1 (замкнуть петлю), R3 (OOS-дисциплина), R4 (feedback/minute/decision-log) — отдельные слайсы, не здесь.
-**Кросс-репо:** нет. Изменения только в `lab`.
+**Разбиение (см. §1.5):** R2 бьётся на два слайса. **Slice 1a — lab-only** (revision-линия + ядро-модуль + closeReason + DB/миграция). **Slice 1b — кросс-репо** (backtester baseline-trades артефакт + SDK-релиз + пере-пин + hypothesis proxy-линия). Приоритет 1a → затем 1b.
 
 ---
 
@@ -18,6 +18,33 @@ R2 добавляет **детерминированный veto-слой**, ко
 - `evaluateBacktest` / `evaluateRevision` остаются чистыми на агрегатах — их сигнатуры НЕ меняются. Veto — отдельная композиция поверх.
 - Veto только понижает: `PASS`/`PAPER_CANDIDATE` → `MODIFY`/`INCONCLUSIVE`; `ACCEPT` → `REJECT`. Would-fail вердикты не трогает.
 - Используем **реальный** `closeReason` от движка (включая `end_of_data`), не эвристику по концу окна.
+
+---
+
+## 1.5. Механика данных и разбиение на слайсы (АВТОРИТЕТНО — уточняет §4/§7/§8)
+
+Две линии приёмки берут baseline/variant из РАЗНЫХ механизмов бэктестера — это определяет, что реализуемо lab-only, а что требует контракта:
+
+**Механизм #2 (отдельные раны) — линия РЕВИЗИЙ.** `revision-build.handler.ts` гоняет baseline (`comparison_baseline`) и candidate как ДВА отдельных платформенных рана; `RevisionRunResult` несёт `runId` + `platformRunId` у каждого. Трейды обоих уже фетчатся `getRunTrades(platformRunId)`. **Полный R2 реализуем lab-only, сегодня.**
+
+**Механизм #1 (single-run overlay) — линия ГИПОТЕЗ (proxy).** `finalizeBacktestCompletion` ← `applyPlatformTerminalOutcome` получает результат ОДНОГО рана: бэктестер симулирует baseline+variant внутри (`runner.ts::runBacktest`), считает дельты (`computeComparison`) и **выбрасывает baseline-трейды** (`overlay-store.ts::persistOverlayArtifacts` персистит только headline=variant трейды). У lab есть variant runId (→ variant-трейды) и baseline метрики только агрегатами. `comparison.baselineRunId` есть в SDK-контракте, но **baseline-trades артефакта не существует**, и lab роняет `baselineRunId` в `toSdkComparison`. **Полный R2 требует аддитивного изменения контракта** (нет JSON-schema/`additionalProperties` стены на этом пути; версионного блока нет).
+
+### Slice 1a — lab-only (ПЕРВЫМ)
+- Секция A (closeReason в `parseTrade`/`TradeRecord`).
+- Секция B (модуль `evaluateTradePreservation`).
+- Секция C: **только `applyRevisionPreservationGate`** в `revision-build.handler.ts` (механизм #2). Фетч baseline `platformRunId` (из `comparison_baseline`/`existingBaselineRun`) + candidate `platformRunId`.
+- Секции D/E (env, kill-switch, тесты) — для revision-линии.
+- Персистенс: колонка `preservation_gate jsonb` в `strategy_revision` + миграция.
+- НЕ трогает `backtest-support.ts`, backtester, SDK. Закрывает choke point (гипотеза входит в стратегию именно здесь).
+
+### Slice 1b — кросс-репо (ПОСЛЕ 1a)
+- backtester: `overlay-store.ts::persistOverlayArtifacts` — персистить `baseline-trades` артефакт (payload `outcome.baseline.trades`), адресуемый (ключ = `outcome.baseline.runId` или `ComparisonSummary.baselineTradesRef?: ArtifactReference`). Аддитивно.
+- SDK (`packages/sdk/src/contracts/run.ts` + движковый mirror `engine/artifacts.ts` + `packages/research-contracts`): опц. поле `baselineTradesRef`. Новый release-tarball.
+- lab: пере-пин `@trading-backtester/sdk` URL + `pnpm install`; расширить `toSdkComparison` (перестать ронять `baselineRunId`/ref) + lab-порты (`research-run-lifecycle.ts`, `platform-gateway.port.ts`); `applyBacktestPreservationGate` в `finalizeBacktestCompletion`; фетч baseline-трейдов по новому ref.
+- Персистенс: колонка `preservation_gate jsonb` в `evaluation` + миграция.
+- (SHOULD, в 1b или follow-up) experiment/holdout путь `experiment-evaluator.ts` — тот же helper (там per-run трейды уже доступны, механизм #2).
+
+Ниже §2–§9 описывают ОБА слайса вместе; при реализации resolve по этой секции — что в 1a, что в 1b.
 
 ---
 
