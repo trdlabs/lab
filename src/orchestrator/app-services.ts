@@ -19,6 +19,7 @@ import type { HypothesisBuildRepository } from '../ports/hypothesis-build.reposi
 import type { BacktestRunRepository } from '../ports/backtest-run.repository.ts';
 import type { EvaluationRepository } from '../ports/evaluation.repository.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
+import type { PreservationThresholds } from '../validation/trade-preservation.ts';
 import type { ChatSessionRepository } from '../ports/chat-session.repository.ts';
 import type { ChatPlanRepository } from '../ports/chat-plan.repository.ts';
 import type { ActionProposalRepository } from '../ports/action-proposal.repository.ts';
@@ -87,6 +88,10 @@ export interface AppServices {
   backtests: BacktestRunRepository;
   evaluations: EvaluationRepository;
   evaluatorThresholds: EvaluatorThresholds;
+  /** Trade-preservation gate kill-switch (env LAB_TRADE_PRESERVATION_GATE); false disables the gate entirely. */
+  preservationGateEnabled: boolean;
+  /** Trade-level preservation-check thresholds (env LAB_TRADE_PRESERVATION_*). */
+  preservationThresholds: PreservationThresholds;
   chatSessions: ChatSessionRepository;
   chatPlans: ChatPlanRepository;
   actionProposals: ActionProposalRepository;

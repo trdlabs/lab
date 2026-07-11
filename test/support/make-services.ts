@@ -42,6 +42,7 @@ import type { StrategyRevisionRunExecutor } from '../../src/ports/strategy-revis
 import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port.ts';
 import { selectSignedEvidence } from '../../src/adapters/platform/select-signed-evidence.ts';
 import { DEFAULT_CONSOLIDATION_TOLERANCES } from '../../src/validation/consolidation-evaluator.ts';
+import { DEFAULT_PRESERVATION_THRESHOLDS } from '../../src/validation/trade-preservation.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -144,6 +145,8 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     consolidator: overrides.consolidator ?? null,
     consolidationDepthThreshold: overrides.consolidationDepthThreshold ?? 0,
     consolidationTolerances: overrides.consolidationTolerances ?? DEFAULT_CONSOLIDATION_TOLERANCES,
+    preservationGateEnabled: overrides.preservationGateEnabled ?? true,
+    preservationThresholds: overrides.preservationThresholds ?? DEFAULT_PRESERVATION_THRESHOLDS,
     ...overrides,
   };
 }

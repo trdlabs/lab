@@ -532,6 +532,24 @@ describe('LAB_CONSOLIDATION_DEPTH_THRESHOLD (slice G3b, Task 7)', () => {
   });
 });
 
+describe('trade-preservation gate env (Task 4)', () => {
+  it('loads preservation thresholds with defaults and gate on', () => {
+    const env = loadEnv({});
+    expect(env.preservationGateEnabled).toBe(true);
+    expect(env.preservationThresholds.winnerRetention).toBe(0.9);
+    expect(env.preservationThresholds.minWinnerSample).toBe(3);
+  });
+
+  it('honors LAB_TRADE_PRESERVATION_GATE=off and env overrides', () => {
+    const env = loadEnv({
+      LAB_TRADE_PRESERVATION_GATE: 'off',
+      LAB_TRADE_PRESERVATION_EOD_SHARE: '0.4',
+    });
+    expect(env.preservationGateEnabled).toBe(false);
+    expect(env.preservationThresholds.eodShare).toBe(0.4);
+  });
+});
+
 describe('LAB_CONSOLIDATION_TOL_REL / LAB_CONSOLIDATION_TOL_ABS (slice G3b, Task 8)', () => {
   it('defaults to 0.001 / 0.01', () => {
     const env = loadEnv({} as NodeJS.ProcessEnv);
