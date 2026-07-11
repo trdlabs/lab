@@ -148,13 +148,22 @@ veto if  variantWinnerContribution < winnerRetention * baselineWinnerGross
 
 ## 4. Секция C — Композиция (veto только вниз) + structured metadata
 
-Новый общий helper: `src/validation/apply-preservation-gate.ts` (или экспорт рядом с модулем).
+Новый файл: `src/validation/apply-preservation-gate.ts`.
+
+**Чистый модуль `evaluateTradePreservation` (§3.1) не знает ни `EvaluationOutcome`, ни `RevisionVerdict`** — он возвращает только `PreservationMetadata`. Понижение вердикта делают ДВА тонких лейн-специфичных wrapper'а (разные типы вердиктов: `evaluateBacktest → EvaluationOutcome`, `evaluateRevision → RevisionVerdict`):
 
 ```
-applyPreservationGate(outcome, baselineTrades, variantTrades, agg, thresholds)
-  → { outcome: EvaluationOutcome (возможно понижен), preservation: PreservationMetadata }
-// agg: PreservationAggregates (§3.1)
+applyBacktestPreservationGate(
+  outcome: EvaluationOutcome, baselineTrades, variantTrades, agg, thresholds,
+) → { outcome: EvaluationOutcome, preservation: PreservationMetadata }
+// EOD → INCONCLUSIVE; abstention/winner → MODIFY; reason добавляется в outcome.reasons.
+
+applyRevisionPreservationGate(
+  verdict: RevisionVerdict, baselineTrades, variantTrades, agg, thresholds,
+) → { verdict: RevisionVerdict, preservation: PreservationMetadata }
+// любой veto → REJECT с preservation-причиной.
 ```
+Оба вызывают один и тот же чистый `evaluateTradePreservation` и мапят `PreservationMetadata.reason` в вердикт своего типа. `agg: PreservationAggregates` (§3.1).
 
 **Правило композиции (явное):**
 - Гейт применяется ТОЛЬКО когда исходный вердикт would-accept:
@@ -166,9 +175,12 @@ applyPreservationGate(outcome, baselineTrades, variantTrades, agg, thresholds)
   - линия ревизий: любой veto → `REJECT` с preservation-причиной.
 - Veto **только понижает**. Никогда не повышает и не трогает would-fail.
 
-**Structured metadata (не только строка):** `PreservationMetadata` персистится:
-- линия гипотез — в jsonb `Evaluation`-строки (рядом с `decision`/`reasons`/`thresholds`), поле `preservationGate`.
-- линия ревизий — в `strategy_revision` eval-метаданных (рядом с `verdictReason`).
+**Structured metadata (не только строка):** `PreservationMetadata` персистится в НОВЫХ jsonb-полях (сейчас таких колонок нет — это явное DB/domain/migration изменение):
+- линия гипотез — новая колонка `preservation_gate jsonb` (nullable) в таблице `evaluation` (`src/db/schema.ts:222`, var `evaluation`).
+- линия ревизий — новая колонка `preservation_gate jsonb` (nullable) в таблице `strategy_revision` (`src/db/schema.ts:359`, var `strategyRevision`).
+- Одна Drizzle-миграция `migrations/0021_*.sql` (следующая за `0020_cynical_thor`), сгенерированная `drizzle-kit generate` из правки схемы — добавляет обе колонки. Значение по умолчанию отсутствует/`NULL` (backward-compatible; старые строки = NULL).
+- Domain-типы строк (`Evaluation`, `StrategyRevision`) + репозитории (`evaluation`-репозиторий; `drizzle-strategy-revision.repository.ts::StrategyRevisionRow` + `DrizzleStrategyRevisionRepository`) — read/write нового поля.
+
 Это питает R4 (feedback) и R5 (scorecard) + объяснимость в UI/логах.
 
 **Проводка (call-sites):**
@@ -234,8 +246,11 @@ applyPreservationGate(outcome, baselineTrades, variantTrades, agg, thresholds)
 - `src/orchestrator/handlers/backtest-support.ts` — проводка (линия гипотез)
 - `src/orchestrator/handlers/revision-build.handler.ts` — проводка (линия ревизий)
 - `src/orchestrator/app-services.ts` — DI `runTrades` в оба хэндлера
-- `src/config/env.ts` — 7 env-порогов + kill-switch
-- (SHOULD) `src/validation/experiment-evaluator.ts` — тот же helper на holdout-пути
+- `src/config/env.ts` — 6 порогов + kill-switch (7 env vars всего, §5)
+- `src/db/schema.ts` — колонки `preservation_gate jsonb` в `evaluation` и `strategyRevision`
+- `migrations/0021_*.sql` — **new** (drizzle-kit generate; следующая за 0020)
+- domain-типы строк `Evaluation`/`StrategyRevision` + репозитории (`drizzle-strategy-revision.repository.ts` и evaluation-репозиторий) — read/write нового поля
+- (SHOULD) `src/validation/experiment-evaluator.ts` — тот же helper на holdout-пути (метадата → таблица `experiment_evaluation`, `src/db/schema.ts:408`, если проводится в этом же слайсе)
 - тесты рядом с каждым
 
 ---
@@ -253,7 +268,7 @@ applyPreservationGate(outcome, baselineTrades, variantTrades, agg, thresholds)
 ## 9. Критерии приёмки
 
 1. Регресс-якорь (§6, EOD-abstention сценарий) даёт INCONCLUSIVE.
-2. Veto срабатывает на обеих линиях и только понижает; `preservationGate` metadata персистится (jsonb) на обеих.
+2. Veto срабатывает на обеих линиях и только понижает; `preservation_gate` metadata персистится в новых jsonb-колонках `evaluation` и `strategy_revision`; миграция `0021` применяется чисто (старые строки = NULL).
 3. `LAB_TRADE_PRESERVATION_GATE=off` полностью восстанавливает старое поведение без фетча трейдов.
 4. `closeReason` доходит из артефакта в `TradeRecord` (реальный `end_of_data`, не эвристика).
 5. Suite зелёный; существующие evaluator-тесты обновлены под композицию.
