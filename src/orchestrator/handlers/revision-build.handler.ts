@@ -22,6 +22,7 @@ import type { RevisionRunResult } from '../../ports/strategy-revision-run-execut
 import { evaluateRevision, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
 import { applyRevisionPreservationGate } from '../../validation/apply-preservation-gate.ts';
 import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
+import type { TradeRecord } from '../../domain/research-experiment.ts';
 
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -320,7 +321,11 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   const allRejectReasons: string[] = [];
 
   const gateOn = services.preservationGateEnabled && baselinePlatformRunId !== null;
-  const baselineTrades = gateOn ? await services.runTrades.getRunTrades(baselinePlatformRunId!) : [];
+  // Baseline trades are fetched lazily on the first would-accept verdict and cached across greedy
+  // retries. A candidate that never reaches ACCEPT (aggregate-reject) triggers no trade fetch at
+  // all, so a trades-read failure can't turn into a spurious revision.build abort for a build the
+  // gate would never have judged.
+  let baselineTrades: TradeRecord[] | null = null;
   let firedPreservation: PreservationMetadata | null = null;
 
   for (let attempt = 0; ; attempt++) {
@@ -332,6 +337,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     if (result.status === 'completed' && result.metrics) {
       verdict = evaluateRevision({ accepted: baselineMetrics, candidate: result.metrics, minTrades: 20 });
       if (gateOn && verdict.decision === 'ACCEPT') {
+        if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
         const variantTrades = await services.runTrades.getRunTrades(result.platformRunId);
         const gated = applyRevisionPreservationGate(
           verdict, baselineTrades, variantTrades,

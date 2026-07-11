@@ -278,6 +278,21 @@ function makeVetoExecutor(): StrategyRevisionRunExecutor {
   };
 }
 
+/** comparison_baseline -> 'base-pr' (net 500); candidate -> 'cand-pr' (net 400 < baseline, so
+ * evaluateRevision REJECTs 'no_improvement_over_accepted' before the gate is consulted). */
+function makeRejectExecutor(): StrategyRevisionRunExecutor {
+  const baseline: BacktestMetricBlock = { netPnlUsd: 500, netPnlPct: 5, totalTrades: 30, winRate: 0.6, profitFactor: 1.5, maxDrawdownPct: 8, expectancyUsd: 16.6, sharpe: 1.2, topTradeContributionPct: 10 };
+  const candidate: BacktestMetricBlock = { netPnlUsd: 400, netPnlPct: 4, totalTrades: 30, winRate: 0.55, profitFactor: 1.3, maxDrawdownPct: 8, expectancyUsd: 13, sharpe: 1.0, topTradeContributionPct: 12 };
+  return {
+    execute: async (req: RevisionRunRequest): Promise<RevisionRunResult> => {
+      if (req.label === 'comparison_baseline') {
+        return { status: 'completed', runId: 'cmp-run', platformRunId: 'base-pr', metrics: baseline, totalTrades: baseline.totalTrades };
+      }
+      return { status: 'completed', runId: 'cand-run', platformRunId: 'cand-pr', metrics: candidate, totalTrades: candidate.totalTrades };
+    },
+  };
+}
+
 async function seedTwoHypotheses(services: AppServices): Promise<void> {
   await services.strategyProfiles.create(profile());
   const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
@@ -343,6 +358,28 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     const v2 = revisions.find((r) => r.version === 2);
     expect(v2).toBeDefined();
     expect(v2!.status).toBe('accepted');
+    expect(getRunTrades).not.toHaveBeenCalled();
+  });
+
+  it('gate on but candidate aggregate-rejects: preservation never runs and runTrades is never called (lazy baseline fetch)', async () => {
+    // Regression for the eager-fetch fix: with the gate enabled, a build whose candidate never
+    // reaches an ACCEPT verdict must trigger NO trade fetch — the baseline fetch is lazy, gated on
+    // a would-accept verdict — so a trades-read failure can't abort an aggregate-reject build.
+    const getRunTrades = vi.fn(async () => []);
+    const runTrades = { getRunTrades };
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeRejectExecutor(), researcher: cap.port, runTrades }); // gate ON (default)
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('rejected');
     expect(getRunTrades).not.toHaveBeenCalled();
   });
 });
