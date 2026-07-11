@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryStrategyRevisionRepository } from './in-memory-strategy-revision.repository.ts';
 import type { StrategyRevision } from '../../domain/strategy-revision.ts';
+import { DEFAULT_PRESERVATION_THRESHOLDS } from '../../validation/trade-preservation.ts';
 
 const row = (over: Partial<StrategyRevision> = {}): StrategyRevision => ({
   id: 'rev-1', strategyProfileId: 'prof-1', version: 1,
@@ -135,5 +136,29 @@ describe('InMemoryStrategyRevisionRepository', () => {
     const got = await repo.findById('rev-1');
     expect(got?.baselineValidationStatus).toBe('passed');
     expect(got?.baselineExperimentId).toBe('exp-1');
+  });
+
+  it('updateStatus round-trips preservationGate through the in-memory repo', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    await repo.create(row());
+    await repo.updateStatus('rev-1', {
+      preservationGate: {
+        fired: true,
+        reason: 'winner_degradation',
+        metrics: {
+          totalDelta: 1,
+          matchedCount: 0,
+          disappearedCount: 0,
+          newCount: 0,
+          baselineWinnerCount: 0,
+        },
+        thresholds: DEFAULT_PRESERVATION_THRESHOLDS,
+      },
+      updatedAt: '2026-07-04T00:00:00.000Z',
+    });
+    const got = await repo.findById('rev-1');
+    expect(got?.preservationGate?.reason).toBe('winner_degradation');
+    expect(got?.preservationGate?.fired).toBe(true);
+    expect(got?.preservationGate?.metrics.totalDelta).toBe(1);
   });
 });
