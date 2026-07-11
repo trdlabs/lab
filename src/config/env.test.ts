@@ -569,3 +569,47 @@ describe('LAB_CONSOLIDATION_TOL_REL / LAB_CONSOLIDATION_TOL_ABS (slice G3b, Task
     expect(env.LAB_CONSOLIDATION_TOL_ABS).toBe(0.01);
   });
 });
+
+describe('queue-routing env knobs (Task 3)', () => {
+  it('defaults LAB_REVISION_QUEUE_CONCURRENCY to 1 and LAB_PG_POOL_MAX to 10', () => {
+    const env = loadEnv({} as NodeJS.ProcessEnv);
+    expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(1);
+    expect(env.LAB_PG_POOL_MAX).toBe(10);
+  });
+
+  it('reads overrides for both knobs', () => {
+    const env = loadEnv({
+      LAB_REVISION_QUEUE_CONCURRENCY: '4',
+      LAB_PG_POOL_MAX: '20',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(4);
+    expect(env.LAB_PG_POOL_MAX).toBe(20);
+  });
+
+  it('falls back to defaults on invalid values (zero, negative, non-integer, non-numeric)', () => {
+    const env = loadEnv({
+      LAB_REVISION_QUEUE_CONCURRENCY: '0',
+      LAB_PG_POOL_MAX: '-5',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(1);
+    expect(env.LAB_PG_POOL_MAX).toBe(10);
+  });
+
+  it('falls back to defaults on non-numeric values', () => {
+    const env = loadEnv({
+      LAB_REVISION_QUEUE_CONCURRENCY: 'abc',
+      LAB_PG_POOL_MAX: 'xyz',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(1);
+    expect(env.LAB_PG_POOL_MAX).toBe(10);
+  });
+
+  it('falls back to defaults on empty string', () => {
+    const env = loadEnv({
+      LAB_REVISION_QUEUE_CONCURRENCY: '',
+      LAB_PG_POOL_MAX: '',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(1);
+    expect(env.LAB_PG_POOL_MAX).toBe(10);
+  });
+});
