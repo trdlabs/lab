@@ -1,4 +1,5 @@
 import type { ArtifactRef } from './types.ts';
+import type { PreservationMetadata } from '../validation/trade-preservation.ts';
 
 export type RevisionStatus = 'candidate' | 'accepted' | 'rejected';
 export type DroppedReason = 'merge_conflict_dropped' | 'combo_fail_dropped' | 'unsupported_module_shape';
@@ -23,6 +24,7 @@ export interface StrategyRevision {
   status: RevisionStatus;
   metrics?: Record<string, unknown>;      // BacktestMetricBlock of the accepted run
   verdictReason?: string;
+  preservationGate?: PreservationMetadata;
   kind?: 'composed' | 'consolidated';        // default 'composed' when absent
   consolidatedFromRevisionId?: string;       // consolidated: the R it materializes
   semanticParentRevisionId?: string;         // composed: baseRevisionId; consolidated: R.id

@@ -16,6 +16,7 @@ import type { EvidenceRef, StrategyRetrievalMetadata } from '../domain/strategy-
 import type { ExperimentType, ExperimentStatus, MemberRole, ExperimentVerdict, DatasetScope, HoldoutPolicy, HoldoutBoundary, MemberResultSummary, ExperimentFlags } from '../domain/research-experiment.ts';
 import type { PaperSubmissionStatus } from '../domain/paper-submission.ts';
 import type { RevisionStatus, DroppedHypothesis } from '../domain/strategy-revision.ts';
+import type { PreservationMetadata } from '../validation/trade-preservation.ts';
 
 // Postgres tsvector has no first-class Drizzle column type. This customType lets us
 // DECLARE the column so drizzle-kit tracks it; the GENERATED ALWAYS expression that
@@ -370,6 +371,7 @@ export const strategyRevision = pgTable('strategy_revision', {
   status: text('status').notNull().$type<RevisionStatus>(),
   metrics: jsonb('metrics').$type<Record<string, unknown>>(),
   verdictReason: text('verdict_reason'),
+  preservationGate: jsonb('preservation_gate').$type<PreservationMetadata>(),
   kind: text('kind').notNull().default('composed').$type<'composed' | 'consolidated'>(),
   consolidatedFromRevisionId: text('consolidated_from_revision_id'),
   semanticParentRevisionId: text('semantic_parent_revision_id'),
