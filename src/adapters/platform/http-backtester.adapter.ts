@@ -436,6 +436,7 @@ function parseTrade(row: unknown): TradeRecord {
     exitTs: r.exitTs,
     side: r.side === 'short' ? 'short' : 'long',
     realizedPnl: typeof r.realizedPnl === 'number' ? r.realizedPnl : 0,
+    ...(typeof r.closeReason === 'string' ? { closeReason: r.closeReason } : {}),
   };
 }
 
