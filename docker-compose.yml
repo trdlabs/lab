@@ -63,6 +63,8 @@ services:
       REDIS_URL: redis://redis:6379
       INGRESS_PORT: "3000"
       READ_API_PORT: "3100"
+      # Postgres pool size (global; createDbClient runs in ingress too). See slice 2026-07-11.
+      LAB_PG_POOL_MAX: ${LAB_PG_POOL_MAX:-10}
       TRADING_LAB_READ_TOKEN: ${TRADING_LAB_READ_TOKEN:-}
       TRADING_LAB_CHAT_TOKEN: ${TRADING_LAB_CHAT_TOKEN:-}
       TRADING_LAB_TASK_TOKEN: ${TRADING_LAB_TASK_TOKEN:-}
@@ -212,6 +214,12 @@ services:
       STRATEGY_REFINER_MODEL: ${STRATEGY_REFINER_MODEL:-}
       # Research task token budget configuration
       RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}
+      # Task-lane + pool knobs (slice 2026-07-11). Both lanes hold backtester-submitters;
+      # keep both concurrencies at 1 until the shared backtester semaphore (1.4).
+      LAB_QUEUE_CONCURRENCY: ${LAB_QUEUE_CONCURRENCY:-1}
+      LAB_REVISION_QUEUE_CONCURRENCY: ${LAB_REVISION_QUEUE_CONCURRENCY:-1}
+      RESEARCH_GRID_CONCURRENCY: ${RESEARCH_GRID_CONCURRENCY:-4}
+      LAB_PG_POOL_MAX: ${LAB_PG_POOL_MAX:-10}
       # Platform paper-intake (feature 036/066). Unset URL = paper bridge disabled (kill-switch).
       LAB_PAPER_INTAKE_URL: ${LAB_PAPER_INTAKE_URL:-}
       LAB_PAPER_INTAKE_TOKEN: ${LAB_PAPER_INTAKE_TOKEN:-}

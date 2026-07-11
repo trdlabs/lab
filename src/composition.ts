@@ -1,5 +1,6 @@
 import { loadEnv } from './config/env.ts';
 import { BullMqQueueAdapter } from './adapters/queue/bullmq-queue.adapter.ts';
+import { RoutingQueueAdapter, buildQueueLanes } from './adapters/queue/routing-queue.adapter.ts';
 import { DrizzleResearchTaskRepository } from './adapters/repository/drizzle-research-task.repository.ts';
 import { DrizzleStrategyProfileRepository } from './adapters/repository/drizzle-strategy-profile.repository.ts';
 import { DrizzleAgentEventRepository } from './adapters/repository/drizzle-agent-event.repository.ts';
@@ -334,8 +335,14 @@ export function composeRuntime() {
 
   const mastraRuntime = composeMastra(env);
 
-  const { db, pool } = createDbClient(env.DATABASE_URL);
-  const queue = new BullMqQueueAdapter(env.REDIS_URL, 'research-tasks', { workerConcurrency: env.LAB_QUEUE_CONCURRENCY });
+  const { db, pool } = createDbClient(env.DATABASE_URL, { max: env.LAB_PG_POOL_MAX });
+  const redisUrl = env.REDIS_URL;
+  const queue = new RoutingQueueAdapter(buildQueueLanes({
+    defaultConcurrency: env.LAB_QUEUE_CONCURRENCY,
+    revisionConcurrency: env.LAB_REVISION_QUEUE_CONCURRENCY,
+    createLaneAdapter: (name, workerConcurrency) =>
+      new BullMqQueueAdapter(redisUrl, name, { workerConcurrency }),
+  }));
 
   const hypotheses = new DrizzleHypothesisProposalRepository(db);
   const strategyProfiles = new DrizzleStrategyProfileRepository(db);
