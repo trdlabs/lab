@@ -20,6 +20,8 @@ import type { StrategyManifestMeta } from '../../ports/strategy-builder.port.ts'
 import type { BacktestMetricBlock } from '../../ports/platform-gateway.port.ts';
 import type { RevisionRunResult } from '../../ports/strategy-revision-run-executor.ts';
 import { evaluateRevision, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
+import { applyRevisionPreservationGate } from '../../validation/apply-preservation-gate.ts';
+import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
 
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -286,16 +288,19 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   const existingBaselineRun = await services.strategyBacktests.findByBundleAndParams(
     baseBundle.manifest.id, acceptedParamsHash, baseBundle.bundleHash,
   );
+  let baselinePlatformRunId: string | null = null;
   let baselineMetrics: BacktestMetricBlock | null =
     existingBaselineRun && existingBaselineRun.status === 'completed' && existingBaselineRun.metrics
       ? existingBaselineRun.metrics
       : null;
+  if (baselineMetrics && existingBaselineRun) baselinePlatformRunId = existingBaselineRun.platformRunId;
   if (!baselineMetrics) {
     const cmp = await services.revisionRunExecutor.execute({
       revisionId, label: 'comparison_baseline', strategyBundle: baseBundle,
       strategyProfileId, run: runConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
     });
     baselineMetrics = cmp.status === 'completed' && cmp.metrics ? cmp.metrics : null;
+    if (baselineMetrics) baselinePlatformRunId = cmp.platformRunId;
   }
   if (!baselineMetrics) {
     await services.revisions.updateStatus(revisionId, {
@@ -314,6 +319,10 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   let acceptedMetrics: BacktestMetricBlock | undefined;
   const allRejectReasons: string[] = [];
 
+  const gateOn = services.preservationGateEnabled && baselinePlatformRunId !== null;
+  const baselineTrades = gateOn ? await services.runTrades.getRunTrades(baselinePlatformRunId!) : [];
+  let firedPreservation: PreservationMetadata | null = null;
+
   for (let attempt = 0; ; attempt++) {
     const result = await services.revisionRunExecutor.execute({
       revisionId, label: 'candidate', strategyBundle: assembled,
@@ -322,6 +331,17 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
 
     if (result.status === 'completed' && result.metrics) {
       verdict = evaluateRevision({ accepted: baselineMetrics, candidate: result.metrics, minTrades: 20 });
+      if (gateOn && verdict.decision === 'ACCEPT') {
+        const variantTrades = await services.runTrades.getRunTrades(result.platformRunId);
+        const gated = applyRevisionPreservationGate(
+          verdict, baselineTrades, variantTrades,
+          { baseline: { netPnlUsd: baselineMetrics.netPnlUsd, totalTrades: baselineMetrics.totalTrades },
+            variant: { netPnlUsd: result.metrics.netPnlUsd, totalTrades: result.metrics.totalTrades } },
+          services.preservationThresholds,
+        );
+        verdict = gated.verdict;
+        if (gated.preservation) firedPreservation = gated.preservation;
+      }
     } else {
       verdict = { decision: 'REJECT', reasons: ['candidate_run_unavailable'] };
     }
@@ -369,7 +389,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   if (verdict.decision === 'ACCEPT' && acceptedRun && acceptedMetrics) {
     await services.revisions.updateStatus(revisionId, {
       status: 'accepted', metrics: acceptedMetrics as unknown as Record<string, unknown>,
-      comboBacktestRunId: acceptedRun.runId, verdictReason: verdict.reasons.join(', '), updatedAt: now(),
+      comboBacktestRunId: acceptedRun.runId, verdictReason: verdict.reasons.join(', '),
+      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
     });
     for (const id of currentIds) {
       await services.hypotheses.updateStatus(id, 'merged');
@@ -395,7 +416,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     }
   } else {
     await services.revisions.updateStatus(revisionId, {
-      status: 'rejected', verdictReason: allRejectReasons.join(', '), updatedAt: now(),
+      status: 'rejected', verdictReason: allRejectReasons.join(', '),
+      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
     });
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: allRejectReasons,
