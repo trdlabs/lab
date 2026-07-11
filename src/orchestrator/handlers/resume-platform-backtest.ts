@@ -52,7 +52,7 @@ export async function resumePlatformRun(services: AppServices, run: BacktestRun)
   if ((await services.evaluations.listByBacktestRun(runId)).length > 0) return { kind: 'skipped', runId, reason: 'already_evaluated' };
   if (again.status !== 'submitted') return { kind: 'skipped', runId, reason: 'not_resumable' };
 
-  const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId: fresh.hypothesisId }, outcome);
+  const result = await applyPlatformTerminalOutcome(services, task, { runId, hypothesisId: fresh.hypothesisId, platformRunId: again.platformRunId }, outcome);
   if (result.kind === 'completed') {
     await enqueueBacktestCompleted(services, task, {
       backtestRunId: runId,

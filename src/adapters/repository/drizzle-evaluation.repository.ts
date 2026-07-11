@@ -16,7 +16,7 @@ function toDomain(row: Row): Evaluation {
     decision: row.decision as EvaluationDecision, reasons: row.reasons,
     metricsSnapshot: row.metricsSnapshot as ComparisonSummary, thresholds: row.thresholds as EvaluatorThresholds,
     createdAt: row.createdAt.toISOString(),
-    preservationGate: row.preservationGate as PreservationMetadata | undefined,
+    preservationGate: row.preservationGate ?? undefined,
   };
 }
 

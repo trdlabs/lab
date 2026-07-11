@@ -64,7 +64,7 @@ export interface BacktestCompletionResult {
 export async function finalizeBacktestCompletion(
   services: AppServices,
   task: ResearchTask,
-  args: { runId: string; hypothesisId: string; comparison: ComparisonSummary; artifactRefs: string[] },
+  args: { runId: string; hypothesisId: string; platformRunId: string; comparison: ComparisonSummary; artifactRefs: string[] },
 ): Promise<BacktestCompletionResult> {
   const now = () => new Date().toISOString();
   const c = args.comparison;
@@ -85,11 +85,11 @@ export async function finalizeBacktestCompletion(
   let preservationGate: PreservationMetadata | undefined;
   if (services.preservationGateEnabled && (outcome.decision === 'PASS' || outcome.decision === 'PAPER_CANDIDATE')) {
     try {
-      const baselineTrades = await services.runTrades.getBaselineRunTrades(args.runId);
+      const baselineTrades = await services.runTrades.getBaselineRunTrades(args.platformRunId);
       if (baselineTrades === null) {
         await services.events.append(event(task.id, 'evaluation.preservation_skipped', { runId: args.runId, reason: 'artifact_unavailable' }));
       } else {
-        const variantTrades = await services.runTrades.getRunTrades(args.runId);
+        const variantTrades = await services.runTrades.getRunTrades(args.platformRunId);
         const gated = applyBacktestPreservationGate(
           outcome, baselineTrades, variantTrades,
           { baseline: { netPnlUsd: c.baseline.netPnlUsd, totalTrades: c.baseline.totalTrades },
@@ -171,10 +171,10 @@ export type PlatformTerminalResult =
 export async function applyPlatformTerminalOutcome(
   services: AppServices,
   task: ResearchTask,
-  args: { runId: string; hypothesisId: string },
+  args: { runId: string; hypothesisId: string; platformRunId: string },
   outcome: Exclude<PlatformRunOutcome, { status: 'pending' }>,
 ): Promise<PlatformTerminalResult> {
-  const { runId, hypothesisId } = args;
+  const { runId, hypothesisId, platformRunId } = args;
   if (outcome.status === 'rejected') {
     await services.backtests.markRejected(runId);
     await services.events.append(event(task.id, 'backtest.failed', {
@@ -194,7 +194,7 @@ export async function applyPlatformTerminalOutcome(
     }
     throw err;
   }
-  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, comparison, artifactRefs: [...outcome.artifactIds] });
+  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, platformRunId, comparison, artifactRefs: [...outcome.artifactIds] });
   return {
     kind: 'completed', decision: completion.decision, reasons: completion.reasons,
     deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,

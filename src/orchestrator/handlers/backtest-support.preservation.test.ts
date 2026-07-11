@@ -42,26 +42,32 @@ function task(): ResearchTask {
 
 it('downgrades a would-accept verdict to MODIFY on abstention and persists preservation_gate', async () => {
   const runTrades = new FakeRunTradesAdapter(
-    { 'run-1': [ /* variant */ { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 }, { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 }, { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 } ] },
-    { 'run-1': [ /* baseline */ { entryTs: 1, exitTs: 2, side: 'long', realizedPnl: -30 }, { entryTs: 2, exitTs: 3, side: 'long', realizedPnl: -30 }, { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 }, { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 }, { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 } ] },
+    { 'platform-run-1': [ /* variant */ { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 }, { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 }, { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 } ] },
+    { 'platform-run-1': [ /* baseline */ { entryTs: 1, exitTs: 2, side: 'long', realizedPnl: -30 }, { entryTs: 2, exitTs: 3, side: 'long', realizedPnl: -30 }, { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 }, { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 }, { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 } ] },
   );
+  const getBaselineRunTrades = vi.spyOn(runTrades, 'getBaselineRunTrades');
   const services = makeServices({ runTrades });
   await services.backtests.createSubmitted(seedRun());
-  const res = await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', comparison: comparison(), artifactRefs: [] });
+  const res = await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', platformRunId: 'platform-run-1', comparison: comparison(), artifactRefs: [] });
   expect(res.decision).toBe('MODIFY');
+  // Proves the fetch is keyed by the PLATFORM run id, not the lab-DB runId — the veto only fires
+  // because the map lookup resolved under 'platform-run-1'; a lookup under 'run-1' would return
+  // null and the fail-open path would leave the verdict at PASS/PAPER_CANDIDATE instead.
+  expect(getBaselineRunTrades).toHaveBeenCalledWith('platform-run-1');
+  expect(getBaselineRunTrades).not.toHaveBeenCalledWith('run-1');
   const evals = await services.evaluations.listByBacktestRun('run-1');
   expect(evals[0]?.preservationGate?.reason).toBe('abstention_gaming');
 });
 
 it('fail-open: baseline artifact unavailable → verdict unchanged + evaluation.preservation_skipped(artifact_unavailable), preservation_gate NULL', async () => {
   // variant trades present, baseline map empty → getBaselineRunTrades returns null
-  const runTrades = new FakeRunTradesAdapter({ 'run-1': [] }, {});
+  const runTrades = new FakeRunTradesAdapter({ 'platform-run-1': [] }, {});
   const events: string[] = [];
   const services = makeServices({ runTrades });
   await services.backtests.createSubmitted(seedRun());
   const origAppend = services.events.append.bind(services.events);
   services.events.append = async (e: any) => { events.push(e.type + ':' + (e.payload?.reason ?? '')); return origAppend(e); };
-  const res = await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', comparison: comparison(), artifactRefs: [] });
+  const res = await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', platformRunId: 'platform-run-1', comparison: comparison(), artifactRefs: [] });
   // aggregate verdict stands (whatever evaluateBacktest returns for this comparison) — NOT downgraded by the gate
   const evals = await services.evaluations.listByBacktestRun('run-1');
   expect(evals[0]?.preservationGate).toBeUndefined();
@@ -74,6 +80,6 @@ it('kill-switch off: no baseline/variant preservation fetch', async () => {
   const runTrades = { getRunTrades, getBaselineRunTrades };
   const services = makeServices({ runTrades, preservationGateEnabled: false });
   await services.backtests.createSubmitted(seedRun());
-  await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', comparison: comparison(), artifactRefs: [] });
+  await finalizeBacktestCompletion(services, task(), { runId: 'run-1', hypothesisId: 'h1', platformRunId: 'platform-run-1', comparison: comparison(), artifactRefs: [] });
   expect(getBaselineRunTrades).not.toHaveBeenCalled();
 });

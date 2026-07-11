@@ -50,6 +50,16 @@ it('downgrades PASS to MODIFY on winner_degradation', () => {
   expect(r.outcome.reasons).toContain('winner_degradation');
 });
 
+it('downgrades PASS to MODIFY on abstention_gaming', () => {
+  const base = [trB({ realizedPnl: -30, entryTs: 1 }), trB({ realizedPnl: -30, entryTs: 2 }),
+                trB({ realizedPnl: 5, entryTs: 3 }), trB({ realizedPnl: 5, entryTs: 4 }), trB({ realizedPnl: 5, entryTs: 5 })];
+  const variant = [trB({ realizedPnl: 5, entryTs: 3 }), trB({ realizedPnl: 5, entryTs: 4 }), trB({ realizedPnl: 5, entryTs: 5 })];
+  // baseline 5 trades net -45; variant 3 trades net 15 → totalDelta 60; dropPct 40%; removedLosers 60 >= 0.7*60
+  const r = applyBacktestPreservationGate(pass, base, variant, agg(-45, 5, 15, 3), T);
+  expect(r.outcome.decision).toBe('MODIFY');
+  expect(r.outcome.reasons).toContain('abstention_gaming');
+});
+
 it('downgrades PAPER_CANDIDATE to INCONCLUSIVE on end_of_data_position', () => {
   const paperCand: EvaluationOutcome = { decision: 'PAPER_CANDIDATE', reasons: ['strong_robust_edge'] };
   const base = [trB({ realizedPnl: -5 })];
