@@ -1,6 +1,6 @@
 # Revision-lane routing + config hygiene — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution:** task-by-task TDD, optional subagents. Do each task's steps in order (write failing test → run-fail → implement → run-pass → commit). Steps use checkbox (`- [ ]`) syntax for tracking. (If a superpowers execution skill is available in the session, subagent-driven-development / executing-plans may be used; they are not required.)
 
 **Goal:** Вынести линию ревизий (`revision.build`, `revision.consolidate`) в отдельную BullMQ-очередь со своим воркером через чистую routing-обёртку над неизменным `BullMqQueueAdapter`, плюс закрыть дешёвую конфиг-гигиену Этапа 0.
 
@@ -99,9 +99,7 @@ Expected: PASS (4 tests).
 
 ```bash
 git add src/adapters/queue/route-task-type.ts src/adapters/queue/route-task-type.test.ts
-git commit -m "feat(queue): pure routeTaskType policy (default | revision lane)
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(queue): pure routeTaskType policy (default | revision lane)"
 ```
 
 ---
@@ -133,15 +131,16 @@ import {
 
 function fakeQueue(): TaskQueuePort & {
   enqueued: Array<{ envelope: QueueEnvelope; opts?: { delayMs?: number } }>;
-  processed: number; closeError?: Error;
+  processed: number; closed: number; closeError?: Error;
 } {
   const state = {
     enqueued: [] as Array<{ envelope: QueueEnvelope; opts?: { delayMs?: number } }>,
     processed: 0,
+    closed: 0,
     closeError: undefined as Error | undefined,
     async enqueue(envelope: QueueEnvelope, opts?: { delayMs?: number }) { state.enqueued.push({ envelope, opts }); },
     process(_handler: QueueHandler) { state.processed += 1; },
-    async close() { if (state.closeError) throw state.closeError; },
+    async close() { state.closed += 1; if (state.closeError) throw state.closeError; },
   };
   return state;
 }
@@ -159,10 +158,12 @@ describe('RoutingQueueAdapter', () => {
     await adapter.enqueue(envelope('revision.build'));
 
     expect(def.enqueued).toHaveLength(1);
-    expect(def.enqueued[0].envelope.taskType).toBe('hypothesis.build');
-    expect(def.enqueued[0].opts).toEqual({ delayMs: 500 });
+    const firstDefault = def.enqueued[0]!;
+    expect(firstDefault.envelope.taskType).toBe('hypothesis.build');
+    expect(firstDefault.opts).toEqual({ delayMs: 500 });
     expect(rev.enqueued).toHaveLength(1);
-    expect(rev.enqueued[0].envelope.taskType).toBe('revision.build');
+    const firstRevision = rev.enqueued[0]!;
+    expect(firstRevision.envelope.taskType).toBe('revision.build');
   });
 
   it('registers the handler on every lane', () => {
@@ -173,11 +174,13 @@ describe('RoutingQueueAdapter', () => {
     expect(rev.processed).toBe(1);
   });
 
-  it('closes all lanes and throws AggregateError when one fails', async () => {
+  it('closes ALL lanes even when one fails, then throws AggregateError (no short-circuit)', async () => {
     const def = fakeQueue(); const rev = fakeQueue();
     rev.closeError = new Error('revision boom');
     const adapter = new RoutingQueueAdapter({ default: def, revision: rev });
     await expect(adapter.close()).rejects.toThrow(AggregateError);
+    expect(def.closed).toBe(1);
+    expect(rev.closed).toBe(1);
   });
 
   it('closes all lanes cleanly when none fail', async () => {
@@ -277,9 +280,7 @@ Expected: PASS (5 tests).
 
 ```bash
 git add src/adapters/queue/routing-queue.adapter.ts src/adapters/queue/routing-queue.adapter.test.ts
-git commit -m "feat(queue): RoutingQueueAdapter + buildQueueLanes (revision lane isolation)
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(queue): RoutingQueueAdapter + buildQueueLanes (revision lane isolation)"
 ```
 
 ---
@@ -353,9 +354,7 @@ Expected: no errors.
 
 ```bash
 git add src/config/env.ts src/config/env.queue.test.ts
-git commit -m "feat(config): LAB_REVISION_QUEUE_CONCURRENCY + LAB_PG_POOL_MAX env knobs
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(config): LAB_REVISION_QUEUE_CONCURRENCY + LAB_PG_POOL_MAX env knobs"
 ```
 
 ---
@@ -423,9 +422,7 @@ Expected: PASS (2 tests).
 
 ```bash
 git add src/db/client.ts src/db/client.test.ts
-git commit -m "feat(db): optional pool max in createDbClient
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(db): optional pool max in createDbClient"
 ```
 
 ---
@@ -492,9 +489,7 @@ Expected: PASS — no regressions. In particular the composition and worker test
 
 ```bash
 git add src/composition.ts
-git commit -m "feat(composition): route tasks to isolated revision lane; wire pool max
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(composition): route tasks to isolated revision lane; wire pool max"
 ```
 
 ---
@@ -503,7 +498,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `.env.example`
-- Modify: `docker-compose.yml` (worker service `environment:` block)
+- Modify: `docker-compose.yml` (worker service `environment:` block; ingress service `environment:` block for the shared pool knob)
 
 **Interfaces:**
 - Docs/config only. No unit test; verified by YAML validation + visual diff.
@@ -562,7 +557,11 @@ LAB_REVISION_QUEUE_CONCURRENCY=1
 LAB_PG_POOL_MAX=10
 ```
 
-- [ ] **Step 3: docker-compose — proxy the knobs into the worker (0.3)**
+- [ ] **Step 3: docker-compose — proxy the knobs into worker + ingress (0.3)**
+
+`composeRuntime()` runs in both the worker and ingress processes; `createDbClient` (pool)
+runs in both, but only the worker calls `queue.process()` — so the concurrency knobs are
+worker-only, while `LAB_PG_POOL_MAX` is a global pool knob needed in both.
 
 In `docker-compose.yml`, in the **worker** service `environment:` block, after the
 `RESEARCH_TASK_TOKEN_BUDGET: ${RESEARCH_TASK_TOKEN_BUDGET:-}` line, add:
@@ -576,6 +575,14 @@ In `docker-compose.yml`, in the **worker** service `environment:` block, after t
       LAB_PG_POOL_MAX: ${LAB_PG_POOL_MAX:-10}
 ```
 
+Then, in the **ingress** service `environment:` block, after the `READ_API_PORT: "3100"`
+line, add the shared pool knob (ingress also builds a pg pool via `createDbClient`):
+
+```yaml
+      # Postgres pool size (global; createDbClient runs in ingress too). See slice 2026-07-11.
+      LAB_PG_POOL_MAX: ${LAB_PG_POOL_MAX:-10}
+```
+
 - [ ] **Step 4: Validate the compose file**
 
 Run: `docker compose -f docker-compose.yml config -q`
@@ -585,9 +592,7 @@ Expected: no output, exit 0 (YAML + interpolation valid). If `docker` is unavail
 
 ```bash
 git add .env.example docker-compose.yml
-git commit -m "docs(config): document lane concurrency guards; proxy knobs into worker
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "docs(config): document lane concurrency guards; proxy knobs into worker + ingress"
 ```
 
 ---
