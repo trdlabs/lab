@@ -10,6 +10,8 @@ import type { Evaluation } from '../../domain/evaluation.ts';
 import type { PlatformRunConfig, Ref } from '../../ports/research-platform.port.ts';
 import { evaluateBacktest } from '../../validation/evaluator.ts';
 import type { EvaluationDecision } from '../../validation/evaluator.ts';
+import { applyBacktestPreservationGate } from '../../validation/apply-preservation-gate.ts';
+import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
 
 export function event(taskId: string, type: string, payload: Record<string, unknown>): AgentEvent {
   return { id: randomUUID(), taskId, type, payload, createdAt: new Date().toISOString() };
@@ -77,16 +79,43 @@ export async function finalizeBacktestCompletion(
   await services.events.append(event(task.id, 'backtest.completed', { runId: args.runId, deltaNetPnlUsd: completion.deltaNetPnlUsd }));
 
   const outcome = evaluateBacktest(c, services.evaluatorThresholds);
+
+  let finalDecision = outcome.decision;
+  let finalReasons = outcome.reasons;
+  let preservationGate: PreservationMetadata | undefined;
+  if (services.preservationGateEnabled && (outcome.decision === 'PASS' || outcome.decision === 'PAPER_CANDIDATE')) {
+    try {
+      const baselineTrades = await services.runTrades.getBaselineRunTrades(args.runId);
+      if (baselineTrades === null) {
+        await services.events.append(event(task.id, 'evaluation.preservation_skipped', { runId: args.runId, reason: 'artifact_unavailable' }));
+      } else {
+        const variantTrades = await services.runTrades.getRunTrades(args.runId);
+        const gated = applyBacktestPreservationGate(
+          outcome, baselineTrades, variantTrades,
+          { baseline: { netPnlUsd: c.baseline.netPnlUsd, totalTrades: c.baseline.totalTrades },
+            variant: { netPnlUsd: c.variant.netPnlUsd, totalTrades: c.variant.totalTrades } },
+          services.preservationThresholds,
+        );
+        finalDecision = gated.outcome.decision;
+        finalReasons = gated.outcome.reasons;
+        if (gated.preservation) preservationGate = gated.preservation;
+      }
+    } catch (err) {
+      await services.events.append(event(task.id, 'evaluation.preservation_skipped', { runId: args.runId, reason: 'fetch_failed', detail: errMsg(err) }));
+    }
+  }
+
   const evaluation: Evaluation = {
     id: randomUUID(), backtestRunId: args.runId, hypothesisId: args.hypothesisId,
-    decision: outcome.decision, reasons: outcome.reasons, metricsSnapshot: c,
+    decision: finalDecision, reasons: finalReasons, metricsSnapshot: c,
     thresholds: services.evaluatorThresholds, createdAt: now(),
+    ...(preservationGate !== undefined ? { preservationGate } : {}),
   };
   await services.evaluations.create(evaluation);
   await services.backtests.markEvaluated(args.runId);
-  await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: outcome.decision, reasons: outcome.reasons }));
+  await services.events.append(event(task.id, 'evaluation.completed', { runId: args.runId, decision: finalDecision, reasons: finalReasons }));
   return {
-    decision: outcome.decision, reasons: outcome.reasons,
+    decision: finalDecision, reasons: finalReasons,
     deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,
   };
 }
