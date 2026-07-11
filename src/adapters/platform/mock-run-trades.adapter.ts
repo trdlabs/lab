@@ -6,4 +6,7 @@ export class MockRunTradesAdapter implements RunTradesPort {
   async getRunTrades(): Promise<TradeRecord[]> {
     return [];
   }
+  async getBaselineRunTrades(): Promise<TradeRecord[] | null> {
+    return null;
+  }
 }

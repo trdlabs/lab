@@ -342,7 +342,7 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
 
   it('kill-switch off: same combo is accepted and runTrades is never called', async () => {
     const getRunTrades = vi.fn(async () => []);
-    const runTrades = { getRunTrades };
+    const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
     const services = makeServices({
       revisionRunExecutor: makeVetoExecutor(), researcher: cap.port, runTrades, preservationGateEnabled: false,
@@ -366,7 +366,7 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     // reaches an ACCEPT verdict must trigger NO trade fetch — the baseline fetch is lazy, gated on
     // a would-accept verdict — so a trades-read failure can't abort an aggregate-reject build.
     const getRunTrades = vi.fn(async () => []);
-    const runTrades = { getRunTrades };
+    const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
     const services = makeServices({ revisionRunExecutor: makeRejectExecutor(), researcher: cap.port, runTrades }); // gate ON (default)
 
