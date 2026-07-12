@@ -19,6 +19,17 @@ export interface ActiveOverlayRuleSummary {
   readonly status: 'validated' | 'rejected' | 'accepted_revision';
 }
 
+/** Narrow lab-local excerpt of a decision-log entry, scoped to a losing trade's window.
+ *  Never exposes the raw SDK DecisionLogEntry DTO to the researcher prompt layer. */
+export interface DecisionExcerpt {
+  runId: string;
+  timestampMs?: number;
+  action?: string;
+  reason?: string;
+  summary?: string;
+  relatedTradeId?: string;
+}
+
 export interface ResearcherInput {
   profile: StrategyProfile;
   marketContext: MarketContext;
@@ -31,6 +42,8 @@ export interface ResearcherInput {
   maxHypotheses: number;
   focus: ResearcherFocus;
   activeOverlayRules?: readonly ActiveOverlayRuleSummary[];
+  retryFeedback?: { decision: string; reasons: readonly string[] };
+  decisionExcerpts?: readonly DecisionExcerpt[];
 }
 
 export interface ResearcherPort {
