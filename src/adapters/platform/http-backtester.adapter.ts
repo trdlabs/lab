@@ -434,11 +434,21 @@ function parseTrade(row: unknown): TradeRecord {
   if (typeof r.entryTs !== 'number' || typeof r.exitTs !== 'number') {
     throw new Error('trades artifact row missing entryTs/exitTs');
   }
+  // side and realizedPnl feed the trade-preservation veto (per-side matching + winner/PnL sums).
+  // A drifted or garbled row must fail loudly — surfacing on the caller's preservation_skipped
+  // path — rather than coerce into a plausible long/0 trade the gate would silently compare
+  // against (a false veto or, worse, a false pass). Symmetric with the entryTs/exitTs check.
+  if (r.side !== 'long' && r.side !== 'short') {
+    throw new Error(`trades artifact row has invalid side: ${JSON.stringify(r.side)}`);
+  }
+  if (typeof r.realizedPnl !== 'number' || !Number.isFinite(r.realizedPnl)) {
+    throw new Error(`trades artifact row has non-numeric realizedPnl: ${JSON.stringify(r.realizedPnl)}`);
+  }
   return {
     entryTs: r.entryTs,
     exitTs: r.exitTs,
-    side: r.side === 'short' ? 'short' : 'long',
-    realizedPnl: typeof r.realizedPnl === 'number' ? r.realizedPnl : 0,
+    side: r.side,
+    realizedPnl: r.realizedPnl,
     ...(typeof r.closeReason === 'string' ? { closeReason: r.closeReason } : {}),
   };
 }
