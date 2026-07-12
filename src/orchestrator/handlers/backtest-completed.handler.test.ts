@@ -322,7 +322,7 @@ describe('backtestCompletedHandler', () => {
       expect(created?.payload).toEqual({ strategyProfileId: 'profile-1', correlationId: 'corr-1' });
     });
 
-    it('does NOT enqueue revision.build while a sibling hypothesis.build/backtest.completed task is still non-terminal', async () => {
+    it('enqueues revision.build unconditionally even while a sibling hypothesis.build/backtest.completed task is still non-terminal (P0-1 fix: terminality is now revisionBuildHandler\'s self-gate, not this trigger)', async () => {
       const queue = new InMemoryQueueAdapter();
       const s = makeServices({ taskQueue: queue });
       const sibling: ResearchTask = {
@@ -332,7 +332,7 @@ describe('backtestCompletedHandler', () => {
       await s.researchTasks.create(sibling);
       await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
 
-      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(1);
     });
 
     it('enqueues revision.build once the last sibling task turns terminal', async () => {
@@ -346,6 +346,34 @@ describe('backtestCompletedHandler', () => {
       await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
 
       expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(1);
+    });
+
+    it('P0-1: two concurrent last-finishers race with a still-non-terminal chain member — exactly one revision.build enqueued (base dedupeKey); zero-fire is impossible', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      // A chain member that never settles for the duration of this test. Under the OLD
+      // allTerminal-gated trigger this would have permanently blocked the enqueue (zero-fire) —
+      // the whole point of P0-1 is that the trigger no longer looks at this at all.
+      const stillRunning: ResearchTask = {
+        id: 'task-still-running', taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'running', payload: {}, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await s.researchTasks.create(stillRunning);
+
+      const taskA = task({ ...BASE_PAYLOAD, hypothesisId: 'hyp-a', backtestRunId: 'bt-a', decision: 'PASS' });
+      taskA.id = 'task-a';
+      const taskB = task({ ...BASE_PAYLOAD, hypothesisId: 'hyp-b', backtestRunId: 'bt-b', decision: 'PASS' });
+      taskB.id = 'task-b';
+
+      // Simulate two concurrent last-finishers running their handlers (sequential here — the
+      // in-memory repo's base-dedupeKey read-then-write is deterministic under sequential
+      // invocation, which is the correct shape for proving the dedupe absorbs the second fire).
+      await backtestCompletedHandler(taskA, s);
+      await backtestCompletedHandler(taskB, s);
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+      expect(revisionTasks[0]!.dedupeKey).toBe('revision.build:corr-1');
     });
 
     it('two concurrent last-finishing backtest.completed tasks both trigger — dedupeKey absorbs into exactly one revision.build task', async () => {
@@ -372,7 +400,11 @@ describe('backtestCompletedHandler', () => {
 
     it('trigger failure is fail-soft: emits revision.build_trigger_failed, does not throw', async () => {
       const s = makeServices();
-      s.researchTasks.listByCorrelationAndTypes = async () => {
+      // enqueueCycleClose's first repo call is findByDedupeKey (inside createAndEnqueueTask) — this
+      // handler no longer calls listByCorrelationAndTypes at all (that query moved to
+      // revisionBuildHandler's self-gate), so the failure must be injected on the call this
+      // trigger actually makes.
+      s.researchTasks.findByDedupeKey = async () => {
         throw new Error('db down');
       };
       await expect(
@@ -384,11 +416,13 @@ describe('backtestCompletedHandler', () => {
       expect(types).toContain('backtest.result_ready'); // the task's own outcome is unaffected
     });
 
-    // Regression (Finding 1): a FAIL/MODIFY decision enqueues a same-correlationId retry
-    // (research.run_cycle) BEFORE the trigger's query runs. The trigger must see that retry as a
-    // non-terminal task in the chain and must NOT fire revision.build for it — otherwise the
-    // retried cycle's hypotheses never get a revision pass, and the dedupeKey is burned early.
-    it('last finisher decides FAIL within retry budget: retry is enqueued AND revision.build is NOT enqueued', async () => {
+    // Regression (Finding 1), updated for P0-1: a FAIL/MODIFY decision enqueues a same-correlationId
+    // retry (research.run_cycle). The OLD allTerminal-gated trigger had to see that retry as
+    // non-terminal and suppress its own fire, or the retried cycle's hypotheses would never get a
+    // revision pass. Under the new unconditional trigger, BOTH fire from this same invocation —
+    // revision.build is no longer gated here at all; revisionBuildHandler's own self-gate
+    // (isCycleChainTerminal) is what defers the build until the retry settles.
+    it('last finisher decides FAIL within retry budget: retry AND revision.build are BOTH enqueued (revisionBuildHandler defers itself until the retry settles)', async () => {
       const queue = new InMemoryQueueAdapter();
       const s = makeServices({ taskQueue: queue });
       const sibling: ResearchTask = {
@@ -402,34 +436,32 @@ describe('backtestCompletedHandler', () => {
         s,
       );
 
-      // The retry (created inside enqueueResearchRetry, which runs before the trigger block in
-      // this same handler invocation) IS visible to listByCorrelationAndTypes by the time the
-      // trigger's query runs.
       expect(queue.queued.filter((q) => q.taskType === 'research.run_cycle')).toHaveLength(1);
-      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(1);
     });
 
-    it('once the retried cycle itself turns terminal, a later backtest.completed fires revision.build exactly once', async () => {
+    it('repeated invocations across the same correlationId (e.g. the retried cycle\'s own later backtest.completed) collapse to exactly one revision.build via the base dedupeKey', async () => {
       const queue = new InMemoryQueueAdapter();
       const s = makeServices({ taskQueue: queue });
 
       const firstTask = task({ ...BASE_PAYLOAD, decision: 'FAIL', reasons: ['no_improvement_over_baseline'], cycleDepth: 0 });
       // Register the finisher itself as completed up front (mirrors the 'two concurrent
-      // last-finishing' test above) so the SECOND invocation's trigger query can see it as terminal.
+      // last-finishing' test above) — irrelevant to the trigger now, kept for parity with the
+      // repo state a real worker would have written by this point.
       await s.researchTasks.create({ ...firstTask, status: 'completed' });
 
       await backtestCompletedHandler(firstTask, s);
 
       const retryEnqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
       expect(retryEnqueued).toHaveLength(1);
-      // Still no revision.build — the retry chain is not terminal yet.
-      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(0);
+      // The trigger already fired unconditionally on this first invocation.
+      expect(queue.queued.filter((q) => q.taskType === 'revision.build')).toHaveLength(1);
 
       // Simulate the retried research.run_cycle running to completion.
       await s.researchTasks.updateStatus(retryEnqueued[0]!.taskId, 'completed');
 
-      // The retried cycle's own backtest.completed fires next and decides PASS (terminal, no
-      // further retry) — this is now the last finisher, and the whole chain is terminal.
+      // The retried cycle's own backtest.completed fires next and decides PASS — same
+      // correlationId, so its enqueueCycleClose call hits the same base dedupeKey and is absorbed.
       const secondTask = task({ ...BASE_PAYLOAD, decision: 'PASS', cycleDepth: 1 });
       secondTask.id = 'task-bt-completed-2';
       await backtestCompletedHandler(secondTask, s);

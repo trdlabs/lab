@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
-import { createAndEnqueueTask } from '../task-intake.ts';
+import { enqueueCycleClose } from '../cycle-close.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { withinTokenBudget } from '../token-budget.ts';
 import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
@@ -187,32 +187,12 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
     backtestRunId,
   }));
 
-  // Cycle-completion trigger (fail-soft): once every hypothesis.build/backtest.completed/
-  // research.run_cycle task in this correlation chain (except this one) is terminal, batch the
-  // cycle's proxy-passed hypotheses into a revision.build candidate. research.run_cycle is
-  // included so a same-correlationId retry enqueued above (see enqueueResearchRetry, which runs
-  // earlier in this same handler invocation and is therefore already visible here) blocks the
-  // trigger until the ENTIRE chain — including retry cycles — is terminal. Without it, the trigger
-  // fired immediately on the last finisher that decided FAIL/MODIFY, before the retried cycle's
-  // hypotheses ever got a revision pass, burning the dedupeKey early. dedupeKey absorbs duplicate
-  // enqueues from concurrent last-finishers.
+  // Cycle-completion trigger (fail-soft, P0-1/P0-2): enqueue the cycle-close unconditionally.
+  // revisionBuildHandler re-checks chain terminality over settled statuses and self-requeues if not
+  // yet done — this is race-free where the old inline allTerminal check (excluding only self, before
+  // the worker writes 'completed') zero-fired at concurrency >= 2.
   try {
-    const chainTasks = await services.researchTasks.listByCorrelationAndTypes(
-      task.correlationId, ['hypothesis.build', 'backtest.completed', 'research.run_cycle'],
-    );
-    const others = chainTasks.filter((t) => t.id !== task.id);
-    const allTerminal = others.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'rejected');
-    if (allTerminal) {
-      await createAndEnqueueTask(
-        {
-          taskType: 'revision.build', source: task.source,
-          payload: { strategyProfileId, correlationId: task.correlationId },
-          correlationId: task.correlationId,
-          dedupeKey: `revision.build:${task.correlationId}`,
-        },
-        { repo: services.researchTasks, queue: services.taskQueue },
-      );
-    }
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId, source: task.source, services });
   } catch (err) {
     await services.events.append(event(task.id, 'revision.build_trigger_failed', { error: errMsg(err) }));
   }

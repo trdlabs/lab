@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { hypothesisBuildHandler } from './hypothesis-build.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import { MockResearchPlatformAdapter } from '../../adapters/platform/mock-research-platform.adapter.ts';
+import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { HypothesisProposal } from '../../domain/hypothesis.ts';
@@ -138,6 +139,50 @@ describe('hypothesisBuildHandler', () => {
     await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
     expect(capturedSdkDoc).not.toBe('');
     expect((capturedSdkDoc ?? '').length).toBeGreaterThan(100);
+  });
+
+  describe('P0-2: domain-terminal exits enqueue the cycle-close trigger (revision.build, base dedupeKey)', () => {
+    it('builder_failed terminal return enqueues revision.build', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const throwingBuilder: BuilderPort = {
+        adapter: 'fake', model: 'fake',
+        build: async (): Promise<BuilderOutput> => { throw new Error('builder boom'); },
+      };
+      const s = await seeded({ builder: throwingBuilder, taskQueue: queue });
+      await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
+
+      const evTypes = (await s.events.listByTask('t1')).map((e) => e.type);
+      expect(evTypes).toContain('build_failed');
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+      expect(revisionTasks[0]!.dedupeKey).toBe('revision.build:c1');
+      const created = await s.researchTasks.findById(revisionTasks[0]!.taskId);
+      expect(created?.payload).toEqual({ strategyProfileId: 'p1', correlationId: 'c1' });
+    });
+
+    it('datasets_unavailable terminal return enqueues revision.build', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const base = new MockResearchPlatformAdapter();
+      const researchPlatform = {
+        discover: base.discover.bind(base),
+        listDatasets: async () => ({ datasets: [] }),
+        validateModule: base.validateModule.bind(base),
+        getRunStatus: base.getRunStatus.bind(base),
+        getRunResult: base.getRunResult.bind(base),
+        submitStrategyResearchRun: base.submitStrategyResearchRun.bind(base),
+        submitOverlayRun: base.submitOverlayRun.bind(base),
+      };
+      const s = await seeded({ researchPlatform, taskQueue: queue });
+      await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN }), s);
+
+      const evTypes = (await s.events.listByTask('t1')).map((e) => e.type);
+      expect(evTypes).toContain('research_platform.datasets_unavailable');
+
+      const revisionTasks = queue.queued.filter((q) => q.taskType === 'revision.build');
+      expect(revisionTasks).toHaveLength(1);
+      expect(revisionTasks[0]!.dedupeKey).toBe('revision.build:c1');
+    });
   });
 
   it('Build Validator fails (denylist token in bundle) → build_failed with validator issues, no submit', async () => {

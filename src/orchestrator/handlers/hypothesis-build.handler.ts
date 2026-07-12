@@ -13,6 +13,7 @@ import { event, errMsg, computeParamsHash, sha256, stableStringify } from './bac
 import { BUILDER_SDK_DOC } from '../../adapters/builder/builder-sdk-doc.ts';
 import { runPlatformBacktest } from './run-platform-backtest.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
+import { enqueueCycleClose } from '../cycle-close.ts';
 
 export const HypothesisBuildPayloadSchema = z.object({
   hypothesisId: z.string().min(1),
@@ -61,6 +62,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
     const issues: ValidationIssue[] = [{ code: 'missing_platform_run_config', severity: 'error', path: 'platformRun', message: 'platformRun is required' }];
     await services.builds.markBuildFailed(buildId, issues);
     await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['missing_platform_run_config'] }));
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
     return;
   }
 
@@ -77,6 +79,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
     await services.builds.markBuildFailed(buildId, issues);
     await services.events.append(event(task.id, 'builder.failed', { buildId, error: errMsg(err) }));
     await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['builder_failed'] }));
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
     return;
   }
   await services.events.append(event(task.id, 'builder.completed', { buildId }));
@@ -88,6 +91,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   if (validation.status === 'build_failed') {
     await services.builds.markBuildFailed(buildId, validation.issues);
     await services.events.append(event(task.id, 'build_failed', { buildId, codes: validation.issues.map((i) => i.code) }));
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
     return;
   }
   await services.events.append(event(task.id, 'build.validated', { buildId, bundleHash: bundle.bundleHash }));
@@ -102,6 +106,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
   const existingRun = await services.backtests.findByIdentity(hypothesis.id, paramsHash, bundle.bundleHash);
   if (existingRun) {
     await services.events.append(event(task.id, 'backtest.reused', { runId: existingRun.id, platformRunId: existingRun.platformRunId, status: existingRun.status, backend: existingRun.backend }));
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
     return;
   }
 
@@ -111,6 +116,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
     await services.builds.markBuildFailed(buildId, issues);
     await services.events.append(event(task.id, 'research_platform.datasets_unavailable', { buildId, reason: 'no datasets returned — research platform may be misconfigured or data source unavailable' }));
     await services.events.append(event(task.id, 'build_failed', { buildId, codes: ['datasets_unavailable'] }));
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
     return;
   }
   if (payload.cycleDepth === 0) {
