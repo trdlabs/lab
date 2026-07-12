@@ -98,11 +98,11 @@ describe('paperMonitorHandler', () => {
 
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
-    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:3');
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0:3');
     expect(monitorCalls[0]?.envelope.source).toBe('operator');
     expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
-    const queuedTask = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:3');
-    expect(queuedTask?.payload).toEqual({ experimentId: 'exp-wfo', attempt: 3 });
+    const queuedTask = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0:3');
+    expect(queuedTask?.payload).toEqual({ experimentId: 'exp-wfo', attempt: 3, epoch: 0 });
   });
 
   it('run located → ledger fixed with paperRunId/runStartedAtMs + paper.run_located event', async () => {
@@ -127,7 +127,7 @@ describe('paperMonitorHandler', () => {
     expect(row?.monitorStatus).toBe('watching');
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
-    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:1');
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0:1');
   });
 
   it('window_complete (>=minTrades, elapsed>=minDays) → ledger+event+research.run_cycle enqueued exactly once; a second monitor run → already_done, no duplicate enqueue', async () => {
@@ -186,6 +186,35 @@ describe('paperMonitorHandler', () => {
       payload: { experimentId: 'exp-wfo', runId: 'run-live-4', observedTrades: 5 },
     });
     expect(queueCalls.filter((c) => c.envelope.taskType === 'research.run_cycle')).toHaveLength(0);
+  });
+
+  it('[P0-5] transient locate error → reschedules the next attempt instead of failing the task', async () => {
+    const { services, queueCalls, events } = harness({ locate: async () => { throw new Error('platform 502'); } });
+    const createdAt = new Date(Date.now() - 1 * DAY_MS).toISOString(); // within maxWaitDays → would normally locate
+    await services.paperSubmissions.upsertByExperimentId(submissionRow({ createdAt })); // no paperRunId → locate path
+    await expect(paperMonitorHandler(taskOf({ experimentId: 'exp-wfo', attempt: 4 }), services)).resolves.toBeUndefined();
+
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0:5');
+    const queued = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0:5');
+    expect(queued?.payload).toEqual({ experimentId: 'exp-wfo', attempt: 5, epoch: 0 });
+    expect(events.map((e) => e.type)).toContain('paper.monitor.poll_failed');
+  });
+
+  it('[P0-5] transient getRunSummary error → reschedules instead of failing the task (chain survives a platform blip)', async () => {
+    const runStartedAtMs = Date.now() - 10 * DAY_MS;
+    const { services, queueCalls, events } = harness();
+    services.botResults.getRunSummary = async () => { throw new Error('summary 503'); };
+    await services.paperSubmissions.upsertByExperimentId(submissionRow({ paperRunId: 'run-live-x', runStartedAtMs }));
+    await expect(paperMonitorHandler(taskOf({ experimentId: 'exp-wfo', attempt: 1 }), services)).resolves.toBeUndefined();
+
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(1);
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0:2');
+    const queued = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0:2');
+    expect(queued?.payload).toEqual({ experimentId: 'exp-wfo', attempt: 2, epoch: 0 });
+    expect(events.map((e) => e.type)).toContain('paper.monitor.poll_failed');
   });
 
   it('maxWaitDays exceeded with no located run → stalled + paper.run_not_found, no reschedule', async () => {

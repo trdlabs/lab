@@ -1,6 +1,7 @@
 // src/orchestrator/handlers/paper-start.handler.test.ts
 import { describe, it, expect } from 'vitest';
 import { paperStartHandler, PaperStartPayloadSchema } from './paper-start.handler.ts';
+import { createAndEnqueueTask } from '../task-intake.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask, QueueEnvelope } from '../../domain/types.ts';
@@ -304,10 +305,10 @@ describe('paperStartHandler', () => {
     await paperStartHandler(taskOf(), services);
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
-    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0:0');
     expect(monitorCalls[0]?.envelope.correlationId).toBe('c1');
     expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
-    const queuedTask = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0');
+    const queuedTask = await services.researchTasks.findByDedupeKey('paper.monitor:exp-wfo:0:0');
     expect(queuedTask?.payload).toEqual({ experimentId: 'exp-wfo' });
   });
 
@@ -331,7 +332,7 @@ describe('paperStartHandler', () => {
     expect(artifacts.getHashes).toHaveLength(0);
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
-    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.envelope.dedupeKey).toMatch(/^paper\.monitor:exp-wfo:\d+:0$/); // fresh revival epoch
     expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
   });
 
@@ -346,8 +347,28 @@ describe('paperStartHandler', () => {
     expect(artifacts.getHashes.length).toBeGreaterThan(0);
     const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
     expect(monitorCalls).toHaveLength(1);
-    expect(monitorCalls[0]?.envelope.dedupeKey).toBe('paper.monitor:exp-wfo:0');
+    expect(monitorCalls[0]?.envelope.dedupeKey).toMatch(/^paper\.monitor:exp-wfo:\d+:0$/); // fresh revival epoch
     expect(monitorCalls[0]?.opts).toEqual({ delayMs: services.paperMonitorPollMs });
+  });
+
+  it('[P0-5] revival re-arms the monitor with a fresh epoch even when the original attempt-0 key is already burned', async () => {
+    const { services, queueCalls } = await make({ seedExisting: 'submitted', strategyName: 'live-strat' });
+    // The original monitor chain's attempt-0 task already exists (created on first admit, and since
+    // dead at some attempt N>0). The old revival reused this exact key → intake dedup → silent no-op.
+    await createAndEnqueueTask(
+      { taskType: 'paper.monitor', source: 'operator', payload: { experimentId: 'exp-wfo' },
+        correlationId: 'c1', dedupeKey: 'paper.monitor:exp-wfo:0' },
+      { repo: services.researchTasks, queue: services.taskQueue },
+    );
+    const before = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor').length;
+
+    await paperStartHandler(taskOf(), services);
+
+    const monitorCalls = queueCalls.filter((c) => c.envelope.taskType === 'paper.monitor');
+    expect(monitorCalls).toHaveLength(before + 1); // a NEW monitor task enqueued, not deduped by the burned key
+    const revival = monitorCalls[monitorCalls.length - 1]!;
+    expect(revival.envelope.dedupeKey).not.toBe('paper.monitor:exp-wfo:0');
+    expect(revival.envelope.dedupeKey).toMatch(/^paper\.monitor:exp-wfo:\d+:0$/);
   });
 
   it('bundleHash mismatch wfo↔baseline → actionable error', async () => {

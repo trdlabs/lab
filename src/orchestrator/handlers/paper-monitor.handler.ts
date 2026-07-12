@@ -4,11 +4,15 @@ import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { evaluatePaperWindow, resolveWindowPolicy } from '../../domain/paper-window.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
-import { event } from './backtest-support.ts';
+import { event, errMsg } from './backtest-support.ts';
 
 export const PaperMonitorPayloadSchema = z.object({
   experimentId: z.string().min(1),
   attempt: z.number().int().nonnegative().optional(),
+  // Monitor-loop generation. A fresh paper.start revival opens a new epoch so its dedupeKeys
+  // (paper.monitor:<exp>:<epoch>:<attempt>) never collide with — and are never dedup-swallowed
+  // by — the original chain's already-created attempt keys.
+  epoch: z.number().int().nonnegative().optional(),
 });
 
 /**
@@ -22,6 +26,7 @@ export const paperMonitorHandler: WorkflowHandler = async (task, services) => {
   if (parsed.status === 'invalid') throw new Error(`invalid paper.monitor payload: ${JSON.stringify(parsed.issues)}`);
   const { experimentId } = parsed.data;
   const attempt = parsed.data.attempt ?? 0;
+  const epoch = parsed.data.epoch ?? 0;
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 
@@ -38,8 +43,8 @@ export const paperMonitorHandler: WorkflowHandler = async (task, services) => {
 
   const reschedule = async (): Promise<void> => {
     await createAndEnqueueTask(
-      { taskType: 'paper.monitor', source: task.source, payload: { experimentId, attempt: attempt + 1 },
-        correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:${attempt + 1}`,
+      { taskType: 'paper.monitor', source: task.source, payload: { experimentId, attempt: attempt + 1, epoch },
+        correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:${epoch}:${attempt + 1}`,
         delayMs: services.paperMonitorPollMs },
       { repo: services.researchTasks, queue: services.taskQueue },
     );
@@ -48,7 +53,17 @@ export const paperMonitorHandler: WorkflowHandler = async (task, services) => {
   let runId = sub.paperRunId;
   let runStartedAtMs = sub.runStartedAtMs;
   if (!runId) {
-    const located = await services.paperRunLocator.locate({ strategyName: sub.strategyName, submittedAtMs });
+    // A transient platform error here must NOT fail the task: a failed paper.monitor is never
+    // retried into attempt+1, so one hiccup would strand the submission at 'watching' for the
+    // whole (multi-week) poll cadence. Reschedule the next tick and keep the chain alive.
+    let located: Awaited<ReturnType<typeof services.paperRunLocator.locate>>;
+    try {
+      located = await services.paperRunLocator.locate({ strategyName: sub.strategyName, submittedAtMs });
+    } catch (err) {
+      await services.events.append(event(task.id, 'paper.monitor.poll_failed', { experimentId, attempt, phase: 'locate', error: errMsg(err) }));
+      await reschedule();
+      return;
+    }
     if (!located) {
       if (now - submittedAtMs > policy.maxWaitDays * 24 * 3600 * 1000) {
         await services.paperSubmissions.updateMonitorState(experimentId, { monitorStatus: 'stalled', updatedAt: nowIso });
@@ -64,7 +79,15 @@ export const paperMonitorHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'paper.run_located', { experimentId, runId }));
   }
 
-  const summary = await services.botResults.getRunSummary(runId);
+  let summary: Awaited<ReturnType<typeof services.botResults.getRunSummary>>;
+  try {
+    summary = await services.botResults.getRunSummary(runId);
+  } catch (err) {
+    // Same transient-error guard as the locate() call above — reschedule, don't die.
+    await services.events.append(event(task.id, 'paper.monitor.poll_failed', { experimentId, attempt, phase: 'summary', error: errMsg(err) }));
+    await reschedule();
+    return;
+  }
   const verdict = evaluatePaperWindow(policy, { runStartedAtMs: runStartedAtMs ?? submittedAtMs, nowMs: now, closedTrades: summary.closedTrades });
 
   if (verdict.state === 'watching') {

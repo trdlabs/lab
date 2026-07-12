@@ -22,7 +22,9 @@ export const PaperStartPayloadSchema = z.object({
  * (undefined monitorStatus — e.g. a pre-G4 row — or still 'watching'). Seeds the monitor fields
  * cheaply computable here via `updateMonitorState` (defined-fields-only patch — NEVER a second
  * upsert, per upsertByExperimentId's full-replace semantics) and (re)schedules paper.monitor at
- * attempt 0; the task's dedupeKey makes re-running this safe (intake dedup).
+ * attempt 0 in a FRESH monitor epoch. The epoch (Date.now()) namespaces the dedupeKey so a revival
+ * of a dead chain is never swallowed by the original chain's already-created attempt-0 key — while
+ * still deduping honest double-runs of paper.start within the same millisecond.
  */
 async function ensureMonitorScheduled(
   task: ResearchTask,
@@ -46,10 +48,11 @@ async function ensureMonitorScheduled(
   if (Object.keys(patch).length > 0) {
     await services.paperSubmissions.updateMonitorState(experimentId, { ...patch, updatedAt: new Date().toISOString() });
   }
+  const epoch = Date.now();
   await createAndEnqueueTask(
     {
-      taskType: 'paper.monitor', source: task.source, payload: { experimentId },
-      correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:0`,
+      taskType: 'paper.monitor', source: task.source, payload: { experimentId, epoch },
+      correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:${epoch}:0`,
       delayMs: services.paperMonitorPollMs,
     },
     { repo: services.researchTasks, queue: services.taskQueue },
@@ -174,10 +177,12 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
     }));
     if (rejected) await services.events.append(event(task.id, 'paper.candidate_rejected', { experimentId, candidateId: res.candidateId, reasonCode: res.admissionReasonCode }));
     if (admitted) {
+      // First tick of a fresh submission → epoch 0, attempt 0. Revivals (ensureMonitorScheduled)
+      // open their own epoch so they are never dedup-swallowed by this key.
       await createAndEnqueueTask(
         {
           taskType: 'paper.monitor', source: task.source, payload: { experimentId },
-          correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:0`,
+          correlationId: task.correlationId, dedupeKey: `paper.monitor:${experimentId}:0:0`,
           delayMs: services.paperMonitorPollMs,
         },
         { repo: services.researchTasks, queue: services.taskQueue },
