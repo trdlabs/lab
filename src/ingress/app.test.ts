@@ -194,3 +194,17 @@ describe('Ingress gate precedes body parsing', () => {
     expect(queue.queued).toHaveLength(0);
   });
 });
+
+describe('[P1-18] GET /healthz (always-on liveness)', () => {
+  it('returns 200 without a token — the ingress process is up on :3000 regardless of the optional read listener', async () => {
+    const { app } = setup();
+    const res = await app.request('/healthz');
+    expect(res.status).toBe(200);
+  });
+
+  it('is reachable even when no task/callback tokens are configured', async () => {
+    const { app } = setup({ taskToken: undefined, callbackToken: undefined });
+    const res = await app.request('/healthz');
+    expect(res.status).toBe(200);
+  });
+});

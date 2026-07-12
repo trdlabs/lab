@@ -24,6 +24,11 @@ export interface IngressDeps {
 export function createIngressApp(deps: IngressDeps): Hono {
   const app = new Hono();
 
+  // Always-on liveness probe on the ingress port. The container healthcheck must target this
+  // (not the read API's /readyz on :3100, which only starts when TRADING_LAB_READ_TOKEN is set —
+  // an unset token otherwise wedges the container 'unhealthy' and blocks office's depends_on).
+  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+
   // SP-6.2: fail-closed, per-boundary service-token gates, registered BEFORE the handlers
   // so unauthorized requests never reach JSON parsing / validation / task intake.
   app.use('/tasks', bearerAuth(deps.taskToken, { notConfiguredMessage: 'task ingress not configured' }));
