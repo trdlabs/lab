@@ -16,7 +16,9 @@ export const StrategyBaselinePayloadSchema = z.object({
   // Ready-bundle mode (G3b re-baseline of a consolidated clean source): reconstruct
   // deterministically instead of an LLM rebuild, which would drift the bundleHash.
   bundleArtifactRef: z.custom<ArtifactRef>((v) => typeof v === 'object' && v !== null).optional(),
-  // When set, the baseline outcome is written back onto this consolidated revision.
+  // When set, the baseline outcome is written back onto this revision (consolidated OR composed accepted).
+  revisionId: z.string().optional(),
+  /** @deprecated transient alias for `revisionId`; drop in a follow-up once the queue drains past this deploy. */
   consolidatedRevisionId: z.string().optional(),
 });
 
@@ -62,15 +64,17 @@ export const strategyBaselineHandler: WorkflowHandler = async (task, services) =
     taskId: task.id,
   });
 
-  if (parsed.data.consolidatedRevisionId) {
-    // Verdict -> baselineValidationStatus: PASS and PAPER_CANDIDATE are both positive outcomes
-    // that map to 'passed'; INCONCLUSIVE stays inconclusive; everything else (FAIL / MODIFY)
-    // is not a clean baseline pass for the consolidated revision, so it lands in 'failed'.
-    const baselineValidationStatus =
-      verdict === 'PASS' || verdict === 'PAPER_CANDIDATE' ? 'passed'
-      : verdict === 'INCONCLUSIVE' ? 'inconclusive'
-      : 'failed';
-    await services.revisions.updateStatus(parsed.data.consolidatedRevisionId, {
+  const revisionId = parsed.data.revisionId ?? parsed.data.consolidatedRevisionId;
+
+  // Verdict -> baselineValidationStatus, computed for EVERY run so the W4 gate below is uniform.
+  // PASS/PAPER_CANDIDATE -> 'passed'; INCONCLUSIVE -> 'inconclusive'; FAIL/MODIFY -> 'failed'.
+  const baselineValidationStatus =
+    verdict === 'PASS' || verdict === 'PAPER_CANDIDATE' ? 'passed'
+    : verdict === 'INCONCLUSIVE' ? 'inconclusive'
+    : 'failed';
+
+  if (revisionId) {
+    await services.revisions.updateStatus(revisionId, {
       baselineValidationStatus,
       baselineExperimentId: experimentId,
       baselineTaskId: task.id,
@@ -78,16 +82,23 @@ export const strategyBaselineHandler: WorkflowHandler = async (task, services) =
     });
   }
 
-  await createAndEnqueueTask(
-    {
-      taskType: 'strategy.wfo',
-      source: task.source,
-      payload: { baselineExperimentId: experimentId },
-      correlationId: task.correlationId,
-      dedupeKey: `strategy.wfo:${experimentId}`,
-    },
-    { repo: services.researchTasks, queue: services.taskQueue },
-  );
+  // W4: only a passing baseline earns the expensive WFO sweep. failed/inconclusive stop here.
+  if (baselineValidationStatus === 'passed') {
+    await createAndEnqueueTask(
+      {
+        taskType: 'strategy.wfo',
+        source: task.source,
+        payload: { baselineExperimentId: experimentId },
+        correlationId: task.correlationId,
+        dedupeKey: `strategy.wfo:${experimentId}`,
+      },
+      { repo: services.researchTasks, queue: services.taskQueue },
+    );
+  } else {
+    await services.events.append(event(task.id, 'strategy.baseline.wfo_skipped', {
+      strategyProfileId, experimentId, verdict, reason: 'baseline_not_passed',
+    }));
+  }
 
   await services.events.append(event(task.id, 'strategy.baseline.completed', {
     strategyProfileId, experimentId, verdict, bundleHash: bundle.bundleHash,
