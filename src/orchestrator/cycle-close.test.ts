@@ -25,6 +25,16 @@ function chainTask(
   return services.researchTasks.create(t);
 }
 
+/** Minimal ResearchTask for enqueueCycleClose call sites — only id/source/correlationId matter. */
+function triggerTask(overrides: Partial<ResearchTask> = {}): ResearchTask {
+  return {
+    id: 'trigger-task', taskType: 'backtest.completed', source: 'operator', correlationId: 'corr-1',
+    status: 'running', payload: {},
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
 describe('cycle-close: constants', () => {
   it('pins the ratified poll budget + chain types', () => {
     expect(CYCLE_CLOSE_MAX_WAIT_ATTEMPTS).toBe(40);
@@ -73,7 +83,7 @@ describe('isCycleChainTerminal', () => {
 describe('enqueueCycleClose', () => {
   it('enqueues a revision.build with the BASE dedupeKey (unconditional, no terminality gate)', async () => {
     const services = makeServices();
-    await enqueueCycleClose({ correlationId: 'corr-1', strategyProfileId: 'p1', source: 'operator', services });
+    await enqueueCycleClose({ task: triggerTask(), strategyProfileId: 'p1', services });
 
     const rows = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['revision.build']);
     expect(rows).toHaveLength(1);
@@ -92,10 +102,32 @@ describe('enqueueCycleClose', () => {
     // Sequential re-triggers (the common P0-2 case: several chain members terminalize one after
     // another) collapse onto the single base dedupeKey. (True concurrent absorption relies on the
     // production DB unique constraint — the in-memory repo's read-then-write dedupe is not atomic.)
-    await enqueueCycleClose({ correlationId: 'corr-1', strategyProfileId: 'p1', source: 'operator', services });
-    await enqueueCycleClose({ correlationId: 'corr-1', strategyProfileId: 'p1', source: 'operator', services });
-    await enqueueCycleClose({ correlationId: 'corr-1', strategyProfileId: 'p1', source: 'operator', services });
+    await enqueueCycleClose({ task: triggerTask(), strategyProfileId: 'p1', services });
+    await enqueueCycleClose({ task: triggerTask(), strategyProfileId: 'p1', services });
+    await enqueueCycleClose({ task: triggerTask(), strategyProfileId: 'p1', services });
     const rows = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['revision.build']);
     expect(rows).toHaveLength(1);
+  });
+
+  it('is fail-soft: an enqueue-time infra failure does NOT throw and appends revision.build_trigger_failed (Task-5 Medium fix — the primitive itself is fail-soft, so every call site is uniformly safe)', async () => {
+    const services = makeServices();
+    services.researchTasks.findByDedupeKey = async () => {
+      throw new Error('db down');
+    };
+    const task = triggerTask({ id: 'trigger-task-1' });
+
+    await expect(
+      enqueueCycleClose({ task, strategyProfileId: 'p1', services }),
+    ).resolves.toBeUndefined();
+
+    const events = await services.events.listByTask('trigger-task-1');
+    expect(events.map((e) => e.type)).toContain('revision.build_trigger_failed');
+    expect(events.find((e) => e.type === 'revision.build_trigger_failed')?.payload).toMatchObject({
+      error: 'db down',
+    });
+
+    // And no revision.build row/enqueue leaked through despite the throw.
+    const rows = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['revision.build']);
+    expect(rows).toHaveLength(0);
   });
 });

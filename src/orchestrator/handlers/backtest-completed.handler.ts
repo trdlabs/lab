@@ -190,10 +190,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   // Cycle-completion trigger (fail-soft, P0-1/P0-2): enqueue the cycle-close unconditionally.
   // revisionBuildHandler re-checks chain terminality over settled statuses and self-requeues if not
   // yet done — this is race-free where the old inline allTerminal check (excluding only self, before
-  // the worker writes 'completed') zero-fired at concurrency >= 2.
-  try {
-    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId, source: task.source, services });
-  } catch (err) {
-    await services.events.append(event(task.id, 'revision.build_trigger_failed', { error: errMsg(err) }));
-  }
+  // the worker writes 'completed') zero-fired at concurrency >= 2. enqueueCycleClose is fail-soft
+  // internally (P0-1/P0-2 fix-wave) — no outer try/catch needed here.
+  await enqueueCycleClose({ task, strategyProfileId, services });
 };
