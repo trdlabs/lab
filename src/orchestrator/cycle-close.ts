@@ -13,9 +13,18 @@ type CycleServices = Pick<AppServices, 'researchTasks' | 'taskQueue' | 'events'>
 /**
  * Cycle-close trigger (P0-1/P0-2). Enqueues a single revision.build for the correlation with the
  * BASE dedupeKey — no terminality gate here: the enqueue is unconditional (which is what removes the
- * P0-1 zero-fire race), and revisionBuildHandler makes the authoritative terminality decision over
- * settled statuses. Called from every chain-member terminal exit (backtest.completed +
- * hypothesis.build domain-terminal returns).
+ * P0-1 zero-fire race), and revisionBuildHandler decides terminality later over settled statuses.
+ * Called from every chain-member terminal exit (backtest.completed + hypothesis.build domain-terminal
+ * returns).
+ *
+ * SCOPE of the terminality guarantee: it is authoritative only over settled CHAIN-TYPE rows
+ * (isCycleChainTerminal, see below). It does NOT see an async backtest that is in-flight but has no
+ * `backtest.completed` row yet (the resume/callback path routes through `backtest.resume`, which is
+ * not a CYCLE_CHAIN_TYPE). On the async backtester path at concurrency >= 2 an early sibling trigger
+ * can therefore observe an all-terminal chain prematurely and burn the base key — a pre-existing gap
+ * (the old inline allTerminal check had it too), fine on the synchronous demo/mock path. Closing it
+ * (submitted-BacktestRun awareness / backtest.resume in the chain) is a follow-up gating any raise of
+ * LAB_QUEUE_CONCURRENCY on the async path. See TODO(P1-2) / spec §8.2.
  *
  * Fail-soft by construction: a trigger-enqueue failure must never fail the caller's handler (which
  * is terminating anyway). Both call sites (backtest.completed + hypothesis.build's 5 domain-terminal

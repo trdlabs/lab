@@ -158,10 +158,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   }
   const { strategyProfileId, correlationId } = parsed.data;
 
-  // --- Step 0: authoritative chain-terminality gate (P0-1/P0-2) ---
+  // --- Step 0: chain-terminality gate over settled chain-type rows (P0-1/P0-2) ---
   // The trigger (enqueueCycleClose) is enqueued unconditionally from any chain member's terminal
-  // exit; the real decision is made HERE, over settled statuses, because revision.build runs as its
-  // own later task. Not-yet-terminal -> bounded delayed self-requeue; cap -> abandoned.
+  // exit; the decision is made HERE, over settled statuses, because revision.build runs as its own
+  // later task. This defeats the P0-1 status-race and the P0-2 non-backtest terminal exit. NOTE it
+  // reads only settled CHAIN-TYPE rows — it does NOT wait on an async backtest still in-flight (no
+  // backtest.completed row yet; resume routes via backtest.resume, not a chain type). Pre-existing
+  // gap, fine on the synchronous path; see cycle-close.ts / spec §8.2 before raising concurrency on
+  // the async path. Not-yet-terminal -> bounded delayed self-requeue; cap -> abandoned.
   if (!(await isCycleChainTerminal(correlationId, services))) {
     const waitAttempt = parsed.data.waitAttempt ?? 0;
     if (waitAttempt >= CYCLE_CLOSE_MAX_WAIT_ATTEMPTS) {
