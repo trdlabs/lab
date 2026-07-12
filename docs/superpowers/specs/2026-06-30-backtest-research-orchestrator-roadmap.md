@@ -185,6 +185,8 @@ paper-losses (ops-read forensics ops.4/ops.5)
 
 **Phase E — office-панели.** trading-office (отдельный репо). experiment list / WFA fold timeline / aggregate card / regime heatmap. Source = lab read API.
 
+> ⚠️ **Коллизия имён (2026-07-12):** «lab Phase E» здесь = office-панели. НЕ путать с **«backtester Phase E»** — это анти-оверфит трек (E1–E5: DSR/walk-forward/held-out/novelty) в репо backtester. Строгость против оверфита теперь **backtester-owned**; lab местами переходит с build на consume (DSR/multi-fold). Граница и lab-обязательства: `docs/research/2026-07-12-backtester-phase-e-lab-reconciliation.md`.
+
 **Phase F — backtester run-metadata (опц.).** echo `workflowId`/`correlationId`, `GET /v1/runs?workflowId`. MVP не нужен.
 
 **Параллелизация:** A — первым, один инстанс (блокирует). После A и стабилизации experiment read-API: **инстанс 1** = lab-ядро (B → B2 → C → D, последовательно — общая fold/aggregate-механика); **инстанс 2** = office-панели (E, читает read-API). F — опц./позже. Выигрыш умеренный (масса — последовательное lab-ядро); office разумно отдать параллельно.
