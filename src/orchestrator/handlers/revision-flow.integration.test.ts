@@ -10,6 +10,7 @@
 // reflects v2's mergedRuleSet when the research cycle handler is run against the SAME services.
 import { describe, it, expect, vi } from 'vitest';
 import { revisionBuildHandler } from './revision-build.handler.ts';
+import { CYCLE_CLOSE_MAX_WAIT_ATTEMPTS } from '../cycle-close.ts';
 import { researchRunCycleHandler } from './research-run-cycle.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import type { AppServices } from '../app-services.ts';
@@ -475,5 +476,98 @@ describe('revision-flow integration (R1 Task 2): direct re-baseline of accepted 
     const tasks = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['strategy.baseline', 'revision.consolidate']);
     expect(tasks.filter((t) => t.taskType === 'revision.consolidate')).toHaveLength(1);
     expect(tasks.filter((t) => t.taskType === 'strategy.baseline')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1 Task 4: revision.build Step-0 self-recheck / self-requeue (P0-1 / P0-2)
+// ---------------------------------------------------------------------------
+//
+// The cycle-close trigger (enqueueCycleClose) is UNCONDITIONAL — the authoritative chain-terminality
+// decision is made HERE, at revision.build execution, over settled statuses. When the chain is not
+// yet terminal, Step-0 self-requeues a delayed revision.build (attempt-scoped dedupeKey, since the
+// base key is already completed) up to CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, then emits revision.build.abandoned.
+// Terminality is driven purely by the researchTasks repo state (chain-type task rows / statuses).
+
+/** Seeds a chain-type task row (hypothesis.build/backtest.completed/research.run_cycle) under corr-1. */
+async function seedChainTask(services: AppServices, id: string, status: ResearchTask['status']): Promise<void> {
+  await services.researchTasks.create({
+    id, taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+    status, payload: { hypothesisId: id }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  });
+}
+
+describe('revision-flow integration (R1 Task 4): revision.build Step-0 self-gate', () => {
+  it('defers (delayed self-requeue + revision.build.deferred) when the chain is NOT terminal', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    // one still-running chain member -> chain not terminal
+    await seedChainTask(services, 'hb-running', 'running');
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    // no revision built (returned at Step-0)
+    expect(await services.revisions.listByProfile('p1')).toHaveLength(0);
+    // the executor was never touched
+    expect(calls).toHaveLength(0);
+
+    // a delayed revision.build was self-requeued with the attempt-scoped dedupeKey + waitAttempt:1
+    const requeued = (await services.researchTasks.listByCorrelationAndTypes('corr-1', ['revision.build']))
+      .filter((t) => /:wait1$/.test(t.dedupeKey ?? ''));
+    expect(requeued).toHaveLength(1);
+    expect(requeued[0]!.payload).toMatchObject({ strategyProfileId: 'p1', correlationId: 'corr-1', waitAttempt: 1 });
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.build.deferred');
+    expect(events).not.toContain('revision.build.abandoned');
+  });
+
+  it('abandons (revision.build.abandoned, no re-enqueue, no revision) at the wait cap', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    await seedChainTask(services, 'hb-running', 'running');
+
+    // waitAttempt == cap -> abandon instead of re-queue
+    await revisionBuildHandler(
+      buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1', waitAttempt: CYCLE_CLOSE_MAX_WAIT_ATTEMPTS }),
+      services,
+    );
+
+    expect(await services.revisions.listByProfile('p1')).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+
+    // no further self-requeue
+    const requeued = (await services.researchTasks.listByCorrelationAndTypes('corr-1', ['revision.build']))
+      .filter((t) => /:wait\d+$/.test(t.dedupeKey ?? ''));
+    expect(requeued).toHaveLength(0);
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.build.abandoned');
+    expect(events).not.toContain('revision.build.deferred');
+  });
+
+  it('builds as before when the chain IS terminal (all chain members settled)', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    // seedTwoHypotheses seeds each hypothesis.build task row as 'completed' (terminal)
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).not.toContain('revision.build.deferred');
+    expect(events).not.toContain('revision.build.abandoned');
   });
 });
