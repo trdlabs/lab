@@ -164,4 +164,67 @@ describe('strategyBaselineHandler', () => {
     expect(patched?.baselineExperimentId).toBe('exp-1');
     expect(patched?.baselineTaskId).toBe('t1');
   });
+
+  it('does NOT enqueue strategy.wfo on a FAIL baseline; emits wfo_skipped + writes failed status', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    await revisions.create({
+      id: 'R', strategyProfileId: 'prof-1', version: 2, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'composed', baselineValidationStatus: 'pending', createdAt: now, updatedAt: now,
+    } as StrategyRevision);
+    const { services, queued } = await makeFakeServices({ revisions, verdict: 'FAIL' });
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', revisionId: 'R' }), services);
+
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(0);
+    expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'strategy.baseline.wfo_skipped' }));
+    expect((await revisions.findById('R'))?.baselineValidationStatus).toBe('failed');
+  });
+
+  it('does NOT enqueue strategy.wfo on an INCONCLUSIVE baseline; writes inconclusive status', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    await revisions.create({
+      id: 'R', strategyProfileId: 'prof-1', version: 2, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'composed', baselineValidationStatus: 'pending', createdAt: now, updatedAt: now,
+    } as StrategyRevision);
+    const { services, queued } = await makeFakeServices({ revisions, verdict: 'INCONCLUSIVE' });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', revisionId: 'R' }), services);
+
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(0);
+    expect((await revisions.findById('R'))?.baselineValidationStatus).toBe('inconclusive');
+  });
+
+  it('writes back via the new revisionId field and enqueues wfo on PASS', async () => {
+    const now = '2026-01-01T00:00:00Z';
+    const revisions = new InMemoryStrategyRevisionRepository();
+    await revisions.create({
+      id: 'R', strategyProfileId: 'prof-1', version: 2, hypothesisIds: [], mergedRuleSet: {},
+      status: 'accepted', kind: 'composed', baselineValidationStatus: 'pending', createdAt: now, updatedAt: now,
+    } as StrategyRevision);
+    const { services, queued } = await makeFakeServices({ revisions, verdict: 'PASS' });
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1', revisionId: 'R' }), services);
+
+    expect((await revisions.findById('R'))?.baselineValidationStatus).toBe('passed');
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
+
+  it('fresh-profile FAIL baseline (no revisionId) also skips wfo (uniform W4 scope)', async () => {
+    const { services, queued } = await makeFakeServices({ verdict: 'FAIL' });
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(0);
+    expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'strategy.baseline.wfo_skipped' }));
+  });
+
+  it('fresh-profile INCONCLUSIVE baseline (no revisionId) still enqueues wfo (rescue hatch)', async () => {
+    const { services, queued } = await makeFakeServices({ verdict: 'INCONCLUSIVE' });
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
 });

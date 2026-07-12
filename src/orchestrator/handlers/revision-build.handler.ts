@@ -5,6 +5,7 @@ import { validateWithSchema } from '../../validation/validator.ts';
 import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
+import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
 import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -27,6 +28,7 @@ import type { TradeRecord } from '../../domain/research-experiment.ts';
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
   correlationId: z.string().min(1),
+  waitAttempt: z.number().int().nonnegative().optional(),
 });
 
 /** Max additional candidate runs after the first (spec: max 2 retries, <= 3 candidate runs total). */
@@ -155,6 +157,34 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     throw new Error(`invalid revision.build payload: ${JSON.stringify(parsed.issues)}`);
   }
   const { strategyProfileId, correlationId } = parsed.data;
+
+  // --- Step 0: chain-terminality gate over settled chain-type rows (P0-1/P0-2) ---
+  // The trigger (enqueueCycleClose) is enqueued unconditionally from any chain member's terminal
+  // exit; the decision is made HERE, over settled statuses, because revision.build runs as its own
+  // later task. This defeats the P0-1 status-race and the P0-2 non-backtest terminal exit. NOTE it
+  // reads only settled CHAIN-TYPE rows — it does NOT wait on an async backtest still in-flight (no
+  // backtest.completed row yet; resume routes via backtest.resume, not a chain type). Pre-existing
+  // gap, fine on the synchronous path; see cycle-close.ts / spec §8.2 before raising concurrency on
+  // the async path. Not-yet-terminal -> bounded delayed self-requeue; cap -> abandoned.
+  if (!(await isCycleChainTerminal(correlationId, services))) {
+    const waitAttempt = parsed.data.waitAttempt ?? 0;
+    if (waitAttempt >= CYCLE_CLOSE_MAX_WAIT_ATTEMPTS) {
+      await services.events.append(event(task.id, 'revision.build.abandoned', { correlationId, waitAttempt }));
+      return;
+    }
+    const next = waitAttempt + 1;
+    await createAndEnqueueTask(
+      {
+        taskType: 'revision.build', source: task.source,
+        payload: { strategyProfileId, correlationId, waitAttempt: next },
+        correlationId, dedupeKey: `revision.build:${correlationId}:wait${next}`,
+        delayMs: CYCLE_CLOSE_WAIT_DELAY_MS,
+      },
+      { repo: services.researchTasks, queue: services.taskQueue },
+    );
+    await services.events.append(event(task.id, 'revision.build.deferred', { correlationId, waitAttempt: next }));
+    return;
+  }
 
   // --- Step 1: ensure an accepted revision exists (bootstrap-backfill if not) ---
   let accepted = await services.revisions.findLatestAccepted(strategyProfileId);
@@ -420,6 +450,22 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
           taskType: 'revision.consolidate', source: task.source,
           payload: { revisionId, strategyProfileId }, correlationId: task.correlationId,
           dedupeKey: `revision.consolidate:${revisionId}`,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
+    } else {
+      // R1 (W1 fix): no consolidation -> re-baseline the accepted composed revision directly so it
+      // returns to paper via the same strategy.baseline -> wfo -> paper.start chain. Mutually
+      // exclusive with the consolidation branch above (which re-baselines the consolidated
+      // revision instead), so an accepted revision is never re-baselined twice / double-submitted
+      // to paper.
+      await services.revisions.updateStatus(revisionId, { baselineValidationStatus: 'pending', updatedAt: now() });
+      await createAndEnqueueTask(
+        {
+          taskType: 'strategy.baseline', source: task.source,
+          payload: { strategyProfileId, bundleArtifactRef, revisionId },
+          correlationId: task.correlationId,
+          dedupeKey: `strategy.baseline:accepted:${revisionId}`,
         },
         { repo: services.researchTasks, queue: services.taskQueue },
       );
