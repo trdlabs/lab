@@ -241,6 +241,32 @@ describe('buildPrompt focus branching', () => {
   });
 });
 
+describe('buildPrompt retry-feedback and decision-log blocks', () => {
+  it('renders the retry-feedback block with the address-not-repeat guard', () => {
+    const prompt = buildPrompt({ ...baseInput, retryFeedback: { decision: 'MODIFY', reasons: ['pf below 1.2', 'dd 30%'] } });
+    expect(prompt).toContain('you MUST ADDRESS this, not merely repeat');
+    expect(prompt).toContain('decision=MODIFY');
+    expect(prompt).toContain('pf below 1.2; dd 30%');
+  });
+
+  it('renders decision-log excerpts with cross-reference framing', () => {
+    const prompt = buildPrompt({ ...baseInput, focus: 'loss_reduction', decisionExcerpts: [
+      { runId: 'r1', timestampMs: 1_500_000, action: 'hold', reason: 'oi rising', summary: 'held through pullback', relatedTradeId: 't7' },
+    ] });
+    expect(prompt).toContain('Decision-log excerpts');
+    expect(prompt).toContain('cross-reference tradeId');
+    expect(prompt).toContain('[hold]');
+    expect(prompt).toContain('tradeId=t7');
+    expect(prompt).toContain('held through pullback');
+  });
+
+  it('omits both blocks when absent (no stray headers)', () => {
+    const prompt = buildPrompt(baseInput);
+    expect(prompt).not.toContain('you MUST ADDRESS');
+    expect(prompt).not.toContain('Decision-log excerpts');
+  });
+});
+
 describe('buildPrompt trade-context header by focus', () => {
   const MIN = 60_000;
   function rows(): CanonicalRowV2[] {
