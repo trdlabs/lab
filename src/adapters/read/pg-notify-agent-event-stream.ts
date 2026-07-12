@@ -21,6 +21,7 @@ export class PgNotifyAgentEventStream implements AgentEventStreamPort {
   private tick: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private stopped = false;
+  private reconnecting = false;
 
   private readonly pool: Pool;
   private readonly reader: AgentEventReadPort;
@@ -44,19 +45,35 @@ export class PgNotifyAgentEventStream implements AgentEventStreamPort {
 
   private async connect(): Promise<void> {
     const client = await this.pool.connect();
-    client.on('notification', () => { void this.catchUp(); });
-    client.on('error', () => { this.reconnect(); });
-    await client.query(`LISTEN ${CHANNEL}`);
-    this.client = client;
+    try {
+      client.on('notification', () => { void this.catchUp(); });
+      client.on('error', (err: Error) => { this.reconnect(err); });
+      await client.query(`LISTEN ${CHANNEL}`);
+      this.client = client;
+    } catch (err) {
+      // LISTEN (or setup) failed — the client was checked out of the pool but never
+      // became this.client, so nothing else will release it. Destroy it here (pass the
+      // error so node-pg discards the socket) instead of leaking a pool connection.
+      try { client.release(err instanceof Error ? err : true); } catch { /* ignore */ }
+      throw err;
+    }
   }
 
-  private reconnect(): void {
-    if (this.stopped) return;
-    try { this.client?.release(); } catch { /* ignore */ }
+  private reconnect(err?: unknown): void {
+    // Guard against overlapping reconnects: a broken client can emit 'error' more than
+    // once, and each event must not spawn its own connect() cycle (which would leak all
+    // but the last LISTEN client).
+    if (this.stopped || this.reconnecting) return;
+    this.reconnecting = true;
+    // Pass the error (or `true`) so node-pg destroys the dead socket rather than
+    // returning it to the idle pool for the next query to trip over.
+    try { this.client?.release(err instanceof Error ? err : true); } catch { /* ignore */ }
     this.client = null;
     setTimeout(() => {
-      if (this.stopped) return;
-      void this.connect().then(() => this.catchUp()).catch(() => this.reconnect());
+      if (this.stopped) { this.reconnecting = false; return; }
+      void this.connect()
+        .then(() => { this.reconnecting = false; return this.catchUp(); })
+        .catch(() => { this.reconnecting = false; this.reconnect(); });
     }, this.opts.reconnectMs ?? 1000);
   }
 

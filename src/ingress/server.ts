@@ -3,6 +3,7 @@ import { composeRuntime } from '../composition.ts';
 import { createIngressApp } from './app.ts';
 import { createChatApp } from '../chat/chat-app.ts';
 import { createReadApp } from '../read-api/read-app.ts';
+import { installProcessSafetyNet } from '../process-safety.ts';
 
 const { env, services, queue, pool, chat, read } = composeRuntime();
 const app = createIngressApp({
@@ -46,11 +47,12 @@ if (env.TRADING_LAB_READ_TOKEN) {
   console.warn('[read-api] TRADING_LAB_READ_TOKEN not set — read API listener not started');
 }
 
-const shutdown = async () => {
+const shutdown = async (code = 0) => {
   if (env.TRADING_LAB_READ_TOKEN) await read.agentStream.stop();
   await queue.close();
   await pool.end();
-  process.exit(0);
+  process.exit(code);
 };
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => { void shutdown(); });
+process.on('SIGINT', () => { void shutdown(); });
+installProcessSafetyNet({ onFatal: () => { void shutdown(1); } });

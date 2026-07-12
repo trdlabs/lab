@@ -45,15 +45,17 @@ export function startWorker(deps: WorkerDeps): void {
 // Runtime entrypoint: `pnpm worker`
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { composeRuntime } = await import('../composition.ts');
+  const { installProcessSafetyNet } = await import('../process-safety.ts');
   const { queue, router, services, pool } = composeRuntime();
   startWorker({ queue, router, services });
   console.log('worker started, consuming research-tasks');
 
-  const shutdown = async () => {
+  const shutdown = async (code = 0) => {
     await queue.close();
     await pool.end();
-    process.exit(0);
+    process.exit(code);
   };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => { void shutdown(); });
+  process.on('SIGINT', () => { void shutdown(); });
+  installProcessSafetyNet({ onFatal: () => { void shutdown(1); } });
 }
