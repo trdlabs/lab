@@ -967,6 +967,24 @@ describe('two-pass research', () => {
     expect(calls2).toEqual(['loss_reduction']);
   });
 
+  it('threads retryFeedback into the profit_improvement pass too (cycle-level per spec §3.3, not loss-only)', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis retry-profit')], researchSummary: 's' });
+    const services = makeServices({
+      researcher: cap.port,
+      botResults: twoPassBotResults([loserTrade({ tradeId: 'L3' }), winnerTrade({ tradeId: 'W3' })]),
+      marketHistory: twoPassHistory(),
+    });
+    await seedProfile(services);
+    await researchRunCycleHandler(
+      task({ strategyProfileId: 'p1', symbol: 'BTCUSDT', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['dd too high'] } }),
+      services,
+    );
+    // capturingResearcher keeps only the LAST propose() call; loss_reduction runs first, then
+    // profit_improvement (winners present) -> asserting focus pins this down as the profit_improvement input.
+    expect(cap.captured()?.focus).toBe('profit_improvement');
+    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['dd too high'] });
+  });
+
   describe('activeOverlayRules (slice G3: sourced from the latest ACCEPTED revision)', () => {
     it('REGRESSION PIN: a validated-but-unmerged HypothesisProposal is NOT fed as an active overlay rule', async () => {
       const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });

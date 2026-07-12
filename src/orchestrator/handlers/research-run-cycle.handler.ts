@@ -372,6 +372,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
       profile, marketContext, marketRegime, similarHypotheses: focus === 'loss_reduction' ? similarHypotheses : [],
       botResults, maxHypotheses: maxPerPass, focus, activeOverlayRules,
       ...(marketContextMath && marketContextMath.terms.length > 0 ? { marketContextMath } : {}),
+      ...(retryFeedback ? { retryFeedback } : {}),
       ...extra,
     };
     const out = await services.researcher.propose(input, {
@@ -392,7 +393,6 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     taggedDrafts = await runPass('loss_reduction', {
       tradeEvidence,
       ...(tradeContexts.length > 0 ? { tradeContexts } : {}),
-      ...(retryFeedback ? { retryFeedback } : {}),
       ...(decisionExcerpts.length > 0 ? { decisionExcerpts } : {}),
     });
     if (winnerContexts.length > 0) {
