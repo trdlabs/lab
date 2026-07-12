@@ -110,6 +110,23 @@ describe('backtestCompletedHandler', () => {
         cycleDepth: 1,
         feedback: { hypothesisId: 'hyp-1', decision: 'FAIL' },
       });
+      // Back-compat: BASE_PAYLOAD carries no `symbol` (older in-flight task shape) — retry
+      // payload must omit it too, not crash and not synthesize a value.
+      expect(retryTask!.payload).not.toHaveProperty('symbol');
+    });
+
+    it('threads the originating symbol into the retry payload when present on backtest.completed', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'FAIL', reasons: ['no_improvement_over_baseline'], cycleDepth: 0, symbol: 'ETHUSDT' }),
+        s,
+      );
+
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
+      expect(enqueued).toHaveLength(1);
+      const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+      expect(retryTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
     });
 
     it('does NOT retry when cycleDepth >= MAX_CYCLE_DEPTH and emits budget_exhausted event', async () => {
@@ -149,6 +166,18 @@ describe('backtestCompletedHandler', () => {
         cycleDepth: 2,
         feedback: { decision: 'MODIFY', reasons: ['drawdown_regression'] },
       });
+    });
+
+    it('threads the originating symbol into the MODIFY retry payload when present', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'MODIFY', reasons: ['drawdown_regression'], cycleDepth: 1, symbol: 'ETHUSDT' }),
+        s,
+      );
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
+      const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+      expect(retryTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
     });
 
     it('stops retrying when cycleDepth >= MAX_CYCLE_DEPTH', async () => {

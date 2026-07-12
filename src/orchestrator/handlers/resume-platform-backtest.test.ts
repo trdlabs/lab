@@ -6,8 +6,9 @@ import type { AppServices } from '../app-services.ts';
 import type { BacktestRun } from '../../domain/backtest-run.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { ResearchPlatformPort } from '../../ports/research-platform.port.ts';
+import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 
-const PLATFORM_RUN = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
+const PLATFORM_RUN = { datasetId: 'ds', symbols: ['ETHUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
 const NOW = '2026-01-01T00:00:00Z';
 
 function run(id: string, over: Partial<BacktestRun> = {}): BacktestRun {
@@ -52,6 +53,18 @@ describe('resumePlatformRun', () => {
     expect(await s.evaluations.listByBacktestRun('rp1')).toHaveLength(1);
     const types = (await s.events.listByTask('t1')).map((e) => e.type);
     expect(types).toEqual(expect.arrayContaining(['backtest.resume.started', 'backtest.completed', 'evaluation.completed', 'backtest.resume.completed']));
+  });
+
+  it('enqueued backtest.completed payload carries the originating (non-default) symbol from the persisted platformRun', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const s = makeServices({ taskQueue: queue }); // default MockResearchPlatformAdapter reports completed
+    const r = await seed(s);
+    await resumePlatformRun(s, r);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
   });
 
   it('second resume after finalize → already_evaluated, no duplicate Evaluation', async () => {

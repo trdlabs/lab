@@ -108,6 +108,9 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
       cycleDepth,
       deltaNetPnlUsd: result.deltaNetPnlUsd,
       deltaMaxDrawdownPct: result.deltaMaxDrawdownPct,
+      // Sourced from the input PlatformRunConfig (always present for a research_platform submit) —
+      // cheaper and more reliable than re-reading it back off the persisted run.
+      symbol: platformRun.symbols[0],
     });
   }
 }

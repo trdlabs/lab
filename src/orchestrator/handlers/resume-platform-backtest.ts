@@ -63,6 +63,10 @@ export async function resumePlatformRun(services: AppServices, run: BacktestRun)
       cycleDepth: typeof task.payload.cycleDepth === 'number' ? task.payload.cycleDepth : 0,
       deltaNetPnlUsd: result.deltaNetPnlUsd,
       deltaMaxDrawdownPct: result.deltaMaxDrawdownPct,
+      // Sourced from the persisted run's PlatformRunConfig — `platformRun` is nullable on the
+      // BacktestRun domain type (sp4_mock backend never sets it), so this is optional-chained;
+      // absent here falls back to the default symbol on the eventual retry.
+      symbol: again.platformRun?.symbols[0],
     });
     await services.events.append(event(task.id, 'backtest.resume.completed', { runId }));
     return { kind: 'completed', runId };
