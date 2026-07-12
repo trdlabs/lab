@@ -46,19 +46,18 @@ export class BacktesterRevisionRunExecutor implements StrategyRevisionRunExecuto
     const paramsHash = computeStrategyParamsHash({
       bundleHash: req.strategyBundle.bundleHash, platformRun: req.run, params: {},
     });
+    const identity = (): Promise<StrategyBacktestRun | null> =>
+      this.d.strategyBacktests.findByBundleAndParams(req.strategyBundle.manifest.id, paramsHash, req.strategyBundle.bundleHash);
 
-    // Dedup — an existing COMPLETED row with metrics for this identity is reused as-is (no resubmit).
-    const existing = await this.d.strategyBacktests.findByBundleAndParams(
-      req.strategyBundle.manifest.id, paramsHash, req.strategyBundle.bundleHash,
-    );
-    if (existing && existing.status === 'completed' && existing.metrics) {
-      return {
-        status: 'completed',
-        runId: existing.id,
-        platformRunId: existing.platformRunId,
-        metrics: existing.metrics,
-        totalTrades: existing.metrics.totalTrades,
-      };
+    // Idempotency — reuse ANY existing row for this identity, not just a completed one. A prior
+    // attempt whose bounded poll parked the run as `submitted` (or a rejected/failed one) must NOT
+    // be resubmitted: the resumeToken embeds the (fresh-per-attempt) revisionId, so a resubmit mints
+    // a DUPLICATE platform run and then throws on the strategy_backtest_run_idem_uq index — stranding
+    // the row and wedging the revision lane (P0-4). Resume the existing row instead.
+    const existing = await identity();
+    if (existing) {
+      const adopted = await this.adoptExisting(existing);
+      if (adopted) return adopted;
     }
 
     const resumeToken = createHash('sha256')
@@ -102,18 +101,55 @@ export class BacktesterRevisionRunExecutor implements StrategyRevisionRunExecuto
       createdAt: this.d.now(),
       updatedAt: this.d.now(),
     };
-    await this.d.strategyBacktests.createSubmitted(row);
+    try {
+      await this.d.strategyBacktests.createSubmitted(row);
+    } catch (err) {
+      // Backstop: a concurrent execute() for the same identity won the idem unique index between
+      // our findByBundleAndParams and this insert. Re-read and adopt the winner rather than throwing
+      // (which would wedge the lane). Our just-submitted platform run is orphaned — acceptable under
+      // the per-profile serialization that must gate concurrency > 1.
+      const winner = await identity();
+      const adopted = winner ? await this.adoptExisting(winner) : null;
+      if (adopted) return adopted;
+      throw err;
+    }
 
     // 3. Bounded poll — NO comparison gate (unlike pollOverlayRun): a revision-combo run is standalone.
     const outcome = await pollResearchRun(this.d.platform, handle.runId, this.d.poll);
+    return this.finalize(labRunId, handle.runId, outcome);
+  }
 
-    // 4. Mark terminal.
+  /**
+   * Reuse an existing run row for this identity without resubmitting. Completed → return its metrics;
+   * a non-terminal (submitted/running/queued) row → resume by re-polling its platform run; a terminal
+   * rejected/failed row → surface rejected (it already ran and produced no reusable metrics). Returns
+   * null only for an unexpected status, letting the caller fall through to a fresh submit.
+   */
+  private async adoptExisting(existing: StrategyBacktestRun): Promise<RevisionRunResult | null> {
+    if (existing.status === 'completed' && existing.metrics) {
+      return {
+        status: 'completed', runId: existing.id, platformRunId: existing.platformRunId,
+        metrics: existing.metrics, totalTrades: existing.metrics.totalTrades,
+      };
+    }
+    if (existing.status === 'rejected' || existing.status === 'failed') {
+      return { status: 'rejected', runId: existing.id, platformRunId: existing.platformRunId };
+    }
+    if (existing.status === 'submitted' || existing.status === 'running' || existing.status === 'queued') {
+      const outcome = await pollResearchRun(this.d.platform, existing.platformRunId, this.d.poll);
+      return this.finalize(existing.id, existing.platformRunId, outcome);
+    }
+    return null;
+  }
+
+  /** Marks a run row terminal from a poll outcome and maps the result into a RevisionRunResult. */
+  private async finalize(runId: string, platformRunId: string, outcome: Awaited<ReturnType<typeof pollResearchRun>>): Promise<RevisionRunResult> {
     if (outcome.status === 'rejected') {
-      await this.d.strategyBacktests.markRejected(labRunId);
-      return { status: 'rejected', runId: labRunId, platformRunId: handle.runId };
+      await this.d.strategyBacktests.markRejected(runId);
+      return { status: 'rejected', runId, platformRunId };
     }
     if (outcome.status === 'pending') {
-      return { status: 'pending', runId: labRunId, platformRunId: handle.runId };
+      return { status: 'pending', runId, platformRunId };
     }
 
     let metrics;
@@ -121,18 +157,18 @@ export class BacktesterRevisionRunExecutor implements StrategyRevisionRunExecuto
       metrics = mapStrategyMetrics(outcome.summary);
     } catch (err) {
       if (err instanceof MetricMappingError) {
-        await this.d.strategyBacktests.markFailed(labRunId);
-        return { status: 'rejected', runId: labRunId, platformRunId: handle.runId };
+        await this.d.strategyBacktests.markFailed(runId);
+        return { status: 'rejected', runId, platformRunId };
       }
       throw err;
     }
 
-    await this.d.strategyBacktests.markCompleted(labRunId, {
+    await this.d.strategyBacktests.markCompleted(runId, {
       metrics,
       artifactRefs: [...outcome.artifactIds],
       platformContractVersion: outcome.summary.evidence?.contractVersion ?? 'unknown',
       finishedAt: this.d.now(),
     });
-    return { status: 'completed', runId: labRunId, platformRunId: handle.runId, metrics, totalTrades: metrics.totalTrades };
+    return { status: 'completed', runId, platformRunId, metrics, totalTrades: metrics.totalTrades };
   }
 }

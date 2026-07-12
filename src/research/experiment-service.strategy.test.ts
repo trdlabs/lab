@@ -484,6 +484,7 @@ describe('runStrategyBaselineValidation — bootstrap strategy_revision v1', () 
       create: async () => { throw new Error('revisions store unavailable'); },
       findById: async () => null,
       findLatestAccepted: async () => null,
+      findMaxVersion: async () => 0,
       updateStatus: async () => {},
       listByProfile: async () => [],
       findConsolidatedOf: async () => null,
