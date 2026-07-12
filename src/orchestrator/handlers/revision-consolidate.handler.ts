@@ -66,7 +66,7 @@ async function acceptConsolidation(
   await createAndEnqueueTask(
     {
       taskType: 'strategy.baseline', source: task.source,
-      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: cleanRef, consolidatedRevisionId: newId },
+      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: cleanRef, revisionId: newId },
       correlationId: task.correlationId, dedupeKey: `strategy.baseline:consolidated:${newId}`,
     },
     { repo: services.researchTasks, queue: services.taskQueue },

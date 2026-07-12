@@ -436,7 +436,7 @@ describe('revisionConsolidateHandler — accept path (slice G3b, Task 9)', () =>
     expect(baselineTask).not.toBeNull();
     expect(baselineTask!.payload['strategyProfileId']).toBe(R.strategyProfileId);
     expect(baselineTask!.payload['bundleArtifactRef']).toBeDefined();
-    expect(baselineTask!.payload['consolidatedRevisionId']).toBe(consolidated!.id);
+    expect(baselineTask!.payload['revisionId']).toBe(consolidated!.id);
 
     const events = await services.events.listByTask('task-consolidate-1');
     const consolidatedEvent = events.find((e) => e.type === 'revision.consolidated');
