@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
-import type { BotRunResultDetail, CloseReason } from '../../ports/bot-results-read.port.ts';
+import type { BotRunResultDetail, CloseReason, DecisionLogEntry } from '../../ports/bot-results-read.port.ts';
 import type { ClosedTrade } from '../../ports/bot-results-read.port.ts';
 import type { TradeEvidenceBundle } from '../../ports/trade-evidence-read.port.ts';
 import type { CanonicalRowV2 } from '../../ports/market-history-read.port.ts';
@@ -13,7 +13,8 @@ import {
   ResearcherOutputSchema, hypothesisFingerprint,
   HYPOTHESIS_PROPOSAL_CONTRACT_VERSION, type HypothesisProposal, type HypothesisProposalDraft, type RuleAction,
 } from '../../domain/hypothesis.ts';
-import type { ResearcherFocus, ActiveOverlayRuleSummary, ResearcherInput } from '../../ports/researcher.port.ts';
+import type { ResearcherFocus, ActiveOverlayRuleSummary, ResearcherInput, DecisionExcerpt } from '../../ports/researcher.port.ts';
+import { toDecisionExcerpts } from '../../research/decision-excerpts.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
 import { buildMarketContextMath } from '../../research-math/market-context-math.ts';
 import { formatMarketContextMath } from '../../research-math/format-market-context-math.ts';
@@ -222,6 +223,26 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     tradeEvidence = [];
   }
 
+  // R4: bounded decision-log excerpts for the suspicious losers (fail-soft, one page per distinct run).
+  const retryFeedback = payload.feedback
+    ? { decision: payload.feedback.decision, reasons: payload.feedback.reasons }
+    : undefined;
+
+  let decisionExcerpts: DecisionExcerpt[] = [];
+  if (suspicious.length > 0) {
+    const distinctRunIds = [...new Set(suspicious.map((t) => t.runId))];
+    const entries: DecisionLogEntry[] = [];
+    for (const runId of distinctRunIds) {
+      try {
+        const page = await services.botResults.getDecisionLog(runId);
+        entries.push(...page.items);
+      } catch (err) {
+        await services.events.append(event(task.id, 'researcher.decision_log_unavailable', { runId, error: errMsg(err) }));
+      }
+    }
+    decisionExcerpts = toDecisionExcerpts(entries, suspicious);
+  }
+
   const parsedWarmup = Number(process.env.TRADE_CONTEXT_WARMUP_MIN ?? '150');
   const warmupMin = Number.isFinite(parsedWarmup) && parsedWarmup > 0 ? parsedWarmup : 150;
   const parsedTail = Number(process.env.TRADE_CONTEXT_TAIL_MIN ?? '60');
@@ -371,6 +392,8 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     taggedDrafts = await runPass('loss_reduction', {
       tradeEvidence,
       ...(tradeContexts.length > 0 ? { tradeContexts } : {}),
+      ...(retryFeedback ? { retryFeedback } : {}),
+      ...(decisionExcerpts.length > 0 ? { decisionExcerpts } : {}),
     });
     if (winnerContexts.length > 0) {
       const profitDrafts = await runPass('profit_improvement', { tradeContexts: winnerContexts });
