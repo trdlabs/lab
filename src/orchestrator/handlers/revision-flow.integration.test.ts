@@ -25,6 +25,7 @@ import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../doma
 import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.port.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import { FakeRunTradesAdapter } from '../../adapters/platform/fake-run-trades.adapter.ts';
+import { FakeStrategyConsolidator } from '../../adapters/consolidator/fake-strategy-consolidator.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures (mirrors revision-build.handler.test.ts)
@@ -404,5 +405,75 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
     expect(v2?.status).toBe('accepted');
     expect(events).toContain('revision.preservation_skipped');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R1 Task 2: direct re-baseline of accepted revisions (W1 loop closure)
+// ---------------------------------------------------------------------------
+//
+// `strategy.baseline` payloads carry no `payload` field on the QueueEnvelope itself (see
+// task-intake.ts createAndEnqueueTask — the envelope is taskId/taskType/correlationId/source/
+// attempt/dedupeKey only; payload lives on the persisted ResearchTask row). Assertions below
+// query services.researchTasks.listByCorrelationAndTypes (the same lookup revisionBuildHandler
+// itself uses for cycle-scoping) rather than the raw taskQueue envelopes.
+describe('revision-flow integration (R1 Task 2): direct re-baseline of accepted revisions', () => {
+  it('re-baselines an accepted revision directly when consolidation is off (W1)', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+
+    const tasks = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['strategy.baseline', 'revision.consolidate']);
+    const baselineTasks = tasks.filter((t) => t.taskType === 'strategy.baseline');
+    expect(baselineTasks).toHaveLength(1);
+    expect(baselineTasks[0]).toMatchObject({
+      dedupeKey: expect.stringMatching(/^strategy\.baseline:accepted:/),
+      payload: expect.objectContaining({
+        strategyProfileId: 'p1',
+        revisionId: v2!.id,
+        bundleArtifactRef: expect.anything(),
+      }),
+    });
+    expect(tasks.filter((t) => t.taskType === 'revision.consolidate')).toHaveLength(0);
+
+    // the accepted revision was marked pending for re-baseline:
+    const accepted = await services.revisions.findLatestAccepted('p1');
+    expect(accepted?.id).toBe(v2!.id);
+    expect(accepted?.baselineValidationStatus).toBe('pending');
+  });
+
+  it('does NOT direct-rebaseline when consolidation fires (mutual exclusion)', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({
+      revisionRunExecutor: executor, researcher: cap.port,
+      consolidator: new FakeStrategyConsolidator(), consolidationDepthThreshold: 1,
+    });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v2 = revisions.find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+
+    const tasks = await services.researchTasks.listByCorrelationAndTypes('corr-1', ['strategy.baseline', 'revision.consolidate']);
+    expect(tasks.filter((t) => t.taskType === 'revision.consolidate')).toHaveLength(1);
+    expect(tasks.filter((t) => t.taskType === 'strategy.baseline')).toHaveLength(0);
   });
 });

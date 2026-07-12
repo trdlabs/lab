@@ -423,6 +423,22 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
         },
         { repo: services.researchTasks, queue: services.taskQueue },
       );
+    } else {
+      // R1 (W1 fix): no consolidation -> re-baseline the accepted composed revision directly so it
+      // returns to paper via the same strategy.baseline -> wfo -> paper.start chain. Mutually
+      // exclusive with the consolidation branch above (which re-baselines the consolidated
+      // revision instead), so an accepted revision is never re-baselined twice / double-submitted
+      // to paper.
+      await services.revisions.updateStatus(revisionId, { baselineValidationStatus: 'pending', updatedAt: now() });
+      await createAndEnqueueTask(
+        {
+          taskType: 'strategy.baseline', source: task.source,
+          payload: { strategyProfileId, bundleArtifactRef, revisionId },
+          correlationId: task.correlationId,
+          dedupeKey: `strategy.baseline:accepted:${revisionId}`,
+        },
+        { repo: services.researchTasks, queue: services.taskQueue },
+      );
     }
   } else {
     await services.revisions.updateStatus(revisionId, {
