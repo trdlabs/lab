@@ -213,8 +213,8 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     if (suspicious.length > 0) {
       tradeEvidence = await services.tradeEvidence.getTradeEvidence({
         tradeIds: suspicious.map((t) => t.tradeId),
-        minuteWindowBefore: 20,
-        minuteWindowAfter: 180,
+        minuteWindowBefore: 0,
+        minuteWindowAfter: 0,
       });
     }
   } catch (err) {

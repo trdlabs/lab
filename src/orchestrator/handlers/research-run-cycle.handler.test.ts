@@ -640,6 +640,22 @@ describe('researchRunCycleHandler per-trade context', () => {
     expect(ctxs?.[0]?.atExit.some((t) => t.config.key === 'micro')).toBe(true);
   });
 
+  it('requests trade-evidence with a 0/0 minute window (no dead minuteContext fetch)', async () => {
+    const calls: { minuteWindowBefore: number; minuteWindowAfter: number }[] = [];
+    const cap = capturingResearcher({ hypotheses: [draft('thesis 0/0 window')], researchSummary: 's' });
+    const tradeEvidence: TradeEvidenceReadPort = {
+      async getTradeEvidence(q) {
+        calls.push({ minuteWindowBefore: q.minuteWindowBefore, minuteWindowAfter: q.minuteWindowAfter });
+        return [];
+      },
+    };
+    const marketHistory: MarketHistoryReadPort = { async getRows() { return historyRows(); } };
+    const services = makeServices({ researcher: cap.port, botResults: losingBotResults(), tradeEvidence, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    expect(calls[0]).toEqual({ minuteWindowBefore: 0, minuteWindowAfter: 0 });
+  });
+
   it('is fail-soft: a per-trade getRows failure skips that context + emits an event, cycle still completes', async () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis ptc-fail')], researchSummary: 's' });
     const tradeEvidence: TradeEvidenceReadPort = { async getTradeEvidence() { return [losingBundle()]; } };
