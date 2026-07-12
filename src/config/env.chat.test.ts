@@ -23,8 +23,7 @@ describe('loadEnv — chat config', () => {
     expect(env.CHAT_MAX_MESSAGE_CHARS).toBe(2000);
   });
 
-  it('falls back to fake for an unknown adapter', () => {
-    const env = loadEnv({ TURN_INTERPRETER_ADAPTER: 'bogus' } as NodeJS.ProcessEnv);
-    expect(env.TURN_INTERPRETER_ADAPTER).toBe('fake');
+  it('[P1-17] rejects an unknown TURN_INTERPRETER_ADAPTER (fail-closed, no silent fake)', () => {
+    expect(() => loadEnv({ TURN_INTERPRETER_ADAPTER: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/TURN_INTERPRETER_ADAPTER/);
   });
 });

@@ -287,9 +287,8 @@ describe('loadEnv — agent adapter family default', () => {
     expect(env.TURN_INTERPRETER_ADAPTER).toBe('fake');
   });
 
-  it('an invalid LAB_AGENTS_ADAPTER falls back to fake', () => {
-    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'bogus' } as NodeJS.ProcessEnv);
-    for (const k of ADAPTERS) expect(env[k]).toBe('fake');
+  it('[P1-17] an invalid LAB_AGENTS_ADAPTER is rejected (fail-closed, no silent fake)', () => {
+    expect(() => loadEnv({ LAB_AGENTS_ADAPTER: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/LAB_AGENTS_ADAPTER/);
   });
 });
 
@@ -337,12 +336,9 @@ describe('pre-flight strategy critic env', () => {
     expect(env.STRATEGY_REFINER_MODEL).toBe('anthropic/claude-sonnet-4-6');
   });
 
-  it('reads an explicit refiner model and treats a non-mastra adapter as fake', () => {
-    const env = loadEnv({
-      STRATEGY_CRITIC_ADAPTER: 'bogus',
-      STRATEGY_REFINER_MODEL: 'openrouter/google/gemini-3.5-flash',
-    } as unknown as NodeJS.ProcessEnv);
-    expect(env.STRATEGY_CRITIC_ADAPTER).toBe('fake');
+  it('[P1-17] rejects a non-fake/mastra STRATEGY_CRITIC_ADAPTER and honors an explicit refiner model', () => {
+    expect(() => loadEnv({ STRATEGY_CRITIC_ADAPTER: 'bogus' } as unknown as NodeJS.ProcessEnv)).toThrow(/STRATEGY_CRITIC_ADAPTER/);
+    const env = loadEnv({ STRATEGY_REFINER_MODEL: 'openrouter/google/gemini-3.5-flash' } as unknown as NodeJS.ProcessEnv);
     expect(env.STRATEGY_REFINER_MODEL).toBe('openrouter/google/gemini-3.5-flash');
   });
 
@@ -611,5 +607,31 @@ describe('queue-routing env knobs (Task 3)', () => {
     } as unknown as NodeJS.ProcessEnv);
     expect(env.LAB_REVISION_QUEUE_CONCURRENCY).toBe(1);
     expect(env.LAB_PG_POOL_MAX).toBe(10);
+  });
+});
+
+describe('[P1-17] fail-closed adapter/integration parsing', () => {
+  it('throws on an unrecognized LAB_AGENTS_ADAPTER instead of silently falling back to fake', () => {
+    expect(() => loadEnv({ LAB_AGENTS_ADAPTER: 'Mastra' } as NodeJS.ProcessEnv)).toThrow(/LAB_AGENTS_ADAPTER/);
+  });
+
+  it('throws on an unrecognized per-agent adapter (RESEARCHER_ADAPTER typo)', () => {
+    expect(() => loadEnv({ RESEARCHER_ADAPTER: 'mastr' } as NodeJS.ProcessEnv)).toThrow(/RESEARCHER_ADAPTER/);
+  });
+
+  it('throws on an unrecognized TRADING_PLATFORM_INTEGRATION instead of silently falling back to mock', () => {
+    expect(() => loadEnv({ TRADING_PLATFORM_INTEGRATION: 'backtestr' } as NodeJS.ProcessEnv)).toThrow(/TRADING_PLATFORM_INTEGRATION/);
+  });
+
+  it('treats an empty-string adapter/integration as unset → default (Docker passes `${VAR:-}` empties)', () => {
+    const env = loadEnv({ STRATEGY_ANALYST_ADAPTER: '', RESEARCHER_ADAPTER: '', TRADING_PLATFORM_INTEGRATION: '' } as NodeJS.ProcessEnv);
+    expect(env.STRATEGY_ANALYST_ADAPTER).toBe('fake');
+    expect(env.RESEARCHER_ADAPTER).toBe('fake');
+    expect(env.TRADING_PLATFORM_INTEGRATION).toBe('mock');
+  });
+
+  it('a per-agent adapter left empty inherits LAB_AGENTS_ADAPTER=mastra', () => {
+    const env = loadEnv({ LAB_AGENTS_ADAPTER: 'mastra', RESEARCHER_ADAPTER: '' } as NodeJS.ProcessEnv);
+    expect(env.RESEARCHER_ADAPTER).toBe('mastra');
   });
 });

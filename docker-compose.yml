@@ -15,6 +15,56 @@ x-lab-image: &lab-image
     context: .
   image: trading-lab:local
 
+# Env that loadEnv reads but the explicit per-service maps historically omitted — merged into BOTH
+# worker and ingress via `<<: *lab-app-env` so a documented knob is never a silent no-op (P1-16).
+# Empty passthrough (`${VAR:-}`) lets loadEnv apply its own defaults, avoiding default-drift with
+# .env.example; explicit per-service keys still win over anything set here.
+x-lab-app-env: &lab-app-env
+  # External backtester integration. Absent, a TRADING_PLATFORM_INTEGRATION=backtester deploy
+  # silently falls back to http://127.0.0.1:8080 inside the container.
+  BACKTESTER_API_URL: ${BACKTESTER_API_URL:-}
+  BACKTESTER_API_TOKEN: ${BACKTESTER_API_TOKEN:-}
+  ARTIFACT_DIR: ${ARTIFACT_DIR:-}
+  TRADING_PLATFORM_BASELINE_VERSION: ${TRADING_PLATFORM_BASELINE_VERSION:-}
+  PLATFORM_RUN_MAX_POLLS: ${PLATFORM_RUN_MAX_POLLS:-}
+  PLATFORM_RUN_POLL_DELAY_MS: ${PLATFORM_RUN_POLL_DELAY_MS:-}
+  MAX_HYPOTHESES_PER_CYCLE: ${MAX_HYPOTHESES_PER_CYCLE:-}
+  REVISION_BATCH_MAX: ${REVISION_BATCH_MAX:-}
+  # Backtest evaluator thresholds
+  EVAL_MIN_TRADES: ${EVAL_MIN_TRADES:-}
+  EVAL_MIN_PNL_DELTA_USD: ${EVAL_MIN_PNL_DELTA_USD:-}
+  EVAL_MAX_DRAWDOWN_TOLERANCE_PCT: ${EVAL_MAX_DRAWDOWN_TOLERANCE_PCT:-}
+  EVAL_FRAGILITY_TOP_TRADE_PCT: ${EVAL_FRAGILITY_TOP_TRADE_PCT:-}
+  EVAL_STRONG_PNL_DELTA_USD: ${EVAL_STRONG_PNL_DELTA_USD:-}
+  EVAL_MIN_PROFIT_FACTOR: ${EVAL_MIN_PROFIT_FACTOR:-}
+  # Trade-preservation veto gate (R2) — kill-switch + thresholds; runs in the worker.
+  LAB_TRADE_PRESERVATION_GATE: ${LAB_TRADE_PRESERVATION_GATE:-}
+  LAB_TRADE_PRESERVATION_WINNER_RETENTION: ${LAB_TRADE_PRESERVATION_WINNER_RETENTION:-}
+  LAB_TRADE_PRESERVATION_MAX_TRADE_DROP_PCT: ${LAB_TRADE_PRESERVATION_MAX_TRADE_DROP_PCT:-}
+  LAB_TRADE_PRESERVATION_MIN_WINNER_SAMPLE: ${LAB_TRADE_PRESERVATION_MIN_WINNER_SAMPLE:-}
+  LAB_TRADE_PRESERVATION_ABSTENTION_SHARE: ${LAB_TRADE_PRESERVATION_ABSTENTION_SHARE:-}
+  LAB_TRADE_PRESERVATION_EOD_SHARE: ${LAB_TRADE_PRESERVATION_EOD_SHARE:-}
+  LAB_TRADE_PRESERVATION_MATCH_TOLERANCE_MS: ${LAB_TRADE_PRESERVATION_MATCH_TOLERANCE_MS:-}
+  # LLM-consolidation (G3b) — OFF unless CONSOLIDATOR_ADAPTER is set.
+  CONSOLIDATOR_ADAPTER: ${CONSOLIDATOR_ADAPTER:-}
+  CONSOLIDATOR_MODEL: ${CONSOLIDATOR_MODEL:-}
+  LAB_CONSOLIDATION_DEPTH_THRESHOLD: ${LAB_CONSOLIDATION_DEPTH_THRESHOLD:-}
+  LAB_CONSOLIDATION_TOL_REL: ${LAB_CONSOLIDATION_TOL_REL:-}
+  LAB_CONSOLIDATION_TOL_ABS: ${LAB_CONSOLIDATION_TOL_ABS:-}
+  # WFO decision agents
+  WFO_GATE1_ADAPTER: ${WFO_GATE1_ADAPTER:-}
+  WFO_GATE1_MODEL: ${WFO_GATE1_MODEL:-}
+  WFO_SWEEP_DESIGNER_ADAPTER: ${WFO_SWEEP_DESIGNER_ADAPTER:-}
+  WFO_SWEEP_DESIGNER_MODEL: ${WFO_SWEEP_DESIGNER_MODEL:-}
+  WFO_RESULT_INTERPRETER_ADAPTER: ${WFO_RESULT_INTERPRETER_ADAPTER:-}
+  WFO_RESULT_INTERPRETER_MODEL: ${WFO_RESULT_INTERPRETER_MODEL:-}
+  # Bot-results / ops-read (paper monitor + trade evidence + market history)
+  LAB_BOT_RESULTS_INTEGRATION: ${LAB_BOT_RESULTS_INTEGRATION:-}
+  LAB_OPS_READ_URL: ${LAB_OPS_READ_URL:-}
+  LAB_OPS_READ_TOKEN: ${LAB_OPS_READ_TOKEN:-}
+  LAB_OPS_READ_FIXTURE_DIR: ${LAB_OPS_READ_FIXTURE_DIR:-}
+  LAB_MARKET_HISTORY_URL: ${LAB_MARKET_HISTORY_URL:-}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -59,6 +109,8 @@ services:
     # Infra-contained; source cleanup is deferred. (migrate stays on pnpm — drizzle-kit only.)
     command: ["node", "--experimental-transform-types", "src/ingress/server.ts"]
     environment:
+      # Shared research/platform env (BACKTESTER_*, preservation, WFO, consolidation, eval, ops-read).
+      <<: *lab-app-env
       DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
       REDIS_URL: redis://redis:6379
       INGRESS_PORT: "3000"
@@ -141,7 +193,10 @@ services:
       - "3000"
       - "3100"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # Liveness on the always-on ingress port :3000. Must NOT target :3100/readyz — that read-API
+      # listener only starts when TRADING_LAB_READ_TOKEN is set, so probing it wedges the container
+      # 'unhealthy' when the token is unset and blocks office-server's depends_on (P1-18).
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -164,6 +219,8 @@ services:
     # Same transform-types workaround as ingress (see note above).
     command: ["node", "--experimental-transform-types", "src/worker/worker.ts"]
     environment:
+      # Shared research/platform env (BACKTESTER_*, preservation, WFO, consolidation, eval, ops-read).
+      <<: *lab-app-env
       DATABASE_URL: postgres://lab:lab@postgres:5432/trading_lab
       REDIS_URL: redis://redis:6379
       TRADING_PLATFORM_INTEGRATION: ${TRADING_PLATFORM_INTEGRATION:-mock}

@@ -207,9 +207,23 @@ function derivePhoenixReadBaseUrl(source: NodeJS.ProcessEnv): string {
 }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const agentsDefault: 'fake' | 'mastra' = source.LAB_AGENTS_ADAPTER === 'mastra' ? 'mastra' : 'fake';
-  const resolveAdapter = (v: string | undefined): 'fake' | 'mastra' =>
-    v === 'mastra' ? 'mastra' : v === 'fake' ? 'fake' : agentsDefault;
+  // Fail-closed adapter/integration parsing: a present-but-unrecognized value is a
+  // deploy typo, not a request for the default. Silently mapping e.g. `Mastra` → the fake
+  // agent (or `backtestr` → mock) runs stub output against real budgets/paper flow. Empty
+  // string is treated as unset (Docker passes `${VAR:-}` empties), matching the fail-closed
+  // parseBotResultsIntegration / parseSignedEvidenceSource parsers.
+  const parseAdapter = (name: string, v: string | undefined, fallback: 'fake' | 'mastra'): 'fake' | 'mastra' => {
+    if (v === undefined || v === '') return fallback;
+    if (v === 'mastra' || v === 'fake') return v;
+    throw new Error(`${name} must be one of fake|mastra, got '${v}'`);
+  };
+  const agentsDefault = parseAdapter('LAB_AGENTS_ADAPTER', source.LAB_AGENTS_ADAPTER, 'fake');
+  const resolveAdapter = (name: string, v: string | undefined): 'fake' | 'mastra' => parseAdapter(name, v, agentsDefault);
+  const parseIntegration = (v: string | undefined): 'backtester' | 'mock' => {
+    if (v === undefined || v === '') return 'mock';
+    if (v === 'backtester' || v === 'mock') return v;
+    throw new Error(`TRADING_PLATFORM_INTEGRATION must be one of backtester|mock, got '${v}'`);
+  };
   const strategyCriticModel = source.STRATEGY_CRITIC_MODEL || 'openrouter/x-ai/grok-4.3';
 
   return {
@@ -224,8 +238,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     TRADING_LAB_TASK_TOKEN: source.TRADING_LAB_TASK_TOKEN,
     TRADING_LAB_CALLBACK_TOKEN: source.TRADING_LAB_CALLBACK_TOKEN,
     TRADING_LAB_CALLBACK_PUBLIC_URL: source.TRADING_LAB_CALLBACK_PUBLIC_URL,
-    TRADING_PLATFORM_INTEGRATION:
-      source.TRADING_PLATFORM_INTEGRATION === 'backtester' ? 'backtester' : 'mock',
+    TRADING_PLATFORM_INTEGRATION: parseIntegration(source.TRADING_PLATFORM_INTEGRATION),
     BACKTESTER_API_URL: source.BACKTESTER_API_URL,
     BACKTESTER_API_TOKEN: source.BACKTESTER_API_TOKEN,
     BACKTEST_BACKEND: 'research_platform',
@@ -236,16 +249,16 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     LAB_QUEUE_CONCURRENCY: parsePositiveInt(source.LAB_QUEUE_CONCURRENCY, 1),
     LAB_REVISION_QUEUE_CONCURRENCY: parsePositiveInt(source.LAB_REVISION_QUEUE_CONCURRENCY, 1),
     LAB_PG_POOL_MAX: parsePositiveInt(source.LAB_PG_POOL_MAX, 10),
-    STRATEGY_ANALYST_ADAPTER: resolveAdapter(source.STRATEGY_ANALYST_ADAPTER),
+    STRATEGY_ANALYST_ADAPTER: resolveAdapter('STRATEGY_ANALYST_ADAPTER', source.STRATEGY_ANALYST_ADAPTER),
     STRATEGY_ANALYST_MODEL: source.STRATEGY_ANALYST_MODEL ?? 'openrouter/openai/gpt-5.5',
     ANTHROPIC_API_KEY: source.ANTHROPIC_API_KEY,
     RUN_LLM_TESTS: source.RUN_LLM_TESTS === 'true',
-    RESEARCHER_ADAPTER: resolveAdapter(source.RESEARCHER_ADAPTER),
+    RESEARCHER_ADAPTER: resolveAdapter('RESEARCHER_ADAPTER', source.RESEARCHER_ADAPTER),
     RESEARCHER_MODEL: source.RESEARCHER_MODEL ?? 'anthropic/claude-sonnet-4-6',
-    CRITIC_ADAPTER: resolveAdapter(source.CRITIC_ADAPTER),
+    CRITIC_ADAPTER: resolveAdapter('CRITIC_ADAPTER', source.CRITIC_ADAPTER),
     CRITIC_MODEL: source.CRITIC_MODEL ?? 'anthropic/claude-sonnet-4-6',
     MAX_HYPOTHESES_PER_CYCLE: parsePositiveInt(source.MAX_HYPOTHESES_PER_CYCLE, 5),
-    BUILDER_ADAPTER: resolveAdapter(source.BUILDER_ADAPTER),
+    BUILDER_ADAPTER: resolveAdapter('BUILDER_ADAPTER', source.BUILDER_ADAPTER),
     BUILDER_MODEL: source.BUILDER_MODEL ?? 'anthropic/claude-sonnet-4-6',
     evaluatorThresholds: {
       minTrades: parsePositiveInt(source.EVAL_MIN_TRADES, DEFAULT_EVALUATOR_THRESHOLDS.minTrades),
@@ -267,7 +280,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     MODEL_PROVIDER: parseModelProvider(source.MODEL_PROVIDER),
     OPENAI_API_KEY: source.OPENAI_API_KEY,
     OPENROUTER_API_KEY: source.OPENROUTER_API_KEY,
-    TURN_INTERPRETER_ADAPTER: resolveAdapter(source.TURN_INTERPRETER_ADAPTER),
+    TURN_INTERPRETER_ADAPTER: resolveAdapter('TURN_INTERPRETER_ADAPTER', source.TURN_INTERPRETER_ADAPTER),
     TURN_INTERPRETER_MODEL: source.TURN_INTERPRETER_MODEL ?? 'openrouter/google/gemini-3.1-flash-lite',
     TURN_INTERPRETER_MIN_CONFIDENCE: parseFloatOr(source.TURN_INTERPRETER_MIN_CONFIDENCE, 0.6),
     CHAT_MAX_MESSAGE_CHARS: parsePositiveInt(source.CHAT_MAX_MESSAGE_CHARS, 4000),
@@ -282,15 +295,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PHOENIX_API_KEY: source.PHOENIX_API_KEY,
     RESEARCH_TASK_TOKEN_BUDGET: parseNonNegativeInt(source.RESEARCH_TASK_TOKEN_BUDGET, 200000),
     STRATEGY_PREFLIGHT_CRITIQUE: source.STRATEGY_PREFLIGHT_CRITIQUE !== 'false',
-    STRATEGY_CRITIC_ADAPTER: resolveAdapter(source.STRATEGY_CRITIC_ADAPTER),
+    STRATEGY_CRITIC_ADAPTER: resolveAdapter('STRATEGY_CRITIC_ADAPTER', source.STRATEGY_CRITIC_ADAPTER),
     STRATEGY_CRITIC_MODE: source.STRATEGY_CRITIC_MODE === 'two_stage' ? 'two_stage' : 'single',
     STRATEGY_CRITIC_MODEL: strategyCriticModel,
     STRATEGY_REFINER_MODEL: source.STRATEGY_REFINER_MODEL || strategyCriticModel,
-    WFO_GATE1_ADAPTER: resolveAdapter(source.WFO_GATE1_ADAPTER),
+    WFO_GATE1_ADAPTER: resolveAdapter('WFO_GATE1_ADAPTER', source.WFO_GATE1_ADAPTER),
     WFO_GATE1_MODEL: source.WFO_GATE1_MODEL ?? 'anthropic/claude-sonnet-4-6',
-    WFO_SWEEP_DESIGNER_ADAPTER: resolveAdapter(source.WFO_SWEEP_DESIGNER_ADAPTER),
+    WFO_SWEEP_DESIGNER_ADAPTER: resolveAdapter('WFO_SWEEP_DESIGNER_ADAPTER', source.WFO_SWEEP_DESIGNER_ADAPTER),
     WFO_SWEEP_DESIGNER_MODEL: source.WFO_SWEEP_DESIGNER_MODEL ?? 'anthropic/claude-sonnet-4-6',
-    WFO_RESULT_INTERPRETER_ADAPTER: resolveAdapter(source.WFO_RESULT_INTERPRETER_ADAPTER),
+    WFO_RESULT_INTERPRETER_ADAPTER: resolveAdapter('WFO_RESULT_INTERPRETER_ADAPTER', source.WFO_RESULT_INTERPRETER_ADAPTER),
     WFO_RESULT_INTERPRETER_MODEL: source.WFO_RESULT_INTERPRETER_MODEL ?? 'anthropic/claude-sonnet-4-6',
     PAPER_WINDOW_MIN_TRADES: parsePositiveInt(source.PAPER_WINDOW_MIN_TRADES, 30),
     PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD: parsePositiveInt(source.PAPER_WINDOW_LOW_CONFIDENCE_THRESHOLD, 15),
