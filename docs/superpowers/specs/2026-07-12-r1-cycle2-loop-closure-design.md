@@ -90,6 +90,8 @@ await services.events.append(event(task.id, 'strategy.baseline.completed', { str
 
 **Uniform scope (ratified):** the gate applies to ALL `strategy.baseline` runs — fresh-profile Cycle-1 onboarding included. Rationale: once the handler has a verdict, `failed`/`inconclusive` should not launch the expensive downstream by default, regardless of caller. The failure branch is observable via `wfo_skipped`, not silent.
 
+**Fresh-profile INCONCLUSIVE rescue hatch (added post-review):** one explicit, named exception — `allowWfoOnInconclusiveForFreshProfile = !revisionId && baselineValidationStatus === 'inconclusive'`. A fresh-profile Cycle-1 baseline (no `revisionId`) that comes back INCONCLUSIVE (too few trades to validate — e.g. long_oi on the demo fixture, tradeCount≈0) STILL enqueues WFO, because the sweep is the intended rescue to find params that generate enough trades. FAIL still stops; revision re-baselines (`revisionId` present) stay strict on INCONCLUSIVE. In-code named policy, no env var. Gate becomes `if (baselineValidationStatus === 'passed' || allowWfoOnInconclusiveForFreshProfile)`.
+
 ## 4. Data flow
 
 ```
@@ -111,7 +113,8 @@ Consolidation-on path is unchanged: accepted → revision.consolidate → (conso
 
 ## 6. Deferred follow-ups (not R1)
 
-- **`allowWfoOnInconclusiveForFreshProfile` policy** — if Cycle-1 onboarding should intentionally run WFO on an `inconclusive` fresh-profile baseline (sweep to find params that generate enough trades), make it an *explicit* named policy/flag with its own test, not an implicit exception in the shared handler. R1 ships the strict uniform gate; this is the escape hatch if the product wants it.
+- **Consolidation-reject re-baseline fall-through** (whole-branch review Important #1): under `CONSOLIDATOR_ADAPTER` on, when consolidation is triggered but then REJECTs (any of its ~11 fail-safe returns: `missing_run_context`, `bundle_invalid`, parity `REJECT`, `concurrent_revision`, …), the accepted revision `R` stays accepted and is never re-baselined — because the direct re-baseline lives in the `else` of the consolidation-*fires* condition. So the W1 dead-end reopens for that config. Off by default (consolidator null; also awaits the mastra adapter), so the default deploy is correct. Fix: on a consolidation reject, fall through to a direct re-baseline of `R` (in `revision-consolidate.handler.ts`'s reject paths, or a re-check in `revision-build`). Ticket this.
+- ~~`allowWfoOnInconclusiveForFreshProfile`~~ — DONE in R1 (see §3.3 rescue hatch), promoted from deferred after the whole-branch review confirmed the demo fixture yields INCONCLUSIVE.
 
 ## 7. Invariants / gotchas
 
