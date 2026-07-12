@@ -204,7 +204,7 @@ paper-losses (ops-read forensics ops.4/ops.5)
 
 ---
 
-## 8. Фиксация статуса и гапов — 2026-07-02 (gap-анализ полного конвейера)
+## 8. Фиксация статуса и гапов — 2026-07-02 (статусы обновлены 2026-07-12)
 
 Сверка «код vs этот roadmap vs целевая двухцикловая система» (4 graph-агента по lab/platform/mock/sdk).
 
@@ -216,15 +216,43 @@ paper-losses (ops-read forensics ops.4/ops.5)
 - **Критик** — HITL в чате + авто в воркере (PR #88/#91), но default OFF (`STRATEGY_PREFLIGHT_CRITIQUE=false`; demo = fake-адаптер).
 - **Evaluator** — baseline-relative детерминированная лестница (`evaluateBacktest`); retry FAIL/MODIFY с `cycleDepth+1` (cap 2) + токен-бюджет.
 
-### Гапы (порядок доработки — принят 2026-07-02)
+### Гапы (порядок доработки — принят 2026-07-02; статусы — 2026-07-12)
 
-1. **G1 — Оркестрация baseline/WFO (ТЕКУЩИЙ СЛАЙС).** Baseline/WFO живут только в CLI (`scripts/run-strategy-baseline.mts`, `run-strategy-wfo.mts`), не зарегистрированы как task types (composition.ts: только onboard / run_cycle / hypothesis.build / backtest.resume / backtest.completed) → из чата недостижимы. **Самоблок WFO:** скрипт пересобирает бандл LLM-билдером → недетерминизм → `bundleHash ≠ baseline.bundleHash` → fail-fast. Fix: персистить `strategy_bundle` artifact-ref на experiment row и реконструировать бандл, не пересобирать. Сюда же: budget kill-switch wiring в WFO-контур.
-2. **G2 — Paper-мост (Phase D).** В lab «paper» = только лейбл `PAPER_CANDIDATE` (событие, тупик). Платформа готова целиком: intake 036 `POST /intake/paper-candidate` → smoke-gate 060 → `bot_bundle` → `materializeBot` → paper host 053/054 → ops-read (`/ops/candidates/{id}`, `/ops/runs?mode=paper`). SDK 0.9.0 (уже вендорен) даёт `submitPaperCandidate` + `createHttpIntakeTransport`, `source:'trading-lab'` зарезервирован. Нужен lab-порт (PaperIntakePort) + **champion-запись** победителя sweep (сейчас params живут только holdout-member'ом в ledger). mock-platform paper НЕ симулирует → тесты через fake transport.
-3. **G3 — Ревизии стратегии + merge гипотез.** Сейчас топология «звезда от baseline»: каждый оверлей ложится на исходный `strategy:${profile.id}`, merge/стекинга нет (0 вхождений), вердикт бэктеста не возвращается на `HypothesisProposal` (нет status-update), `activeOverlayRules` подаёт schema-validated (не backtest-proven). Нужна сущность «ревизия» (baseline v2 = baseline + принятые оверлеи), гипотезы N+1 — поверх ревизии. Отдельный дизайн.
-4. **G4 — Триггер Цикла 2 + адаптивная длительность.** §2.5-политика (trades/day → длина paper/бэктеста, компенсаторный paper для low-freq) не реализована: период = статический `defaultPlatformRun`, автозапуска `research.run_cycle` по завершении paper-окна нет. Backtest-period HITL — backlog.
-5. **G5 — Canary-comparison (§3, GATE CANARY)** — не начат.
-6. **G6 — Каналы + включение критика.** Telegram/crawler — enum-заглушки в `TASK_SOURCES`, кода нет. Критик включить после paid eval выбора модели.
-7. **G7 — Live-верификация + видимость.** Известный блокер живых прогонов: tradeCount=0 (long_oi детектит дамп, не эмитит вход — builder-faithfulness/1h-гранулярность). Phase E (office-панели экспериментов) не начата — вердикты видны только в БД/консоли. После каждого слайса — сквозной живой прогон.
+1. ✅ **G1 — Оркестрация baseline/WFO. MERGED PR #125** (`c11fb24`): bundle-ref персистится на experiment row + реконструкция вместо LLM-пересборки (самоблок WFO снят), task types зарегистрированы, автоцепочка из чата, budget kill-switch в WFO-контуре. Рядом: #126 (параллельные бэктесты сетки, bounded concurrency), #143 (default-platform-run SSOT).
+   <details><summary>Исходный гап (2026-07-02)</summary> Baseline/WFO жили только в CLI, не были task types → из чата недостижимы; скрипт пересобирал бандл LLM-билдером → `bundleHash ≠ baseline.bundleHash` → fail-fast.</details>
+2. ✅ **G2 — Paper-мост (Phase D). MERGED**: PaperIntakePort — PR #127 (`76592ac`), оркестрация G2b (paper.start + champion mapper + ledger 0016) — PR #129 (`c855e81`). Поверх: **079 signed-evidence trust-gate** — PR #134 (`8e694ae`, fail-closed; live-loop ждёт Deliverable A бэктестера + http-provider, см. P1-29 ревью). Gotcha: `strategyName` = manifest.id, НЕ profile.id-UUID. mock-platform paper по-прежнему не симулирует → тесты через fake transport.
+3. ✅ **G3 — Ревизии стратегии + merge гипотез. MERGED PR #133** (`9a26203`): детерминированный merge-пайплайн, strategy-lane acceptance, стекинг раундов. **G3b (LLM-консолидация на пороге вложенности) — MERGED PR #136** (`dbd975c`), off by default (`CONSOLIDATOR_ADAPTER`); live-включение ждёт mastra-адаптер **+ пакет фиксов ревью P1-8/9/12/13/14** (см. triage ниже). Revision-lane routing (отдельная очередь) — PR #149. ⚠️ `LAB_QUEUE_CONCURRENCY=1` держится до фиксов P0-1/3/4 + P1-7 (см. triage).
+4. ✅ **G4 — Триггер Цикла 2 + адаптивная длительность. MERGED PR #130** (`d146081`): адаптивное paper-окно по §2.5, локатор-шов run'а, автотриггер `research.run_cycle` с paperRunId, resume CLI. Live ждёт платформенные auto-start и candidate→run link. ⚠️ Ревью: monitor-цепочка умирает от одной транзиентной ошибки, revival инертен (P0-5) — чинить до длинных paper-окон.
+5. ⬜ **G5 — Canary-comparison (§3, GATE CANARY)** — не начат.
+6. ⬜ **G6 — Каналы + включение критика.** Telegram/crawler — enum-заглушки в `TASK_SOURCES`, кода нет. Критик включить после paid eval выбора модели.
+7. 🔶 **G7 — Live-верификация + видимость.** Частично: ctx.market window-fix MERGED (platform#102→`f4c7b73`, backtester#92→`7b5b447`; calendar-grid + gap-explicit live-адаптер, absence end-to-end, check:093 гейт). tradeCount=0 диагностирован: 1m/1h timeframe mismatch (long_oi — минутная FSM, demo-фикстура 1h) — НЕ баг движка; usable-слайс = `2026-06-18-real-all` (1-min/22 трейда). Остаётся: signal-reproduction acceptance (exec-validation сверяет только FILL), Phase E office-панели не начаты — вердикты видны только в БД/консоли.
+
+**Добавлено после 2026-07-02 (вне исходного списка):**
+
+- ✅ **R2 — Trade-preservation gate (из hypothesis-eval review 2026-07-11): все 3 среза в main** — 1a PR #147 (revision-lane veto), 1b-backtester PR #99 (baseline-trades артефакт, ARTIFACT_CONTRACT_VERSION 022.2), 1b-lab PR #150 (proxy-lane veto + fail-open). Остаётся: backtester-редеплой на VPS (оператор) + доводка по ревью P1-10/11.
+- 🔶 **R1 — Замкнуть петлю Цикла 2 — ТЕКУЩИЙ СЛАЙС** (ветка `feat/r1-cycle2-loop-closure`). Ревью 2026-07-12 нашло два бага ровно в этой петле (P0-1 zero-fire гонка триггера, P0-2 потеря триггера на fail-выходах `hypothesis.build`) — входят в объём слайса.
+
+### Находки код-ревью 2026-07-12 (triage)
+
+Полный аудит багов/недоработок/узких мест: `docs/research/2026-07-12-lab-code-review-bugs-and-bottlenecks.md` (номера P0-x/P1-x ниже — оттуда). Главный вывод: у петли Цикла 2 есть режимы «тихого перманентного клина», срабатывающие уже при `LAB_QUEUE_CONCURRENCY=1`, и три подтверждённых механизма, из-за которых конкурентность нельзя поднимать. Триаж принят 2026-07-12:
+
+**Сразу (в R1-слайс или первым follow-up — блокируют надёжность замыкаемой петли):**
+
+1. **Cycle-closure триггер** — P0-1 (zero-fire гонка `allTerminal` в `backtest-completed.handler`) + P0-2 (триггер теряется на fail-выходах `hypothesis.build`). Это буквально «петля не замыкается» — тема R1, чинить в нём же.
+2. **Идемпотентность `revision.build`** — P0-3 (краш после create → retry → ложный `concurrent_revision` → застрявший `candidate` навсегда клинит lane профиля; нужен adopt-or-expire + sweep протухших candidate).
+3. **Run-executor resume-or-adopt** — P0-4 (ресабмит застрявшего `submitted`-рана: orphan-ран на платформе + throw, детонирующий п.2; identity базлайна общая для всех ревизий профиля).
+4. **`paper.monitor` retry + рабочий revival** — P0-5 (одна транзиентная ошибка платформы убивает многонедельное наблюдение; revival-ключ `:0` инертен). G4 уже в проде петли — чинить до длинных paper-окон.
+5. **Процесс-уровень** — P0-6 (pg-notify стрим течёт коннектами пула до зависания всей БД) + P0-7 (`pool.on('error')` + unhandledRejection/uncaughtException — сейчас idle-ошибка пула роняет процесс при `restart: "no"`). Дёшево, чинить немедленно.
+6. **Deploy-гигиена перед VPS-редеплоем** — P1-16 (docker env-allowlist роняет `BACKTESTER_API_URL` и ~30 knobs → сабмиты в localhost) + P1-17 (опечатка в `*_ADAPTER` тихо даёт Fake/mock в prod — throw на нераспознанном) + P1-18 (ingress healthcheck на опциональный listener блокирует office).
+
+**Перед соответствующим этапом (гейты, не сейчас):**
+
+- **Перед подъёмом `LAB_QUEUE_CONCURRENCY`** (load-readiness слайс): per-profile сериализация выделения версии ревизии (P1-7, advisory lock / BullMQ groups), все enqueue через task-intake с dedupeKey на строке (P1-2), idempotency fence воркера (P1-3), обработка 23505 (P1-25). Пункты 1–3 из «сразу» — тоже prerequisite.
+- **Перед `CONSOLIDATOR_ADAPTER=mastra` live (G3b-live):** демоция consolidated-головы на проваленном re-baseline + WFO по вердикту (P1-9), идемпотентный re-enqueue `strategy.baseline` из `already_consolidated` (P1-8), non-vacuous parity (P1-12), потолок попыток консолидации/depth (P1-13), theses как Record (P1-14).
+- **Перед реальными деньгами / внешней экспозицией:** read-auth пустой токен = bypass (P1-19), чат-LLM вне token-kill-switch + rate limiting (P1-22), CAS containment + hash-verify + атомарная запись (P1-20/21), retry-able `paper.start` при transient evidence-сбое (P1-6).
+- **Рядом с R2-доводкой:** сузить fail-open try preservation-гейта (баг гейта ≠ `fetch_failed`) + событие при тихом `gateOn=false` (P1-10), строгий `parseTrade` (P1-11 — иначе veto сравнивает фикцию при schema drift).
+
+**Отложено осознанно (P2/P3/P4 отчёта):** индексы (`platform_run_id`, поллеры), таймауты/backoff внешних fetch'ей, параллелизация `research.run_cycle`, декомпозиция god-functions (`researchRunCycleHandler` fan-out 141), `.env.example`-дрейф, Dockerfile/volume для `.artifacts`, orphan CAS GC, pin-тест vendored canonicalizer. Достаём при работе над соответствующим кодом или при деградации производительности.
 
 ---
 
