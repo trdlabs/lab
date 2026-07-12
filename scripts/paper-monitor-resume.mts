@@ -22,6 +22,10 @@
  * instead of double-enqueuing. `delayMs` is omitted (BullMQ default = immediate) — resume implies
  * "check right now", not "wait another poll interval".
  *
+ * The resumed task also carries a FRESH monitor `epoch` (Date.now()) so its self-reschedules
+ * (paper.monitor:<exp>:<epoch>:<attempt>) live in their own namespace and are never dedup-swallowed
+ * by the original — now-dead — chain's already-created attempt keys.
+ *
  * Boots the DB-backed runtime (like `pnpm worker` / `pnpm platform:resume`); all decisions are
  * data-driven from the paper_submission ledger, no in-process state.
  *
@@ -53,7 +57,7 @@ async function main(): Promise<{ total: number; resumed: { experimentId: string;
         {
           taskType: 'paper.monitor',
           source: 'platform',
-          payload: { experimentId: sub.experimentId, attempt: 0 },
+          payload: { experimentId: sub.experimentId, attempt: 0, epoch: Date.now() },
           dedupeKey: `paper.monitor:${sub.experimentId}:resume-${stamp}`,
         },
         { repo: services.researchTasks, queue: services.taskQueue },
