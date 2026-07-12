@@ -324,3 +324,153 @@ git commit -m "refactor(r1): migrate consolidation re-baseline caller to revisio
 - **Spec coverage:** §3.1 → Task 2; §3.2 (rename + alias + caller migration + back-compat) → Task 1 (schema/resolve/back-compat via existing tests) + Task 3 (caller); §3.3 (uniform W4 gate) → Task 1; §5 tests → Tasks 1-3; §6 deferred (fresh-profile rescue policy) → intentionally NOT implemented.
 - **Behavior-change note:** Task 1 makes fresh-profile Cycle-1 baselines with FAIL/INCONCLUSIVE verdicts skip WFO (was unconditional). This is the ratified uniform W4 scope; covered by the "fresh-profile FAIL" test. If any existing Cycle-1 baseline test asserts a WFO enqueue on a non-`passed` fixture verdict, update it (change the fixture verdict to a passing one, or assert the skip).
 - **Transient alias:** deliberately kept in Task 1; the follow-up cleanup that removes `consolidatedRevisionId` is out of scope for R1 and should be a separate commit after the queue drains.
+
+---
+
+## Cycle-close robustness (P0-1/P0-2) — Tasks 4-5 (added 2026-07-12)
+
+Spec §8. Folds two code-review P0s (zero-fire race + trigger-lost-on-non-backtest-terminal) into this slice. Global constraints unchanged (lab `.ts` imports, no param properties, no new env).
+
+### Task 4: `cycle-close` primitive + `revision.build` self-recheck/self-requeue
+
+**Files:**
+- Create: `src/orchestrator/cycle-close.ts`
+- Modify: `src/orchestrator/handlers/revision-build.handler.ts` (schema; new Step-0 before Step-1)
+- Test: `src/orchestrator/cycle-close.test.ts` (new), `src/orchestrator/handlers/revision-flow.integration.test.ts` (self-gate cases)
+
+**Interfaces:**
+- Produces: `enqueueCycleClose({correlationId, strategyProfileId, source, services})`, `isCycleChainTerminal(correlationId, services): Promise<boolean>`, consts `CYCLE_CHAIN_TYPES`, `CYCLE_CLOSE_MAX_WAIT_ATTEMPTS = 40`, `CYCLE_CLOSE_WAIT_DELAY_MS = 15_000`. `RevisionBuildPayloadSchema` gains `waitAttempt?: number`. New events `revision.build.deferred`, `revision.build.abandoned`.
+
+- [ ] **Step 1: Write `src/orchestrator/cycle-close.ts`**
+
+```typescript
+import { createAndEnqueueTask } from './task-intake.ts';
+import type { AppServices } from './app-services.ts';
+import type { ResearchTask } from '../domain/types.ts';
+
+export const CYCLE_CHAIN_TYPES = ['hypothesis.build', 'backtest.completed', 'research.run_cycle'] as const;
+/** Generous poll budget: 40 x 15s = 10min, well over ~23s/backtest. On exhaustion -> revision.build.abandoned. */
+export const CYCLE_CLOSE_MAX_WAIT_ATTEMPTS = 40;
+export const CYCLE_CLOSE_WAIT_DELAY_MS = 15_000;
+
+type CycleServices = Pick<AppServices, 'researchTasks' | 'taskQueue'>;
+
+/**
+ * Cycle-close trigger (P0-1/P0-2). Enqueues a single revision.build for the correlation with the
+ * BASE dedupeKey — no terminality gate here: the enqueue is unconditional (which is what removes the
+ * P0-1 zero-fire race), and revisionBuildHandler makes the authoritative terminality decision over
+ * settled statuses. Called from every chain-member terminal exit (backtest.completed +
+ * hypothesis.build domain-terminal returns).
+ */
+export async function enqueueCycleClose(args: {
+  correlationId: string; strategyProfileId: string; source: ResearchTask['source']; services: CycleServices;
+}): Promise<void> {
+  await createAndEnqueueTask(
+    {
+      taskType: 'revision.build', source: args.source,
+      payload: { strategyProfileId: args.strategyProfileId, correlationId: args.correlationId },
+      correlationId: args.correlationId,
+      dedupeKey: `revision.build:${args.correlationId}`,
+    },
+    { repo: args.services.researchTasks, queue: args.services.taskQueue },
+  );
+}
+
+/**
+ * Authoritative chain-terminality check. revision.build is NOT a chain type, so no exclude-self.
+ * TODO(P1-2): 'queued' is treated as non-terminal (blocking) — an orphaned queued row will defer
+ * the cycle until the abandon cap. Tolerating stale 'queued' older than a horizon is deferred to P1-2.
+ */
+export async function isCycleChainTerminal(correlationId: string, services: CycleServices): Promise<boolean> {
+  const chain = await services.researchTasks.listByCorrelationAndTypes(correlationId, [...CYCLE_CHAIN_TYPES]);
+  return chain.every((t) => t.status === 'completed' || t.status === 'failed' || t.status === 'rejected');
+}
+```
+
+- [ ] **Step 2: Add `waitAttempt` to the schema** (`revision-build.handler.ts`)
+
+```typescript
+export const RevisionBuildPayloadSchema = z.object({
+  strategyProfileId: z.string().min(1),
+  correlationId: z.string().min(1),
+  waitAttempt: z.number().int().nonnegative().optional(),
+});
+```
+
+- [ ] **Step 3: Write the failing self-gate tests** (`revision-flow.integration.test.ts`) — reuse the file's harness. Assert: (a) chain NOT terminal → no revision created, a delayed `revision.build` re-enqueued with dedupeKey matching `/:wait1$/` and a `revision.build.deferred` event; (b) `waitAttempt: 40` + non-terminal → `revision.build.abandoned` event, no re-enqueue, no revision; (c) chain terminal → builds as before. Drive terminality via the `researchTasks` repo state (seed chain tasks with statuses).
+
+- [ ] **Step 4: Add Step-0 to `revisionBuildHandler`** (immediately after payload parse, before `// --- Step 1`)
+
+```typescript
+  // --- Step 0: authoritative chain-terminality gate (P0-1/P0-2) ---
+  // The trigger (enqueueCycleClose) is enqueued unconditionally from any chain member's terminal
+  // exit; the real decision is made HERE, over settled statuses, because revision.build runs as its
+  // own later task. Not-yet-terminal -> bounded delayed self-requeue; cap -> abandoned.
+  if (!(await isCycleChainTerminal(correlationId, services))) {
+    const waitAttempt = parsed.data.waitAttempt ?? 0;
+    if (waitAttempt >= CYCLE_CLOSE_MAX_WAIT_ATTEMPTS) {
+      await services.events.append(event(task.id, 'revision.build.abandoned', { correlationId, waitAttempt }));
+      return;
+    }
+    const next = waitAttempt + 1;
+    await createAndEnqueueTask(
+      {
+        taskType: 'revision.build', source: task.source,
+        payload: { strategyProfileId, correlationId, waitAttempt: next },
+        correlationId, dedupeKey: `revision.build:${correlationId}:wait${next}`,
+        delayMs: CYCLE_CLOSE_WAIT_DELAY_MS,
+      },
+      { repo: services.researchTasks, queue: services.taskQueue },
+    );
+    await services.events.append(event(task.id, 'revision.build.deferred', { correlationId, waitAttempt: next }));
+    return;
+  }
+```
+
+Add imports at the top: `import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';` (`createAndEnqueueTask` and `event` are already imported).
+
+- [ ] **Step 5: Run the tests + tsc**
+
+Run: `npx vitest run src/orchestrator/cycle-close.test.ts src/orchestrator/handlers/revision-flow.integration.test.ts` (green) and `npx tsc --noEmit` (clean).
+
+- [ ] **Step 6: Commit** — `git commit -m "feat(r1): cycle-close primitive + revision.build self-recheck/self-requeue (P0-1)"`
+
+### Task 5: wire call-sites (backtest.completed unconditional + hypothesis.build domain-terminal exits)
+
+**Files:**
+- Modify: `src/orchestrator/handlers/backtest-completed.handler.ts` (~199-215), `src/orchestrator/handlers/hypothesis-build.handler.ts` (5 return sites ~64/80/91/105/114)
+- Test: `src/orchestrator/handlers/backtest-completed.handler.test.ts`, `src/orchestrator/handlers/hypothesis-build.handler.test.ts`
+
+**Interfaces:** Consumes `enqueueCycleClose` (Task 4).
+
+- [ ] **Step 1: Write failing tests.** (a) `backtest-completed.handler.test.ts` — P0-1: two chain tasks left non-terminal in the repo, run the handler twice (simulating concurrent last-finishers) → assert exactly one `revision.build` enqueued (base dedupeKey). (b) `hypothesis-build.handler.test.ts` — P0-2: force `builder_failed` and (separately) `datasets_unavailable` as the last chain member → assert a `revision.build` is enqueued (base dedupeKey) from that terminal return.
+
+- [ ] **Step 2: Replace the trigger block in `backtest-completed.handler.ts`** (~199-215) with:
+
+```typescript
+  // Cycle-completion trigger (fail-soft, P0-1/P0-2): enqueue the cycle-close unconditionally.
+  // revisionBuildHandler re-checks chain terminality over settled statuses and self-requeues if not
+  // yet done — this is race-free where the old inline allTerminal check (excluding only self, before
+  // the worker writes 'completed') zero-fired at concurrency >= 2.
+  try {
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId, source: task.source, services });
+  } catch (err) {
+    await services.events.append(event(task.id, 'revision.build_trigger_failed', { error: errMsg(err) }));
+  }
+```
+
+Add `import { enqueueCycleClose } from '../cycle-close.ts';`. Remove the now-unused `listByCorrelationAndTypes` call and its locals in this handler (keep the import if still used elsewhere in the file; otherwise drop it).
+
+- [ ] **Step 3: Add the trigger to `hypothesis-build.handler.ts`** — immediately before each of the 5 domain-terminal `return;` (the `missing_platform_run_config`, `builder_failed`, invalid-bundle, `backtest.reused`, `datasets_unavailable` branches), insert:
+
+```typescript
+    await enqueueCycleClose({ correlationId: task.correlationId, strategyProfileId: hypothesis.strategyProfileId, source: task.source, services });
+```
+
+(Use the profile id already in scope — `hypothesis.strategyProfileId`, confirmed present since the handler loads `hypothesis` at the top. Do NOT add it to the normal-success path that spawns a backtest.) Add `import { enqueueCycleClose } from '../cycle-close.ts';`.
+
+- [ ] **Step 4: Run tests + tsc + full suite**
+
+Run: `npx vitest run src/orchestrator/handlers/backtest-completed.handler.test.ts src/orchestrator/handlers/hypothesis-build.handler.test.ts` (green), `npx tsc --noEmit` (clean), then `npx vitest run` (full suite green).
+
+- [ ] **Step 5: Commit** — `git commit -m "feat(r1): wire cycle-close from backtest.completed + hypothesis.build terminal exits (P0-2)"`

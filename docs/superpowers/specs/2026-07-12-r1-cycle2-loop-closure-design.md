@@ -122,3 +122,40 @@ Consolidation-on path is unchanged: accepted → revision.consolidate → (conso
 - Mutual exclusion of consolidate vs direct re-baseline at the accept point is load-bearing (double paper-submit otherwise).
 - No new env; the direct path is gated by the existing consolidator-null default. Paper intake still gated downstream by `LAB_PAPER_INTAKE_URL`.
 - `strategy.baseline.completed` fires on every run regardless of the WFO branch.
+
+---
+
+## 8. Cycle-close trigger robustness (P0-1 / P0-2 — folded in 2026-07-12)
+
+Source: code review `docs/research/2026-07-12-lab-code-review-bugs-and-bottlenecks.md` §P0-1/§P0-2; roadmap §8 triage assigns both to this slice. Both are bugs in the exact loop this slice closes: the `revision.build` trigger that batches a cycle's `proxy_passed` hypotheses.
+
+### 8.1 The two bugs
+- **P0-1 (zero-fire race):** the trigger in `backtest-completed.handler.ts` evaluates `others.every(terminal)` excluding only itself, but the worker flips a task to `completed` only AFTER its handler returns (`worker.ts:20-23`). At `LAB_QUEUE_CONCURRENCY ≥ 2` the two last `backtest.completed` handlers run concurrently, each sees the other `running`, both conclude "not terminal", and `revision.build` never fires. (This is the constraint that pins `LAB_QUEUE_CONCURRENCY=1` today.)
+- **P0-2 (trigger lost on non-`backtest.completed` terminal exit):** the trigger lives only in `backtest-completed.handler`, but `hypothesis.build` has terminal exits that never produce a `backtest.completed` (all are `return`s: `missing_platform_run_config`, `builder_failed`, invalid bundle, `backtest.reused`, `datasets_unavailable`; plus throw-after-3-attempts). If the last chain member to terminalize is one of these, the trigger never runs — even at concurrency=1.
+
+### 8.2 Design (ratified): unconditional trigger + authoritative self-recheck (P0-1 direction b)
+One shared primitive, race-free by construction, covering both bugs.
+
+**`src/orchestrator/cycle-close.ts`:**
+- `CYCLE_CHAIN_TYPES = ['hypothesis.build','backtest.completed','research.run_cycle']`, `CYCLE_CLOSE_MAX_WAIT_ATTEMPTS = 40`, `CYCLE_CLOSE_WAIT_DELAY_MS = 15_000`.
+- `enqueueCycleClose({correlationId, strategyProfileId, source, services})` — enqueues `revision.build` with **base** dedupeKey `revision.build:${correlationId}`. NO terminality gate at the call site (this is what kills the P0-1 race — nothing racy is evaluated at trigger time; the enqueue is unconditional and the base dedupeKey absorbs the storm of concurrent/repeated triggers into ONE row).
+- `isCycleChainTerminal(correlationId, services)` — `listByCorrelationAndTypes(cid, CYCLE_CHAIN_TYPES).every(terminal)`. Carries a `TODO(P1-2)`: currently `queued` is non-terminal (blocking); tolerating stale `queued` older than a horizon is deferred to P1-2 (strict scope-guard).
+
+**`revisionBuildHandler` Step-0 self-gate** (the authoritative decision, over settled statuses — revision.build runs as its own later task, so the finishers' statuses are written by then):
+- Add `waitAttempt?: number` to `RevisionBuildPayloadSchema`.
+- If `!isCycleChainTerminal(correlationId)`: if `waitAttempt >= CYCLE_CLOSE_MAX_WAIT_ATTEMPTS` → emit `revision.build.abandoned {correlationId, waitAttempt}` and return (observable, not a silent orphan); else self-requeue a **delayed** revision.build with attempt-scoped dedupeKey `revision.build:${cid}:wait${n+1}` (the base key is already `completed`, so a fresh key is required to re-enqueue), `delayMs: CYCLE_CLOSE_WAIT_DELAY_MS`, `payload.waitAttempt: n+1`; emit `revision.build.deferred {correlationId, waitAttempt}`; return. If terminal → proceed to the existing Step 1+ (unchanged). `revision.build` is not one of `CYCLE_CHAIN_TYPES`, so no exclude-self is needed.
+
+Why race-free: the trigger is unconditional, so P0-1's "both see running" can no longer yield zero enqueues — at least one `revision.build` row always exists. The authoritative terminality decision is deferred to that row's own execution, which the self-requeue re-evaluates until statuses settle. Budget `40 × 15s = 10min` is generous vs ~23s/backtest; on exhaustion `abandoned` fires rather than looping forever.
+
+### 8.3 Call sites
+- `backtest-completed.handler.ts:199-215` — replace the racy `allTerminal`-gated block with an unconditional `enqueueCycleClose(...)` (keep the fail-soft try/catch → `revision.build_trigger_failed`).
+- `hypothesis-build.handler.ts` — call `enqueueCycleClose(...)` immediately before each of the 5 domain-terminal `return`s (lines ~64/80/91/105/114). The normal-success path (which spawns a backtest → later `backtest.completed`) does NOT call it.
+- Throw-after-3-attempts is covered **transitively**: any earlier chain member's trigger already has a self-requeue loop polling terminality, which re-checks after the final `failed` write. A cycle where every hypothesis throws has no `proxy_passed` to orphan. (Defensive comment; maxAttempts is NOT threaded into the worker.)
+
+### 8.4 Tests
+- **P0-1:** simulate two concurrent last-finishers (both chain tasks left non-terminal in the repo while both `backtest.completed` handlers run) → assert exactly one `revision.build` enqueued (base dedupeKey). Then, with statuses settled, the handler re-check proceeds to build.
+- **P0-2:** with `builder_failed` and `datasets_unavailable` as the last chain member → assert `revision.build` is eventually enqueued (trigger fired from the domain-terminal return).
+- **self-gate:** non-terminal chain → `revision.build` defers (delayed self-requeue with `wait${n}` key + `revision.build.deferred`), does NOT build; terminal chain → builds; `waitAttempt ≥ cap` → `revision.build.abandoned`, no build, no further requeue.
+
+### 8.5 Scope guard
+Do NOT fold P0-3 (revision.build idempotency), P0-4 (run-executor resume-or-adopt), or P1-2 (intake-bypassing enqueues) — staged separately in the roadmap triage. The primitive leaves a `TODO(P1-2)` in `isCycleChainTerminal` and must not worsen them.
