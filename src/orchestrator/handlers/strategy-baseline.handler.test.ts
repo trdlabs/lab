@@ -221,4 +221,10 @@ describe('strategyBaselineHandler', () => {
     expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(0);
     expect(appendSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'strategy.baseline.wfo_skipped' }));
   });
+
+  it('fresh-profile INCONCLUSIVE baseline (no revisionId) still enqueues wfo (rescue hatch)', async () => {
+    const { services, queued } = await makeFakeServices({ verdict: 'INCONCLUSIVE' });
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
 });

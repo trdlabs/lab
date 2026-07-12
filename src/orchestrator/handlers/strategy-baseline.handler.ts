@@ -82,8 +82,12 @@ export const strategyBaselineHandler: WorkflowHandler = async (task, services) =
     });
   }
 
-  // W4: only a passing baseline earns the expensive WFO sweep. failed/inconclusive stop here.
-  if (baselineValidationStatus === 'passed') {
+  // W4: only a passing baseline earns the expensive WFO sweep. failed/inconclusive stop here —
+  // EXCEPT fresh-profile Cycle-1 onboarding on an INCONCLUSIVE baseline (too few trades to validate,
+  // e.g. long_oi on the demo fixture), where the WFO sweep is the intended rescue to find params
+  // that generate enough trades. Revision re-baselines (revisionId present) stay strict.
+  const allowWfoOnInconclusiveForFreshProfile = !revisionId && baselineValidationStatus === 'inconclusive';
+  if (baselineValidationStatus === 'passed' || allowWfoOnInconclusiveForFreshProfile) {
     await createAndEnqueueTask(
       {
         taskType: 'strategy.wfo',
