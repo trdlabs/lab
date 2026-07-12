@@ -162,3 +162,16 @@ describe('InMemoryStrategyRevisionRepository', () => {
     expect(got?.preservationGate?.metrics.totalDelta).toBe(1);
   });
 });
+
+describe('InMemoryStrategyRevisionRepository.findMaxVersion (P0-3)', () => {
+  it('returns the max version across ALL statuses for the profile (0 when none)', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    expect(await repo.findMaxVersion('prof-1')).toBe(0);
+    await repo.create(row({ id: 'r1', version: 1, status: 'accepted' }));
+    await repo.create(row({ id: 'r2', version: 2, status: 'rejected' })); // rejected still counts
+    await repo.create(row({ id: 'r3', version: 3, status: 'candidate' })); // stranded candidate still counts
+    await repo.create(row({ id: 'other', strategyProfileId: 'prof-2', version: 9, status: 'accepted' }));
+    expect(await repo.findMaxVersion('prof-1')).toBe(3);
+    expect(await repo.findMaxVersion('prof-2')).toBe(9);
+  });
+});

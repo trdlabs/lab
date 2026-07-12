@@ -73,6 +73,15 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
     return rows[0] ? strategyRevisionToDomain(rows[0]) : null;
   }
 
+  async findMaxVersion(strategyProfileId: string): Promise<number> {
+    // Max version across ALL statuses — see the port comment: collision-free version allocation.
+    const rows = await this.db.select({ version: strategyRevision.version }).from(strategyRevision)
+      .where(eq(strategyRevision.strategyProfileId, strategyProfileId))
+      .orderBy(desc(strategyRevision.version))
+      .limit(1);
+    return rows[0]?.version ?? 0;
+  }
+
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
     'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'preservationGate' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
     const set: Record<string, unknown> = {};

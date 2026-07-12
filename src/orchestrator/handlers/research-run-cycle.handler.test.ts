@@ -927,6 +927,7 @@ describe('two-pass research', () => {
         async create() { throw new Error('db down'); },
         async findById() { throw new Error('db down'); },
         async findLatestAccepted() { throw new Error('db down'); },
+        async findMaxVersion() { throw new Error('db down'); },
         async updateStatus() { throw new Error('db down'); },
         async listByProfile() { throw new Error('db down'); },
         async findConsolidatedOf() { throw new Error('db down'); },

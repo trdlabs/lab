@@ -266,6 +266,31 @@ describe('revisionBuildHandler', () => {
     expect(candidateCalls).toHaveLength(1);
   });
 
+  it('[P0-3] a rejected/stranded revision at the next version does not wedge the lane — a fresh version is allocated', async () => {
+    const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const { services } = await setup({ hypotheses: [h1], candidateResults: [{ status: 'completed', metrics: acceptMetrics() }] });
+
+    // A prior cycle's candidate at v2 rejected (or a crashed attempt's stranded 'candidate'): it
+    // occupies version 2. With `accepted.version + 1` allocation the next build recomputes v2,
+    // collides on UNIQUE(profileId, version), and skips as 'concurrent_revision' — wedging the lane.
+    await services.revisions.create({
+      id: 'rev-2-rejected', strategyProfileId: 'p1', version: 2, hypothesisIds: [],
+      mergedRuleSet: { order: [], rules: [] }, status: 'rejected',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+
+    await revisionBuildHandler(task({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const revisions = await services.revisions.listByProfile('p1');
+    const v3 = revisions.find((r) => r.version === 3);
+    expect(v3).toBeDefined();
+    expect(v3!.status).toBe('accepted');
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).not.toContain('revision.skipped'); // no concurrent_revision wedge
+    expect(events).toContain('revision.accepted');
+  });
+
   it('conflict-drop: later-scored conflicting hypothesis is dropped_merge_conflict, winner still composes', async () => {
     const winner = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 500, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
     const loser = proposal('h3', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 5 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 100, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h3' } });

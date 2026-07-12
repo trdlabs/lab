@@ -26,6 +26,14 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
     return accepted.reduce((max, r) => (r.version > max.version ? r : max));
   }
 
+  async findMaxVersion(strategyProfileId: string): Promise<number> {
+    let max = 0;
+    for (const r of this.byId.values()) {
+      if (r.strategyProfileId === strategyProfileId && r.version > max) max = r.version;
+    }
+    return max;
+  }
+
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
     'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId' | 'preservationGate'>>): Promise<void> {
     const existing = this.byId.get(id);

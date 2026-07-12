@@ -245,7 +245,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   const baseBundle = await reconstructStrategyBundle(services.artifacts, accepted.bundleArtifactRef);
 
   // --- Step 6: compose ---
-  const version = accepted.version + 1;
+  // Allocate the next version as max(version)+1 across ALL statuses, not accepted.version+1: a
+  // rejected candidate — or a candidate stranded by a prior crashed attempt — occupies a version
+  // number, and reusing accepted.version+1 would collide on UNIQUE(profileId, version), get caught
+  // below as 'concurrent_revision', and wedge the profile's lane permanently (P0-3). max+1 is
+  // collision-free under per-profile serialization (LAB_QUEUE_CONCURRENCY=1); the create() catch
+  // below remains the backstop for a genuine concurrent build once that serialization is relaxed.
+  const version = (await services.revisions.findMaxVersion(strategyProfileId)) + 1;
   let compose = composeRevisionBundle({
     baseSource: baseBundle.source,
     baseManifestMeta: baseBundle.manifest as StrategyManifestMeta,

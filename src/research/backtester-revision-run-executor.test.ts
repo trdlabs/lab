@@ -105,6 +105,117 @@ describe('BacktesterRevisionRunExecutor', () => {
     expect(out.totalTrades).toBe(7);
   });
 
+  it('[P0-4] resumes an existing SUBMITTED row by re-polling its platform run — does NOT resubmit', async () => {
+    const repo = new InMemoryStrategyBacktestRunRepository();
+    const paramsHash = computeStrategyParamsHash({ bundleHash: bundle.bundleHash, platformRun: run, params: {} });
+    const stuck: StrategyBacktestRun = {
+      id: 'stuck_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x',
+      bundleHash: bundle.bundleHash, paramsHash, runKind: 'revision_combo',
+      platformRunId: 'pr_stuck', correlationId: 'corr_prior', taskId: 'rev_0',
+      resumeToken: 'tok', params: {}, status: 'submitted',
+      metrics: null, platformRun: run, artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: 'builder-sdk-v0',
+      backend: 'research_platform', submittedAt: 't0', finishedAt: null, createdAt: 't0', updatedAt: 't0',
+    };
+    await repo.createSubmitted(stuck);
+
+    let submitCalls = 0;
+    const polledIds: string[] = [];
+    const exec = new BacktesterRevisionRunExecutor({
+      platform: {
+        submitStrategyResearchRun: async () => { submitCalls += 1; return { runId: 'pr_should_not_happen' }; },
+        getRunStatus: async (id: string) => { polledIds.push(id); return { status: 'completed' }; },
+        getRunResult: async () => ({ kind: 'summary', summary: { status: 'completed', artifactRefs: [], metrics: rawMetrics, evidence: { seed: 42, contractVersion: 'platform-v1', moduleVersions: [] } } }),
+      } as any,
+      strategyBacktests: repo,
+      poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} },
+      now: () => 't1',
+    });
+    const out = await exec.execute(baseReq);
+
+    expect(submitCalls).toBe(0); // never resubmits — no duplicate platform run, no idem-index throw
+    expect(polledIds).toContain('pr_stuck'); // re-polled the stranded run's platform id
+    expect(out.status).toBe('completed');
+    expect(out.runId).toBe('stuck_run');
+    expect(out.platformRunId).toBe('pr_stuck');
+    expect((await repo.findById('stuck_run'))?.status).toBe('completed');
+  });
+
+  it('[P0-4] a still-pending SUBMITTED row re-polls and stays pending — no resubmit', async () => {
+    const repo = new InMemoryStrategyBacktestRunRepository();
+    const paramsHash = computeStrategyParamsHash({ bundleHash: bundle.bundleHash, platformRun: run, params: {} });
+    await repo.createSubmitted({
+      id: 'pending_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: bundle.bundleHash, paramsHash,
+      runKind: 'revision_combo', platformRunId: 'pr_pending', correlationId: 'c', taskId: 'rev_0', resumeToken: 'tok',
+      params: {}, status: 'submitted', metrics: null, platformRun: run, artifactRefs: [], platformContractVersion: 'pending',
+      sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform', submittedAt: 't0', finishedAt: null, createdAt: 't0', updatedAt: 't0',
+    });
+    let submitCalls = 0;
+    const exec = new BacktesterRevisionRunExecutor({
+      platform: {
+        submitStrategyResearchRun: async () => { submitCalls += 1; return { runId: 'nope' }; },
+        getRunStatus: async () => ({ status: 'running' }),
+        getRunResult: async () => { throw new Error('should not be called while pending'); },
+      } as any,
+      strategyBacktests: repo, poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} }, now: () => 't1',
+    });
+    const out = await exec.execute(baseReq);
+    expect(submitCalls).toBe(0);
+    expect(out.status).toBe('pending');
+    expect(out.runId).toBe('pending_run');
+  });
+
+  it('[P0-4] an existing REJECTED row surfaces rejected without resubmitting', async () => {
+    const repo = new InMemoryStrategyBacktestRunRepository();
+    const paramsHash = computeStrategyParamsHash({ bundleHash: bundle.bundleHash, platformRun: run, params: {} });
+    await repo.createSubmitted({
+      id: 'rej_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: bundle.bundleHash, paramsHash,
+      runKind: 'revision_combo', platformRunId: 'pr_rej', correlationId: 'c', taskId: 'rev_0', resumeToken: 'tok',
+      params: {}, status: 'submitted', metrics: null, platformRun: run, artifactRefs: [], platformContractVersion: 'pending',
+      sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform', submittedAt: 't0', finishedAt: null, createdAt: 't0', updatedAt: 't0',
+    });
+    await repo.markRejected('rej_run');
+
+    let submitCalls = 0;
+    const exec = new BacktesterRevisionRunExecutor({
+      platform: {
+        submitStrategyResearchRun: async () => { submitCalls += 1; return { runId: 'nope' }; },
+        getRunStatus: async () => ({ status: 'completed' }),
+        getRunResult: async () => { throw new Error('should not be called'); },
+      } as any,
+      strategyBacktests: repo, poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} }, now: () => 't1',
+    });
+    const out = await exec.execute(baseReq);
+    expect(submitCalls).toBe(0);
+    expect(out.status).toBe('rejected');
+    expect(out.runId).toBe('rej_run');
+  });
+
+  it('[P0-4] createSubmitted idem-violation backstop: re-reads and adopts the winner instead of throwing', async () => {
+    const paramsHash = computeStrategyParamsHash({ bundleHash: bundle.bundleHash, platformRun: run, params: {} });
+    const winner: StrategyBacktestRun = {
+      id: 'winner_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: bundle.bundleHash, paramsHash,
+      runKind: 'revision_combo', platformRunId: 'pr_winner', correlationId: 'c2', taskId: 'rev_2', resumeToken: 'tok2',
+      params: {}, status: 'completed',
+      metrics: { netPnlUsd: 3, netPnlPct: 0, totalTrades: 4, winRate: 0.5, profitFactor: 1.2, maxDrawdownPct: 2, expectancyUsd: 0, sharpe: 0.5, topTradeContributionPct: 12 },
+      platformRun: run, artifactRefs: [], platformContractVersion: 'platform-v1', sdkContractVersion: 'builder-sdk-v0',
+      backend: 'research_platform', submittedAt: 't0', finishedAt: 't0', createdAt: 't0', updatedAt: 't0',
+    };
+    let findCalls = 0;
+    const repo = {
+      findByBundleAndParams: async () => { findCalls += 1; return findCalls === 1 ? null : winner; }, // null first (pre-submit), winner after the race
+      createSubmitted: async () => { throw new Error('duplicate key value violates unique constraint "strategy_backtest_run_idem_uq"'); },
+      markCompleted: async () => {}, markRejected: async () => {}, markFailed: async () => {},
+    };
+    const exec = new BacktesterRevisionRunExecutor({
+      platform: { submitStrategyResearchRun: async () => ({ runId: 'pr_loser' }), getRunStatus: async () => ({ status: 'completed' }), getRunResult: async () => { throw new Error('unused'); } } as any,
+      strategyBacktests: repo as any, poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} }, now: () => 't',
+    });
+    const out = await exec.execute(baseReq);
+    expect(out.status).toBe('completed');
+    expect(out.runId).toBe('winner_run');
+    expect(out.platformRunId).toBe('pr_winner');
+  });
+
   it('marks rejected on a rejected outcome and propagates', async () => {
     const repo = new InMemoryStrategyBacktestRunRepository();
     const exec = new BacktesterRevisionRunExecutor({
