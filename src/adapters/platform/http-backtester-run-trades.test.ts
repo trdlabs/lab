@@ -56,6 +56,30 @@ describe('HttpBacktesterRunTradesAdapter', () => {
     await expect(new HttpBacktesterRunTradesAdapter(client).getRunTrades('r')).rejects.toThrow(/entryTs/);
   });
 
+  it('[P1-11] rejects a trades row with an unrecognized side instead of coercing to long', async () => {
+    const client = {
+      getArtifactManifest: async () => ({ descriptors: [{ artifactType: 'trades', contentHash: 'h1', availability: 'available', approxItemCount: 1 }] }),
+      readArtifact: async () => ({ page: [{ entryTs: 1, exitTs: 2, side: 'buy', realizedPnl: 3 }], total: 1, offset: 0 }),
+    } as never;
+    await expect(new HttpBacktesterRunTradesAdapter(client).getRunTrades('r')).rejects.toThrow(/side/);
+  });
+
+  it('[P1-11] rejects a trades row with a non-numeric realizedPnl instead of coercing to 0', async () => {
+    const client = {
+      getArtifactManifest: async () => ({ descriptors: [{ artifactType: 'trades', contentHash: 'h1', availability: 'available', approxItemCount: 1 }] }),
+      readArtifact: async () => ({ page: [{ entryTs: 1, exitTs: 2, side: 'long', realizedPnl: 'oops' }], total: 1, offset: 0 }),
+    } as never;
+    await expect(new HttpBacktesterRunTradesAdapter(client).getRunTrades('r')).rejects.toThrow(/realizedPnl/);
+  });
+
+  it('[P1-11] rejects a NaN realizedPnl (would poison the preservation veto sums)', async () => {
+    const client = {
+      getArtifactManifest: async () => ({ descriptors: [{ artifactType: 'trades', contentHash: 'h1', availability: 'available', approxItemCount: 1 }] }),
+      readArtifact: async () => ({ page: [{ entryTs: 1, exitTs: 2, side: 'short', realizedPnl: NaN }], total: 1, offset: 0 }),
+    } as never;
+    await expect(new HttpBacktesterRunTradesAdapter(client).getRunTrades('r')).rejects.toThrow(/realizedPnl/);
+  });
+
   it('parseTrade keeps closeReason from the artifact row', async () => {
     const client = {
       getArtifactManifest: async () => ({ descriptors: [{ artifactType: 'trades', contentHash: 'h1', availability: 'available', approxItemCount: 1 }] }),
