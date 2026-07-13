@@ -639,3 +639,123 @@ describe('revision-flow integration (R3a Task 2): OOS holdout boundary + skip pa
     expect(events).toContain('revision.holdout_skipped');
   });
 });
+
+// ---------------------------------------------------------------------------
+// R3a Task 3: trade_based holdout gate activation (train selection + holdout confirm)
+// ---------------------------------------------------------------------------
+//
+// Seeds a full-window baseline with 80 synthetic trades (>= DEFAULT_HOLDOUT_POLICY's
+// minTradesTrain 50 + minTradesHoldout 30) at 'base-full', so resolveHoldoutBoundary returns
+// mode:'trade_based' with a fixed t (full confidence: holdoutTrades === 30, not < 30). The fake
+// executor keys its response purely on `req.label` -- each label (comparison_baseline,
+// train_baseline, candidate, holdout_baseline, holdout_candidate) is requested with a distinct
+// window/bundle combination in the handler, so label alone disambiguates train vs holdout without
+// needing to introspect req.run.period.
+
+function metricBlock(netPnlUsd: number, totalTrades: number): BacktestMetricBlock {
+  return {
+    netPnlUsd, netPnlPct: netPnlUsd / 100, totalTrades, winRate: 0.6, profitFactor: 1.4,
+    maxDrawdownPct: 8, expectancyUsd: netPnlUsd / totalTrades, sharpe: 1.1, topTradeContributionPct: 10,
+  };
+}
+
+function syntheticTrades(count: number): Array<{ entryTs: number; exitTs: number; side: 'long'; realizedPnl: number }> {
+  return Array.from({ length: count }, (_, i) => ({ entryTs: i + 1, exitTs: i + 2, side: 'long' as const, realizedPnl: 1 }));
+}
+
+/** comparison_baseline -> full-window 'base-full' (80 trades seeded via FakeRunTradesAdapter, so
+ * resolveHoldoutBoundary picks a trade_based boundary); train_baseline/candidate -> train-window
+ * runs ('base-train'/'cand-train', a PASSing combo); holdout_baseline/holdout_candidate -> the
+ * held-out confirm runs ('base-holdout'/'cand-holdout'), keyed on `opts.holdoutPasses`. */
+function makeHoldoutExecutor(opts: { holdoutPasses: boolean }): { executor: StrategyRevisionRunExecutor; calls: RevisionRunRequest[] } {
+  const calls: RevisionRunRequest[] = [];
+  const fullBaseline = metricBlock(500, 80);
+  const trainBaseline = metricBlock(500, 50);
+  const trainCandidate = metricBlock(900, 50); // PASSes vs trainBaseline
+  const holdoutBaseline = metricBlock(200, 30);
+  const holdoutCandidatePass = metricBlock(400, 30); // PASSes vs holdoutBaseline
+  const holdoutCandidateFail = metricBlock(150, 30); // degrades: 150 < holdoutBaseline's 200 -> no_improvement_over_accepted
+  const executor: StrategyRevisionRunExecutor = {
+    execute: async (req: RevisionRunRequest): Promise<RevisionRunResult> => {
+      calls.push(req);
+      switch (req.label) {
+        case 'comparison_baseline':
+          return { status: 'completed', runId: 'cmp-full-run', platformRunId: 'base-full', metrics: fullBaseline, totalTrades: fullBaseline.totalTrades };
+        case 'train_baseline':
+          return { status: 'completed', runId: 'train-base-run', platformRunId: 'base-train', metrics: trainBaseline, totalTrades: trainBaseline.totalTrades };
+        case 'candidate':
+          return { status: 'completed', runId: 'cand-train-run', platformRunId: 'cand-train', metrics: trainCandidate, totalTrades: trainCandidate.totalTrades };
+        case 'holdout_baseline':
+          return { status: 'completed', runId: 'holdout-base-run', platformRunId: 'base-holdout', metrics: holdoutBaseline, totalTrades: holdoutBaseline.totalTrades };
+        case 'holdout_candidate':
+          return {
+            status: 'completed', runId: 'cand-holdout-run', platformRunId: 'cand-holdout',
+            metrics: opts.holdoutPasses ? holdoutCandidatePass : holdoutCandidateFail, totalTrades: 30,
+          };
+        default:
+          throw new Error(`unexpected revision-run label in R3a Task 3 holdout fixture: ${req.label}`);
+      }
+    },
+  };
+  return { executor, calls };
+}
+
+describe('revision-flow integration (R3a Task 3): trade_based holdout gate activation', () => {
+  it('trade_based: accepts only after a passing holdout confirm; primary run = holdout run', async () => {
+    const runTrades = new FakeRunTradesAdapter({ 'base-full': syntheticTrades(80) });
+    const { executor, calls } = makeHoldoutExecutor({ holdoutPasses: true });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+    expect(v2!.holdoutValidation?.mode).toBe('trade_based');
+    expect(v2!.holdoutValidation?.reason).toBe('holdout_passed');
+    expect(v2!.holdoutValidation?.trainMetrics).toBeDefined();
+    expect(v2!.holdoutValidation?.holdoutMetrics).toBeDefined();
+    // primary run-context is the holdout run, not the train-window candidate run:
+    expect(v2!.comboBacktestRunId).toBe('cand-holdout-run');
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.holdout_validated');
+    expect(events).toContain('revision.accepted');
+
+    // sanity: the train-window candidate + the holdout confirm runs both actually happened.
+    expect(calls.some((c) => c.label === 'train_baseline')).toBe(true);
+    expect(calls.some((c) => c.label === 'holdout_baseline')).toBe(true);
+    expect(calls.some((c) => c.label === 'holdout_candidate')).toBe(true);
+  });
+
+  it('trade_based: rejects holdout_failed when the train-accepted candidate degrades on holdout', async () => {
+    const runTrades = new FakeRunTradesAdapter({ 'base-full': syntheticTrades(80) });
+    const { executor } = makeHoldoutExecutor({ holdoutPasses: false });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('rejected');
+    expect(v2!.verdictReason).toBe('holdout_failed');
+    expect(v2!.holdoutValidation?.reason).toBe('holdout_failed');
+    expect(v2!.holdoutValidation?.trainMetrics).toBeDefined();
+    expect(v2!.holdoutValidation?.holdoutMetrics).toBeDefined();
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.holdout_validated');
+    expect(events).toContain('revision.rejected');
+    expect(events).not.toContain('revision.accepted');
+  });
+});
