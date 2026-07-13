@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createChatApp, type ChatAppDeps } from './chat-app.ts';
+import { ChatRateLimiter } from './chat-rate-limiter.ts';
+import type { TurnInterpreterPort } from '../ports/turn-interpreter.port.ts';
 import { FakeTurnInterpreter } from '../adapters/intent/fake-turn-interpreter.ts';
 import { FakeOperatorRetrieval } from '../../test/support/fake-operator-retrieval.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
@@ -206,5 +208,52 @@ describe('chat auth gate runs before body parsing', () => {
     const app = createChatApp(appDeps());
     const res = await post(app, { message: 'привет' }, { token: 'wrong-token' });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /chat/messages rate limiting (P1-22)', () => {
+  it('serves turns up to the window cap, then rejects with 429 rate_limited', async () => {
+    const app = createChatApp(appDeps({ rateLimiter: new ChatRateLimiter({ maxTurns: 1, windowMs: 60_000 }) }));
+    const first = await post(app, { message: 'какая сегодня погода?' });
+    expect(first.status).toBe(200);
+    const second = await post(app, { message: 'какая сегодня погода?' });
+    expect(second.status).toBe(429);
+    expect(await second.json()).toMatchObject({ status: 'rejected', reason: 'rate_limited' });
+  });
+
+  it('rejects a second in-flight turn on the same session with 429 concurrent_request', async () => {
+    // Park the first turn inside interpret() so it holds the per-session lock when the second arrives.
+    let openGate!: () => void;
+    const gate = new Promise<void>((r) => { openGate = r; });
+    let signalEntered!: () => void;
+    const entered = new Promise<void>((r) => { signalEntered = r; });
+    const fake = new FakeTurnInterpreter();
+    const gated: TurnInterpreterPort = {
+      adapter: 'fake', model: 'gated',
+      interpret: async (m: string) => { signalEntered(); await gate; return fake.interpret(m); },
+    };
+    const app = createChatApp(appDeps({
+      interpreter: gated,
+      rateLimiter: new ChatRateLimiter({ maxTurns: 100, windowMs: 60_000 }),
+    }));
+
+    const p1 = post(app, { message: 'какая сегодня погода?', sessionId: 'sess-conc' });
+    await entered; // first turn now parked in interpret() → lock held
+    const second = await post(app, { message: 'какая сегодня погода?', sessionId: 'sess-conc' });
+    expect(second.status).toBe(429);
+    expect(await second.json()).toMatchObject({ status: 'rejected', reason: 'concurrent_request' });
+
+    openGate();
+    expect((await p1).status).toBe(200); // first completes and releases the lock
+    // lock released → same session can run again
+    const third = await post(app, { message: 'какая сегодня погода?', sessionId: 'sess-conc' });
+    expect(third.status).toBe(200);
+  });
+
+  it('no limiter configured → never rate-limited (back-compat)', async () => {
+    const app = createChatApp(appDeps());
+    for (let i = 0; i < 5; i++) {
+      expect((await post(app, { message: 'какая сегодня погода?' })).status).toBe(200);
+    }
   });
 });

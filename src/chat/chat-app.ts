@@ -6,10 +6,13 @@ import type { TaskSource } from '../domain/types.ts';
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
 import { handleChatMessage, consumeConfirmation, type ChatHandlerDeps, type ChatEvFn } from './chat-handler.ts';
 import { chatAuthMiddleware } from './auth.ts';
+import type { ChatRateLimiter } from './chat-rate-limiter.ts';
 
 export interface ChatAppDeps extends ChatHandlerDeps {
   maxMessageChars: number;
   authToken?: string;
+  /** Caps chat LLM throughput (P1-22). Absent = no limiting (tests / opt-out). */
+  rateLimiter?: ChatRateLimiter;
 }
 
 function channelToSource(channel: 'web' | 'telegram'): TaskSource {
@@ -37,14 +40,26 @@ export function createChatApp(deps: ChatAppDeps): Hono {
     }
 
     const sessionId = req.sessionId ?? randomUUID();
-    const existing = await deps.sessions.get(sessionId);
-    const session: ChatSessionContext = existing ?? { sessionId, updatedAt: new Date().toISOString() };
 
-    const response = await handleChatMessage(
-      { message: req.message, session, source: channelToSource(req.channel) },
-      deps,
-    );
-    return c.json(response, 200);
+    // Rate/concurrency guard (P1-22): cap chat LLM throughput before the handler runs any model
+    // call. A leaked chat token or a looping client could otherwise drive unbounded spend, invisible
+    // to the per-correlationId budget (every turn mints a fresh chatRequestId).
+    const gate = deps.rateLimiter?.acquire(sessionId);
+    if (gate && !gate.ok) {
+      return c.json({ status: 'rejected', reason: gate.reason }, 429);
+    }
+    try {
+      const existing = await deps.sessions.get(sessionId);
+      const session: ChatSessionContext = existing ?? { sessionId, updatedAt: new Date().toISOString() };
+
+      const response = await handleChatMessage(
+        { message: req.message, session, source: channelToSource(req.channel) },
+        deps,
+      );
+      return c.json(response, 200);
+    } finally {
+      if (gate?.ok) deps.rateLimiter?.release(sessionId);
+    }
   });
 
   app.post('/confirm', async (c) => {
