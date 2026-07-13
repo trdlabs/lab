@@ -640,6 +640,22 @@ describe('researchRunCycleHandler per-trade context', () => {
     expect(ctxs?.[0]?.atExit.some((t) => t.config.key === 'micro')).toBe(true);
   });
 
+  it('requests trade-evidence with a 0/0 minute window (no dead minuteContext fetch)', async () => {
+    const calls: { minuteWindowBefore: number; minuteWindowAfter: number }[] = [];
+    const cap = capturingResearcher({ hypotheses: [draft('thesis 0/0 window')], researchSummary: 's' });
+    const tradeEvidence: TradeEvidenceReadPort = {
+      async getTradeEvidence(q) {
+        calls.push({ minuteWindowBefore: q.minuteWindowBefore, minuteWindowAfter: q.minuteWindowAfter });
+        return [];
+      },
+    };
+    const marketHistory: MarketHistoryReadPort = { async getRows() { return historyRows(); } };
+    const services = makeServices({ researcher: cap.port, botResults: losingBotResults(), tradeEvidence, marketHistory });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+    expect(calls[0]).toEqual({ minuteWindowBefore: 0, minuteWindowAfter: 0 });
+  });
+
   it('is fail-soft: a per-trade getRows failure skips that context + emits an event, cycle still completes', async () => {
     const cap = capturingResearcher({ hypotheses: [draft('thesis ptc-fail')], researchSummary: 's' });
     const tradeEvidence: TradeEvidenceReadPort = { async getTradeEvidence() { return [losingBundle()]; } };
@@ -684,6 +700,101 @@ describe('researchRunCycleHandler per-trade context', () => {
     await seedProfile(services);
     await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
     expect(toMsSeen).toContain(240 * MIN + 60 * MIN); // per-trade window = closedAtMs + 60min tail
+  });
+});
+
+describe('R4: retry feedback + bounded decision-log excerpts', () => {
+  const MIN = 60_000;
+
+  function loserOn(runId: string, tradeId: string, openedAtMs: number, closedAtMs: number): import('../../ports/bot-results-read.port.ts').ClosedTrade {
+    return {
+      tradeId, runId, symbol: 'BTCUSDT', side: 'long',
+      openedAtMs, closedAtMs, realizedPnl: '-15', pnlPct: '-1.5', isWin: false, closeReason: 'stop_loss',
+      entryPrice: null, exitPrice: null, closeReasonRaw: null,
+    };
+  }
+
+  /** N distinct finished runs on BTCUSDT, each with exactly one losing trade; getDecisionLog is caller-supplied. */
+  function makeLoserBotResults(
+    runIds: readonly string[],
+    getDecisionLog: BotResultsReadPort['getDecisionLog'],
+  ): BotResultsReadPort {
+    return {
+      async listBotRuns() {
+        return runIds.map((runId) => ({
+          runId, mode: 'paper' as const, status: 'finished' as const, bundleId: null,
+          strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'],
+        }));
+      },
+      async getRunSummary(runId) {
+        return { runId, excludesReconcile: true, asOf: 2, closedTrades: 1, wins: 0, losses: 1, breakeven: 0, winratePct: 0, pnlUsd: '-15', avgPnl: '-15', exitReasons: { stop_loss: 1 } };
+      },
+      async getClosedTrades(runId) {
+        const idx = runIds.indexOf(runId);
+        const base = 200 + idx * 100;
+        return [loserOn(runId, `t-loss-${runId}`, base * MIN, (base + 40) * MIN)];
+      },
+      async getOperationalEvents() { return { items: [], nextCursor: null, asOf: 2, window: {}, freshness: 'fresh' }; },
+      getDecisionLog,
+    };
+  }
+
+  it('threads payload.feedback into researcher input as retryFeedback', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis feedback')], researchSummary: 's' });
+    const services = makeServices({ researcher: cap.port }); // default botResults -> no suspicious losers
+    await seedProfile(services);
+    await researchRunCycleHandler(
+      task({ strategyProfileId: 'p1', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['dd too high'] } }),
+      services,
+    );
+    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['dd too high'] });
+  });
+
+  it('fetches getDecisionLog once per distinct loser run and attaches bounded excerpts', async () => {
+    const runIds: string[] = [];
+    const cap = capturingResearcher({ hypotheses: [draft('thesis decision-log')], researchSummary: 's' });
+    const services = makeServices({
+      researcher: cap.port,
+      botResults: makeLoserBotResults(['r1', 'r2'], async (runId) => {
+        runIds.push(runId);
+        const tsMs = runId === 'r1' ? 205 * MIN : 305 * MIN;
+        return {
+          items: [{ category: 'entry', runId, botId: 'b', symbol: 'BTCUSDT', side: 'long' as const, reason: 'breakout', tsMs, safeMessage: `note-${runId}` }],
+          nextCursor: null, asOf: 2, window: {}, freshness: 'fresh',
+        };
+      }),
+    });
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services);
+
+    // one call per DISTINCT loser run, single page (no cursor follow-up):
+    expect(new Set(runIds).size).toBe(runIds.length);
+    expect([...runIds].sort()).toEqual(['r1', 'r2']);
+    const input = cap.captured();
+    expect(input?.decisionExcerpts && input.decisionExcerpts.length).toBeGreaterThan(0);
+    expect(input!.decisionExcerpts!.length).toBeLessThanOrEqual(20);
+  });
+
+  it("is fail-soft: a getDecisionLog error drops that run's excerpts, cycle still succeeds", async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis decision-log-fail')], researchSummary: 's' });
+    const services = makeServices({
+      researcher: cap.port,
+      botResults: makeLoserBotResults(['r1'], async () => { throw new Error('ops-read down'); }),
+    });
+    await seedProfile(services);
+    await expect(researchRunCycleHandler(task({ strategyProfileId: 'p1', symbol: 'BTCUSDT' }), services)).resolves.toBeUndefined();
+    expect(cap.captured()?.decisionExcerpts ?? []).toEqual([]);
+    expect(await types(services)).toContain('researcher.decision_log_unavailable');
+    expect((await types(services)).at(-1)).toBe('research.run_cycle.completed');
+  });
+
+  it('does not call getDecisionLog when there are no suspicious losers', async () => {
+    let called = 0;
+    const services = makeServices({ researcher: stubResearcher({ hypotheses: [draft('thesis no-losers dl')], researchSummary: 's' }) });
+    services.botResults.getDecisionLog = async () => { called += 1; return { items: [], nextCursor: null, asOf: 0, window: {}, freshness: 'fresh' }; };
+    await seedProfile(services);
+    await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+    expect(called).toBe(0);
   });
 });
 
@@ -854,6 +965,24 @@ describe('two-pass research', () => {
     await seedProfile(services2);
     await researchRunCycleHandler(runCycleTask(), services2);
     expect(calls2).toEqual(['loss_reduction']);
+  });
+
+  it('threads retryFeedback into the profit_improvement pass too (cycle-level per spec §3.3, not loss-only)', async () => {
+    const cap = capturingResearcher({ hypotheses: [draft('thesis retry-profit')], researchSummary: 's' });
+    const services = makeServices({
+      researcher: cap.port,
+      botResults: twoPassBotResults([loserTrade({ tradeId: 'L3' }), winnerTrade({ tradeId: 'W3' })]),
+      marketHistory: twoPassHistory(),
+    });
+    await seedProfile(services);
+    await researchRunCycleHandler(
+      task({ strategyProfileId: 'p1', symbol: 'BTCUSDT', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['dd too high'] } }),
+      services,
+    );
+    // capturingResearcher keeps only the LAST propose() call; loss_reduction runs first, then
+    // profit_improvement (winners present) -> asserting focus pins this down as the profit_improvement input.
+    expect(cap.captured()?.focus).toBe('profit_improvement');
+    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['dd too high'] });
   });
 
   describe('activeOverlayRules (slice G3: sourced from the latest ACCEPTED revision)', () => {

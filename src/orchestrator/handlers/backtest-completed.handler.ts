@@ -20,6 +20,9 @@ export const BacktestCompletedPayloadSchema = z.object({
   /** Absent on older in-flight tasks enqueued before this field existed — fail-soft to 0s. */
   deltaNetPnlUsd: z.number().optional(),
   deltaMaxDrawdownPct: z.number().optional(),
+  /** Originating symbol for this backtest run. Absent on older in-flight tasks enqueued before
+   *  this field existed, or on non-symbol-scoped runs — retry falls back to the default symbol. */
+  symbol: z.string().optional(),
 });
 
 export type BacktestCompletedPayload = z.infer<typeof BacktestCompletedPayloadSchema>;
@@ -49,6 +52,7 @@ async function enqueueResearchRetry(
   strategyProfileId: string,
   feedback: { hypothesisId: string; decision: string; reasons: string[] },
   nextCycleDepth: number,
+  symbol?: string,
 ): Promise<void> {
   const retryTaskId = randomUUID();
   const retryTask: ResearchTask = {
@@ -57,7 +61,7 @@ async function enqueueResearchRetry(
     source: task.source,
     correlationId: task.correlationId,
     status: 'queued',
-    payload: { strategyProfileId, cycleDepth: nextCycleDepth, feedback },
+    payload: { strategyProfileId, cycleDepth: nextCycleDepth, feedback, ...(symbol ? { symbol } : {}) },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -79,7 +83,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   }
   const {
     backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth,
-    deltaNetPnlUsd, deltaMaxDrawdownPct,
+    deltaNetPnlUsd, deltaMaxDrawdownPct, symbol,
   } = parsed.data;
 
   const cumulativeTokens = await services.tokenUsage.get(task.correlationId);
@@ -107,7 +111,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       }));
       if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
-          { hypothesisId, decision, reasons }, cycleDepth + 1);
+          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
           strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
         }));
@@ -130,7 +134,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       }));
       if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
-          { hypothesisId, decision, reasons }, cycleDepth + 1);
+          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
           strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
         }));

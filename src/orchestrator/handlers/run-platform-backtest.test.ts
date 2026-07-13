@@ -8,8 +8,9 @@ import type { ResearchTask } from '../../domain/types.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { ResearchPlatformPort } from '../../ports/research-platform.port.ts';
+import { InMemoryQueueAdapter } from '../../adapters/queue/in-memory-queue.adapter.ts';
 
-const PLATFORM_RUN = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
+const PLATFORM_RUN = { datasetId: 'ds', symbols: ['ETHUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
 
 function profile(): StrategyProfile {
   const now = '2026-01-01T00:00:00Z';
@@ -59,6 +60,17 @@ describe('runPlatformBacktest', () => {
     expect(evals).toHaveLength(1);
     const evTypes = (await s.events.listByTask('t1')).map((e) => e.type);
     expect(evTypes).toEqual(expect.arrayContaining(['build.platform_validated', 'backtest.submitted', 'backtest.completed', 'evaluation.completed']));
+  });
+
+  it('enqueued backtest.completed payload carries the originating (non-default) symbol', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const { s, common } = await setup({ researchPlatform: new MockResearchPlatformAdapter(), backtestBackend: 'research_platform', taskQueue: queue });
+    await runPlatformBacktest(common);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
   });
 
   it('pending: poll never terminal → run stays submitted, backtest.pending, no evaluation', async () => {

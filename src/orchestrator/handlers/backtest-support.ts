@@ -133,6 +133,9 @@ export async function enqueueBacktestCompleted(
     cycleDepth: number;
     deltaNetPnlUsd?: number;
     deltaMaxDrawdownPct?: number;
+    /** Originating symbol for this run — threaded through so a retry `research.run_cycle`
+     *  researches the same instrument instead of falling back to the default. */
+    symbol?: string;
   },
 ): Promise<void> {
   const completedTaskId = randomUUID();

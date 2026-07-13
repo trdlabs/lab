@@ -118,6 +118,26 @@ function forensicBundleText(bundles: readonly TradeEvidenceBundle[] | undefined)
   ];
 }
 
+function retryFeedbackText(fb: ResearcherInput['retryFeedback']): string[] {
+  if (!fb) return [];
+  return [
+    'Feedback from your last attempt — you MUST ADDRESS this, not merely repeat the previous hypothesis:',
+    `  decision=${fb.decision}`,
+    `  reasons: ${fb.reasons.join('; ')}`,
+  ];
+}
+
+function decisionExcerptsText(excerpts: ResearcherInput['decisionExcerpts']): string[] {
+  if (!excerpts || excerpts.length === 0) return [];
+  return [
+    "Decision-log excerpts (the bot's own reasoning — why it entered / why it did not exit earlier;"
+    + ' cross-reference tradeId against the trade\'s @entry/@exit/micro market values above):',
+    ...excerpts.map((e) =>
+      `  - [${e.action ?? 'unknown'}] tsMs=${e.timestampMs ?? 'unknown'} tradeId=${e.relatedTradeId ?? 'unknown'}`
+      + ` reason=${e.reason ?? ''} :: ${e.summary ?? ''}`),
+  ];
+}
+
 function activeOverlayRulesText(rules: readonly ActiveOverlayRuleSummary[] | undefined): string {
   const rulesList = rules ?? [];
   if (rulesList.length === 0) return 'Active overlay rules on this profile: (no active overlay rules yet — critique the base profile)';
@@ -138,6 +158,7 @@ export function buildPrompt(input: ResearcherInput): string {
       : `Market context features: ${JSON.stringify(input.marketContext.features)}`,
     RESEARCHER_PROFILE_CRITICAL_FRAMING,
     activeOverlayRulesText(input.activeOverlayRules),
+    ...retryFeedbackText(input.retryFeedback),
   ];
 
   if (input.focus === 'profit_improvement') {
@@ -164,6 +185,7 @@ export function buildPrompt(input: ResearcherInput): string {
     ...(botPerf ? [botPerf] : []),
     ...forensicBundleText(input.tradeEvidence),
     ...loserBlock,
+    ...decisionExcerptsText(input.decisionExcerpts),
     `Produce at most ${input.maxHypotheses} loss-reduction hypotheses.`,
   ].join('\n');
 }
