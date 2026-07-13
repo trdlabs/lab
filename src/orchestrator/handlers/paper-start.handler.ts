@@ -130,7 +130,10 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
     if (!evidence) {
       if (services.paperEvidenceRequired) {
         await services.events.append(event(task.id, 'paper.evidence_required', { experimentId, reason: 'provider_returned_null' }));
-        return; // [I1] no submit
+        // [I1] no submit. Throw rather than return (P1-6): a silent completion marks the task done and
+        // the dedupeKey burns, permanently losing the champion. The provider is up but has no evidence
+        // yet — likely async signing-pipeline lag — so let the worker retry; it dead-letters if persistent.
+        throw new Error(`paper.start: signed evidence required but provider returned null for experiment ${experimentId} — evidence may not be ready yet, retrying`);
       }
       // not required (non-079 intake) → fall through, submit without evidence
     } else {
@@ -147,9 +150,12 @@ export const paperStartHandler: WorkflowHandler = async (task, services) => {
       evidenceArtifactRef = evRef.content_hash; // [I3] ref only AFTER verify passes
     }
   } else if (services.paperEvidenceRequired) {
-    // defense-in-depth (boot guard should already have failed): never submit unsigned to a 079 intake
+    // defense-in-depth (boot guard should already have failed): never submit unsigned to a 079 intake.
     await services.events.append(event(task.id, 'paper.evidence_required', { experimentId, reason: 'provider_unavailable' }));
-    return;
+    // Throw rather than return (P1-6): a silent completion burns the dedupeKey and loses the champion.
+    // `available` is a static capability flag, so this is a boot misconfiguration if it persists — the
+    // worker's retry/dead-letter path surfaces it instead of hiding it behind a "completed" task.
+    throw new Error(`paper.start: signed evidence required but provider unavailable for experiment ${experimentId} — retrying (boot misconfiguration if persistent)`);
   }
   const res = await services.paperIntake.submitProvenCandidate({ ...args, ...(evidenceArtifactRef ? { evidenceArtifactRef } : {}) });
   const now = new Date().toISOString();

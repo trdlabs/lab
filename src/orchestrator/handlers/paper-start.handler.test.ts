@@ -431,11 +431,14 @@ describe('paperStartHandler', () => {
       expect(row?.submissionStatus).toBe('submitted');
     });
 
-    it('[I1a] paperEvidenceRequired=true + provider unavailable → paper.evidence_required, no submit', async () => {
+    it('[I1a] paperEvidenceRequired=true + provider unavailable → emits paper.evidence_required then THROWS (retry, not silent completion — P1-6)', async () => {
+      // P1-6: a silent return here marks the task completed, so the dedupeKey burns and the champion
+      // is lost forever. Throwing routes it through the worker's retry/dead-letter path instead — the
+      // event is still recorded first for observability.
       const { services, intakeCalls, events } = await make({
         paperEvidenceRequired: true, signedEvidenceAvailable: false,
       });
-      await paperStartHandler(taskOf(), services);
+      await expect(paperStartHandler(taskOf(), services)).rejects.toThrow(/evidence required|provider unavailable/i);
       expect(intakeCalls).toHaveLength(0);
       expect(events).toContainEqual({
         type: 'paper.evidence_required',
@@ -444,11 +447,11 @@ describe('paperStartHandler', () => {
       expect(await services.paperSubmissions.findByExperimentId('exp-wfo')).toBeNull();
     });
 
-    it('[I1b] paperEvidenceRequired=true + provider available but provide()→null → paper.evidence_required, no submit', async () => {
+    it('[I1b] paperEvidenceRequired=true + provider available but provide()→null → emits paper.evidence_required then THROWS (transient signing lag, retry — P1-6)', async () => {
       const { services, intakeCalls, events, signedEvidenceCalls } = await make({
         paperEvidenceRequired: true, signedEvidenceAvailable: true, // no evidenceFactory → provide() resolves null
       });
-      await paperStartHandler(taskOf(), services);
+      await expect(paperStartHandler(taskOf(), services)).rejects.toThrow(/evidence required|returned null|not ready/i);
       expect(signedEvidenceCalls).toHaveLength(1);
       expect(intakeCalls).toHaveLength(0);
       expect(events).toContainEqual({
