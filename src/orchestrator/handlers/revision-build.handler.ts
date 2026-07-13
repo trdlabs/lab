@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler, HandlerDeps } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
-import { event, errMsg } from './backtest-support.ts';
+import { event, errMsg, stableStringify } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
@@ -27,6 +27,7 @@ import type { TradeRecord, HoldoutBoundary } from '../../domain/research-experim
 import { resolveHoldoutBoundary } from '../../research/holdout-boundary-resolver.ts';
 import { DEFAULT_HOLDOUT_POLICY } from '../../domain/research-experiment.ts';
 import { encodeTrainPeriod, encodeHoldoutPeriod } from '../../research/period-encoding.ts';
+import type { PlatformRunConfig } from '../../ports/research-platform.port.ts';
 
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -323,7 +324,31 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   }));
 
   // --- Step 8: same-run-context comparison baseline (>= 0, <= 1 run) ---
-  const runConfig = services.defaultPlatformRun;
+  // R3b-1: the eval window is the cycle's — extracted from the hypothesis.build tasks, never
+  // re-resolved here. If the cycle's tasks disagree, reject rather than silently mix windows.
+  const cycleWindows = cycleTasks
+    .map((t) => t.payload.platformRun as PlatformRunConfig | undefined)
+    .filter((w): w is PlatformRunConfig => w !== undefined);
+  const distinct = new Map(cycleWindows.map((w) => [stableStringify(w), w]));
+  let runConfig: PlatformRunConfig;
+  if (distinct.size > 1) {
+    await services.revisions.updateStatus(revisionId, {
+      status: 'rejected', verdictReason: 'eval_window_inconsistent', updatedAt: now(),
+    });
+    await services.events.append(event(task.id, 'eval_window.inconsistent', {
+      revisionId, version, windows: [...distinct.values()],
+    }));
+    await services.events.append(event(task.id, 'revision.rejected', {
+      revisionId, version, reasons: ['eval_window_inconsistent'],
+    }));
+    return;
+  }
+  if (distinct.size === 1) {
+    runConfig = [...distinct.values()][0]!;
+  } else {
+    runConfig = services.defaultPlatformRun;
+    await services.events.append(event(task.id, 'eval_window.fallback', { reason: 'no_cycle_window' }));
+  }
   const acceptedParamsHash = computeStrategyParamsHash({ bundleHash: baseBundle.bundleHash, platformRun: runConfig, params: {} });
   const existingBaselineRun = await services.strategyBacktests.findByBundleAndParams(
     baseBundle.manifest.id, acceptedParamsHash, baseBundle.bundleHash,
