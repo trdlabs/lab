@@ -2,130 +2,175 @@
 
 **Дата:** 2026-07-13
 **Статус:** design approved (brainstorming), ready for writing-plans
-**Источник:** hypothesis-eval review `docs/research/2026-07-11-hypothesis-evaluation-workflow-review.md` §R5 (+§R7 selection-bias). Первый слайс после R1/R2/R3a/R3b-1/R4 (все в main).
+**Источник:** hypothesis-eval review `docs/research/2026-07-11-hypothesis-evaluation-workflow-review.md` §R5 (+§R7). Первый слайс после R1/R2/R3a/R3b-1/R4 (все в main).
+
+## 0. Декомпозиция (важно)
+
+Ревью дизайна выявило, что решающие входы оценки (baseline/thresholds/holdout-verdict) **не персистятся** сегодня, а R5 без них не объясним. Поэтому слайс делится:
+
+- **R5a — Persistence decision-inputs (upstream, предпосылка):** revision-build сохраняет типизированный `selectionEvaluation` snapshot + расширяет `holdoutValidation`; versioned evaluator policy выносится как явный вход. Без реконструкции из констант. §4.
+- **R5b — Cycle Scorecard (потребитель):** таблица `cycle_scorecard`, pure builder, `cycle.scorecard` task + `finalizeCycle`, read-API. §5–§7.
+
+Оба — свои plan → subagent-driven. R5b зависит от R5a. Ниже — единый дизайн; writing-plans разведёт на два.
+
+Границы: только **cycle-scorecard** (per-hypothesis не строим — `evaluation`-строки уже есть). markdown-рендер, funnel-top (proposed/deduped), DSR/R11/R14 — вне (см. §9).
 
 ## 1. Проблема / цель
 
-Итог цикла (что предложено, что оценено, из какого пула отобран champion, насколько он робастен, почему исход именно такой) сегодня рассеян по ledger-строкам и событиям. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, exactly-once, выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
+Итог цикла (что предложено/оценено, из какого пула отобран champion, насколько робастен, почему исход такой) рассеян по ledger. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, exactly-once, выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
 
-Границы v1: только **cycle-scorecard** (per-hypothesis scorecard не строим — `evaluation`-строки уже есть). markdown-рендер, funnel-top (proposed/deduped), DSR/R11/R14 — вне слайса (см. §8).
+## 2. Что уже персистится
 
-## 2. Что уже персистится (авторитетные источники)
+- Рабочий набор = `hypothesisIds` из `hypothesis.build`-задач correlation (`listByCorrelationAndTypes(cid,['hypothesis.build'])`). Только **validated** получают build-задачу.
+- `HypothesisProposal` (`findById`): `status`, `proxyMetrics`. Нет `correlationId` (funnel-top не scope'ится, §9).
+- `Evaluation` (**immutable**, `evaluations.create` — единственная запись): `decision`, `metricsSnapshot`, `thresholds`, `preservationGate`. Через `listByHypothesis`→`listByBacktestRun`.
+- `BacktestRun.correlationId` — есть.
+- `StrategyRevision` (`findById`): `status`, `verdictReason`, `metrics` (candidate), `preservationGate`, `holdoutValidation` (сейчас только train/holdout **candidate** metrics), `hypothesisIds`, `dropped`, `comboBacktestRunId`. **Нет** baseline/thresholds/holdout-verdict → R5a их добавляет.
 
-- Рабочий набор цикла = `hypothesisIds` из `hypothesis.build`-задач correlation (`listByCorrelationAndTypes(cid, ['hypothesis.build'])`, паттерн revision-build:210). Только **validated**-гипотезы получают build-задачу.
-- `HypothesisProposal` (`findById`): `status`, `proxyMetrics` (нет `correlationId` — поэтому funnel-top не scope'ится, §8).
-- `Evaluation` (**immutable**, `evaluations.create` — единственная запись): `decision`, `reasons`, `metricsSnapshot` (baseline+variant), `thresholds`, `preservationGate` (R2). Достаётся `listByHypothesis`→`listByBacktestRun`.
-- `BacktestRun.correlationId` — есть (нужен для scope evaluations, §4.2).
-- `StrategyRevision` (`findById`): `status`, `verdictReason`, `metrics`, `holdoutValidation` (R3a), `preservationGate` (R2), `hypothesisIds`, `dropped: DroppedHypothesis[]`.
-
-## 3. Таксономия счётчиков (v1, авторитетно из строк)
+## 3. Таксономия счётчиков (v1)
 
 | Счётчик | Определение |
 |---|---|
 | **built** | `|cycleHypothesisIds|` — validated working set |
-| **evaluated** | из built — сколько имеют ≥1 завершённый `evaluation` (в этой correlation, §4.2) |
-| **eligible (=N)** | `|{ hypId : last-completed evaluation.decision ∈ {PASS, PAPER_CANDIDATE} }|` — из **immutable evaluation-строк**, НЕ из `hypothesis.status` (revision-build мутирует его в merged/dropped) |
-| **considered** | `number \| null` — размер capped selection-пула, реально вошедшего в merge; передаётся revision-build'ом (§4.3). `null` + `consideredUnavailableReason`, когда терминал наступил до отбора |
+| **evaluated** | из built — сколько имеют ≥1 завершённый `evaluation` (в этой correlation, §5.2) |
+| **eligible (=N)** | `eligibleHypIds.length` — **immutable selection snapshot, переданный revision-build'ом** (не реконструкция из evaluations) |
+| **considered** | `consideredHypIds.length` — capped-set после `revisionBatchMax`, тоже из revision-build |
 | **selected** | `revision.status==='accepted' ? |unique(revision.hypothesisIds)| : 0` |
-| **dropped** | `|{ hypId : status ∈ dropped_* } ∪ dropIds(revision.dropped)|` — **union по hypothesisId**, не сумма |
+| **dropped** | `|{ hypId : status ∈ dropped_* } ∪ dropIds(revision.dropped)|` — **union по hypothesisId** |
 
-Провенанс исхода: `mergeAttempted` (revision-row существует и не skipped), `candidateIncluded = |unique(revision.hypothesisIds)|` (даже для rejected — видимость no-champion drop-пространства). N для R7 = **eligible** (immutable). Funnel чисто вложен: built ⊇ evaluated ⊇ eligible ⊇ considered ⊇ selected.
+`eligible`/`considered`: `number | null`. Присутствуют, когда revision-build дошёл до отбора; иначе `null` + `*UnavailableReason: 'terminated_before_selection'` (ранние терминалы вроде `no_baseline`). Провенанс исхода: `mergeAttempted`, `candidateIncluded = |unique(revision.hypothesisIds)|`. N для R7 = **eligible**.
 
-**Три инварианта таксономии (иначе баги):**
-1. `eligible` — из **последней завершённой evaluation** каждой гипотезы, не из финального `hypothesis.status` (мутируется revision-build'ом до async-scorecard). evaluation-строки immutable → это и есть selection snapshot.
-2. `selected` считается **только для `accepted`** ревизии (`revision.hypothesisIds` существует и у rejected candidate).
-3. `dropped` — **union** множеств `{dropped_* status}` и `{revision.dropped}` по `hypothesisId` (не сумма — иначе одна гипотеза задвоится).
+**Три инварианта:**
+1. `eligible`/`considered` — из **immutable наборов revision-build** (`eligibleHypIds` до cap, `consideredHypIds` после), НЕ реконструкция из `hypothesis.status` (мутируется) и НЕ из evaluations (evaluation могла записаться, а fail-soft status-write упасть → selection её не видел). Evaluations дают только `evaluated`/`lastDecision`.
+2. `selected` — только `accepted` (у rejected candidate `hypothesisIds` тоже заполнены).
+3. `dropped` — **union** по `hypothesisId` (не сумма).
 
-## 4. Архитектура
+## 4. R5a — Persistence decision-inputs (upstream)
 
-### 4.1 Поток
+### 4.1 Versioned evaluator policy
+Пороги evaluator сейчас — литерал (`minTrades: 20` в revision-build) внутри `evaluateRevision` (`src/validation/revision-evaluator.ts`). R5a выносит `RevisionEvaluatorPolicy` (versioned объект: `{ evaluatorVersion, minTrades, ...пороги }`) как **явный вход** `evaluateRevision(input, policy)`; **тот же объект** сохраняется (не реконструкция из текущих констант — иначе при смене констант старые ревизии станут необъяснимы).
+
+### 4.2 `selectionEvaluation` snapshot (аддитивное поле revision)
+Один типизированный JSONB на `StrategyRevision`:
+```
+selectionEvaluation?: {
+  evaluatorVersion: string
+  baselineMetrics:  BacktestMetricBlock
+  candidateMetrics: BacktestMetricBlock
+  thresholds:       RevisionEvaluatorPolicy
+  decision:         RevisionDecision
+  reasons:          string[]
+}
+```
+- Пишется на **окне отбора** (train для `trade_based`, full для `mode:'none'`) — то, на чём revision-build принял accept/reject.
+- Пишется **и для финального rejected candidate**, не только accepted (объяснить no-champion).
+- `deltas` **не хранятся** — scorecard-builder вычисляет детерминированно из `baselineMetrics`/`candidateMetrics`.
+
+### 4.3 Расширение `holdoutValidation` (объяснимый ROBUSTNESS)
+Сейчас `{ mode, t?, reason, lowConfidence?, trainMetrics?, holdoutMetrics? }` — нет baseline и verdict. Аддитивно:
+```
+holdoutValidation += {
+  trainBaselineMetrics?:   BacktestMetricBlock
+  holdoutBaselineMetrics?: BacktestMetricBlock
+  holdoutDecision?:        RevisionDecision
+  holdoutReasons?:         string[]
+  policy?:                 RevisionEvaluatorPolicy
+}
+```
+(`trainMetrics`/`holdoutMetrics` остаются candidate-метриками train/holdout). Так ROBUSTNESS = полное baseline-vs-candidate сравнение на обоих окнах + verdict.
+
+### 4.4 Хранение R5a
+- `strategy_revision` + `selection_evaluation jsonb` (аддитивная nullable миграция).
+- `holdout_validation` — **уже** jsonb-колонка (R3a) → расширение внутри payload, миграция колонки не нужна; меняется TS-тип + drizzle toDomain + in-memory round-trip.
+- Обновить schema/domain, drizzle repo (create+toDomain+updateStatus patch), in-memory (whitelist round-trip — защита от drop полей).
+
+## 5. R5b — Архитектура cycle-scorecard
+
+### 5.1 Поток
 ```
 revision-build ДОМЕННО-ТЕРМИНАЛЬНЫЙ исход (accepted / rejected / skipped / abandoned)
-  → finalizeCycle(outcome)                                  // ЕДИНАЯ точка; НЕ на deferred/self-requeue
-    → enqueue cycle.scorecard
-       dedupeKey = `cycle.scorecard:${CYCLE_SCORECARD_SCHEMA_VERSION}:${correlationId}`   // logical exactly-once
-       payload   = { correlationId, strategyProfileId, terminalOutcome, revisionId?, consideredHypIds? }
+  → finalizeCycle(outcome)                       // ЕДИНАЯ точка; НЕ на deferred/self-requeue
+      outcome = { correlationId, strategyProfileId, terminalOutcome, revisionId?,
+                  eligibleHypIds?, consideredHypIds? }   // immutable selection snapshot из Step 2
+    → enqueue cycle.scorecard  (FAIL-SOFT, §5.5)
+       dedupeKey = `cycle.scorecard:${CYCLE_SCORECARD_SCHEMA_VERSION}:${correlationId}`
 
 cycle.scorecard handler:
-  → gather snapshot (§4.2, authoritative rows)
-  → buildCycleScorecard(snapshot)          // pure, без LLM, без clock
-  → cycleScorecards.upsert(payload)         // идемпотентно по (correlationId, schemaVersion)
-  → emit cycle.scorecard.built
-  сбой gather/upsert → THROW → общий worker retry (BullMQ attempts:3 + backoff) → dead-letter (§4.5)
+  → gather snapshot (§5.2)
+  → buildCycleScorecard(snapshot)     // pure, без LLM, без clock
+  → cycleScorecards.upsert(payload)    // идемпотентно по (correlationId, schemaVersion)
+  → emit cycle.scorecard.built (at-least-once, §9)
+  сбой gather/upsert → THROW → worker: task='failed' + BullMQ retry attempts:3 (§5.5)
 ```
 
-### 4.2 Snapshot (авторитетно, scope по correlation)
-- `cycleHypothesisIds` ← `listByCorrelationAndTypes(cid, ['hypothesis.build'])`.map(payload.hypothesisId), unique.
-- На гипотезу: `hypotheses.findById` (status) + `backtests.listByHypothesis(hypId)` → **фильтр `run.correlationId === correlationId`** (listByHypothesis может вернуть исторические раны) → на каждый run `evaluations.listByBacktestRun` → **последняя завершённая evaluation = детерминированный max по `(createdAt, id)`** (id-tiebreak исключает недетерминизм при равном createdAt).
-- Ревизия (если `revisionId`): `revisions.findById` → terminal-поля.
-- Counts по §3.
+### 5.2 Snapshot (авторитетно, scope по correlation)
+- `cycleHypothesisIds` ← build-задачи correlation, unique.
+- На гипотезу: `hypotheses.findById` (status для roster) + `backtests.listByHypothesis(hypId)` → **фильтр `run.correlationId === correlationId`** (listByHypothesis может вернуть исторические раны) → `evaluations.listByBacktestRun` → **последняя завершённая = детерминированный max по `(createdAt, id)`** (id-tiebreak). Даёт `evaluated` + `lastDecision`.
+- `eligible`/`considered` — из `outcome.eligibleHypIds`/`consideredHypIds` (не из evaluations).
+- Ревизия (если `revisionId`): `revisions.findById` → `selectionEvaluation` (AGGREGATE), `preservationGate` (TRADE-SPLIT), расширенный `holdoutValidation` (ROBUSTNESS), `status`, `verdictReason`, `hypothesisIds`, `dropped`.
 
-### 4.3 `considered` — из revision-build, не реконструкция
-`considered` НЕ всегда выводим из revision-строки: для `nothing_composable` / ранних skipped / отсутствующей строки `included ∪ dropped` недоступен, хотя отбор мог состояться → нельзя писать ложный 0. Поэтому revision-build **передаёт в `finalizeCycle` immutable `consideredHypIds`** — capped selection-пул `sortEligible(proposals).slice(0, revisionBatchMax)`, известный до compose. Builder:
-- `consideredHypIds` присутствует → `considered = consideredHypIds.length`; помечает roster-записи флагом `considered`.
-- отсутствует (терминал до отбора, напр. `no_baseline`) → `considered = null`, `consideredUnavailableReason = 'terminated_before_selection'`.
+### 5.3 Терминальность (явные фиксации)
+- Terminal outcomes = **{accepted, rejected, skipped, abandoned}**. `revision.build.abandoned` (исчерпание wait-cap) — **терминал**.
+- **deferred/self-requeue** (`:wait${n}` re-enqueue) — **НЕ** финализирует (finalizeCycle не вызывается).
+- `cycle.scorecard` **НЕ в `CYCLE_CHAIN_TYPES`** (`['hypothesis.build','backtest.completed','research.run_cycle']`, cycle-close.ts:6) — иначе вмешается в R1 terminality-gate.
 
-### 4.4 Терминальность (явные фиксации)
-- Terminal outcomes = **{accepted, rejected, skipped, abandoned}**. `revision.build.abandoned` (исчерпание wait-cap) — **терминал** (иначе цикл не получит scorecard).
-- **deferred / self-requeue** (`:wait${n}` re-enqueue) — **НЕ** финализирует цикл (finalizeCycle не вызывается).
-- `cycle.scorecard` **НЕ добавляется в `CYCLE_CHAIN_TYPES`** (`['hypothesis.build','backtest.completed','research.run_cycle']`, cycle-close.ts:6) — иначе вмешается в R1 terminality-gate (`isCycleChainTerminal`).
-
-### 4.5 Ошибки / дедлеттер (правка 4)
-Handler на сбое сбора/записи **бросает** — маршрутизируется через **существующий** worker-контур (BullMQ `attempts:3` + exponential backoff → failed-queue dead-letter; прецедент `paper-start.handler`). Handler **не** детектирует «последний retry» и **не** эмитит own dead-letter — это принадлежит generic worker/dead-letter hook (у него есть attempt/maxAttempts). Инвариант: сбой scorecard **ретраится независимо и не переигрывает решение ревизии**; цикл остаётся завершённым при финальном dead-letter.
-
-### 4.6 Идемпотентность
-`upsert` по unique `(correlationId, schemaVersion)` перезаписывает тем же детерминированным payload. Физически at-least-once, логически exactly-once.
-
-## 5. Хранение
-
-Новая таблица `cycle_scorecard`:
-- `id`, `correlationId`, `strategyProfileId`, `schemaVersion`, **`payload jsonb`** (детерминированный), `generatedAt` (**metadata-колонка строки, НЕ внутри payload** — payload остаётся идентичным при повторной сборке), `createdAt`, `updatedAt`.
-- `UNIQUE(correlationId, schemaVersion)` → идемпотентный upsert.
-- Port `CycleScorecardRepository { upsert(row), findByCorrelation(cid): CycleScorecard[] }` + drizzle + in-memory (round-trip тест).
-- read-API route: `GET` scorecard по `correlationId`.
-
-## 6. Payload (детерминированный, без LLM)
+### 5.4 Payload (детерминированный, без LLM)
 ```
 CycleScorecard {
   schemaVersion: 'cycle-scorecard-v1'
   correlationId, strategyProfileId
   terminalOutcome: { kind: 'accepted'|'rejected'|'skipped'|'abandoned', reason }
   counts: { built, evaluated, eligible, considered, selected, dropped }
-  consideredUnavailableReason?: string
+  eligibleUnavailableReason?, consideredUnavailableReason?: string
   provenance: { mergeAttempted, candidateIncluded, revisionId?, sourceTaskId }
   champion: null | {                          // только при accepted
     revisionId, version,
-    aggregate:  { metrics, baselineMetrics, deltas, thresholds, decision }   // §AGGREGATE (ladder)
-    tradeSplit: preservationGate | null        // §TRADE-LEVEL SPLIT (R2)
-    robustness: holdoutValidation | null       // §ROBUSTNESS (R3a train/holdout + lowConfidence)
+    aggregate:  { evaluatorVersion, baselineMetrics, candidateMetrics, deltas, thresholds, decision, reasons }
+                //  deltas ВЫЧИСЛЯЮТСЯ builder'ом из baseline/candidate; всё прочее — из selectionEvaluation
+    tradeSplit: preservationGate | null
+    robustness: holdoutValidation | null      // расширенный (train+holdout baseline+candidate+verdict)
   }
-  selectionBias: { n: eligible, considered, selected }      // §R7
-  roster: [ { hypId, lastDecision, terminalStatus, considered } ]   // тонкий, ссылки не метрики (не дублирует evaluation rows)
-  verdict: { decision, reason }               // детерминированный (champion / reject-reason / skip-reason)
+  selectionBias: { n: eligible, considered, selected }
+  roster: [ { hypId, lastDecision, terminalStatus, considered } ]   // тонкий; ссылки, не метрики
+  verdict: { decision, reason }               // детерминированный
 }
 ```
-`generatedAt` — вне payload (§5).
+`generatedAt` — **вне payload** (metadata-колонка строки, §5.6).
+
+### 5.5 Ошибки / enqueue-gap / дедлеттер (правка 2)
+**Generic dead-letter hook отсутствует.** worker.ts на throw ставит task `'failed'` + re-throw; BullMQ `attempts:3` + `removeOnFail:5000` — лишь удержание failed-job, **не** финальное событие и **не** hook (worker не знает `attemptsMade/maxAttempts`). Поэтому:
+- Handler на сбое gather/upsert **бросает** → task `'failed'` + BullMQ retry (attempts:3) → при исчерпании job остаётся в failed-set (наблюдаемость = failed job + task.status, **НЕ** событие). Спека **не обещает** `cycle.scorecard.failed`.
+- **Enqueue-gap:** `createAndEnqueueTask` создаёт DB-row, **затем** enqueue. Если enqueue падает после row-create, повтор видит dedupe-row и не энкьюит снова. Поэтому terminal revision-build **нельзя безоговорочно ретраить** — это может переиграть доменное решение ревизии. Значит **`finalizeCycle`-enqueue — FAIL-SOFT**: сбой → `cycle.scorecard_enqueue_failed` event + признанный **reconciliation gap** (scorecard может не построиться, цикл всё равно завершён). Полное закрытие gap = зависимость от **P1-2 (task-intake dedupeKey на строке) / outbox** — вне R5.
+- Инвариант: сбой scorecard **ретраится независимо и не переигрывает ревизию**; финальный failed-job оставляет цикл завершённым.
+
+### 5.6 Хранение R5b + идемпотентность
+Таблица `cycle_scorecard`: `id`, `correlationId`, `strategyProfileId`, `schemaVersion`, **`payload jsonb`**, `generatedAt` (metadata-колонка, НЕ в payload — payload идентичен при повторной сборке), `createdAt`, `updatedAt`; **`UNIQUE(correlationId, schemaVersion)`** → идемпотентный upsert (физически at-least-once, логически exactly-once). Port `CycleScorecardRepository { upsert, findByCorrelation }` + drizzle + in-memory (round-trip). read-API route: `GET` по `correlationId`.
+
+## 6. dedupeKey (правка 1)
+`cycle.scorecard:${CYCLE_SCORECARD_SCHEMA_VERSION}:${correlationId}` — schemaVersion **в ключе**, иначе v2 не построится из-за существующей v1-задачи.
 
 ## 7. Тестирование
-- **Pure builder** (`buildCycleScorecard`, по-веточно): accepted champion (все секции) / rejected → selected=0, champion=null / skipped-no-champion / abandoned / eligible из evaluation-decision, НЕ из мутированного status / dropped union-дедуп (гипотеза в обоих источниках = 1) / considered из `consideredHypIds` vs null+reason.
-- **Snapshot gather**: evaluation scope по correlation (исторический ран другой correlation игнорируется); детерминированный max по (createdAt,id) при tie.
-- **Handler**: upsert-идемпотентность (двойной прогон = одна строка, идентичный payload); throw на gather-сбое (маршрут в worker retry — тест на проброс, не на self-dead-letter).
-- **finalizeCycle**: энкьюит на всех 4 терминалах; НЕ энкьюит на deferred/self-requeue; dedupeKey с schemaVersion.
-- **Persistence** round-trip (in-memory + drizzle, UNIQUE-конфликт → upsert).
-- **read-API** route.
-- **Гард**: тест, что `cycle.scorecard` не в `CYCLE_CHAIN_TYPES`.
+**R5a:** versioned policy как явный вход + сохранён тот же объект (не константа); `selectionEvaluation` пишется на accepted И rejected; holdout-расширение (baseline+verdict) round-trip (drizzle+in-memory, whitelist-drop RED); миграция `selection_evaluation`.
+**R5b:**
+- Pure builder по-веточно: accepted (deltas вычислены из baseline/candidate) / rejected→selected=0,champion=null / skipped / abandoned / dropped union-дедуп / eligible+considered из наборов vs null+reason.
+- Snapshot: evaluation scope по correlation (ран другой correlation игнорируется); max по (createdAt,id) при tie.
+- Handler: upsert-идемпотентность (двойной прогон = 1 строка, идентичный payload); throw на gather-сбое (проброс, НЕ self-dead-letter).
+- finalizeCycle: энкьюит на 4 терминалах; НЕ на deferred; **fail-soft** enqueue → `cycle.scorecard_enqueue_failed` (не бросает из revision-build); dedupeKey с schemaVersion.
+- Гард: `cycle.scorecard` не в `CYCLE_CHAIN_TYPES`.
+- Persistence round-trip + read-API.
 
-## 8. Границы / отложено
-- **markdown-рендер** (office/chat completion-summary) — отдельный слайс; v1 = pure jsonb → рендер = чистая функция поверх готового payload.
-- **Funnel-top** (proposed/deduped/rejected-на-валидации) — требует upstream `correlationId` на `hypothesis_proposal` (иначе недосчёт pre-validation дропов → нарушение no-shortcuts). Follow-up; R7 headline (N=eligible) покрыт без него.
-- **DSR** advisory-поле — consume из backtester E2, не строим.
-- **R11** bootstrap-CI, **R14** regime breakdown — later.
+## 8. Инварианты / gotchas
+- `eligible`/`considered`/N — из immutable наборов revision-build, не из status и не из evaluations.
+- `selected` — только accepted; `dropped` — union по hypothesisId.
+- `selectionEvaluation`/holdout — **сохранённые входы** оценки (versioned policy), не реконструкция из констант; пишутся и для rejected.
+- `deltas` builder считает из сохранённых metrics (не хранятся).
+- dedupeKey несёт schemaVersion; `cycle.scorecard` вне `CYCLE_CHAIN_TYPES`; abandoned=терминал; deferred≠терминал; `generatedAt` вне payload.
+- `finalizeCycle`-enqueue fail-soft (enqueue-gap + row-then-enqueue → нельзя безоговорочно ретраить ревизию); reconciliation gap признан (P1-2/outbox — вне R5).
+- Нет generic dead-letter hook → спека не обещает финальное failed-событие; наблюдаемость = failed task/job.
+- `cycle.scorecard.built` — **at-least-once** (upsert прошёл, append события упал → retry повторит событие): потребители обязаны быть толерантны/идемпотентны (документировано; дедуп события — вне v1).
 
-## 9. Инварианты / gotchas
-- `eligible`/N — из immutable evaluations, не из мутируемого status.
-- `selected` — только accepted; `considered` — из revision-build snapshot, не post-hoc из строки (иначе ложный 0).
-- `dropped` — union по hypothesisId.
-- dedupeKey несёт schemaVersion (иначе v2 заблокирован существующей v1-задачей).
-- `cycle.scorecard` вне `CYCLE_CHAIN_TYPES`; abandoned = терминал; deferred = не терминал; `generatedAt` — вне payload.
-- Builder чистый (без clock/LLM); handler throw'ит, dead-letter — общий worker-контур.
-- Без миграции данных — только аддитивная таблица.
+## 9. Границы / отложено
+- **markdown-рендер** — отдельный слайс; v1 = pure jsonb → рендер = чистая функция поверх payload.
+- **Funnel-top** (proposed/deduped/rejected-на-валидации) — требует upstream `correlationId` на `hypothesis_proposal`; follow-up. R7 (N=eligible) покрыт без него.
+- **DSR** advisory — consume из backtester E2, не строим. **R11** bootstrap-CI, **R14** regime — later.
+- Полное закрытие enqueue reconciliation gap — **P1-2/outbox**, вне R5.
