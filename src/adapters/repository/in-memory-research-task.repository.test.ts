@@ -46,4 +46,29 @@ describe('InMemoryResearchTaskRepository', () => {
     await repo.updateStatus('a', 'completed');
     expect((await repo.findById('a'))?.updatedAt).not.toBe('2026-06-10T00:00:00Z');
   });
+
+  describe('startRunUnlessTerminal (P1-3 terminal fence)', () => {
+    it('transitions a non-terminal task → true, status becomes running', async () => {
+      const repo = new InMemoryResearchTaskRepository();
+      for (const status of ['accepted', 'queued', 'running', 'failed'] as const) {
+        await repo.create(task({ id: status, status }));
+        expect(await repo.startRunUnlessTerminal(status)).toBe(true);
+        expect((await repo.findById(status))?.status).toBe('running');
+      }
+    });
+
+    it('refuses a terminal task → false, status unchanged', async () => {
+      const repo = new InMemoryResearchTaskRepository();
+      for (const status of ['completed', 'rejected'] as const) {
+        await repo.create(task({ id: status, status }));
+        expect(await repo.startRunUnlessTerminal(status)).toBe(false);
+        expect((await repo.findById(status))?.status).toBe(status);
+      }
+    });
+
+    it('throws when the task does not exist', async () => {
+      const repo = new InMemoryResearchTaskRepository();
+      await expect(repo.startRunUnlessTerminal('missing')).rejects.toThrow(/not found/);
+    });
+  });
 });

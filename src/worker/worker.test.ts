@@ -27,6 +27,34 @@ describe('startWorker', () => {
     expect((await services.researchTasks.findById('id-1'))?.status).toBe('completed');
   });
 
+  it('does NOT re-dispatch a redelivered task that is already completed (P1-3 idempotency fence)', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const services = makeServices();
+    await services.researchTasks.create(task({ status: 'completed' }));
+    let calls = 0;
+    const router = new WorkflowRouter();
+    router.register('strategy.onboard', async () => { calls += 1; });
+    startWorker({ queue, router, services });
+    await queue.enqueue(env());
+    await queue.drain();
+    expect(calls).toBe(0); // handler never re-ran
+    expect((await services.researchTasks.findById('id-1'))?.status).toBe('completed'); // unchanged
+  });
+
+  it('skips a redelivered rejected task without re-dispatching', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const services = makeServices();
+    await services.researchTasks.create(task({ status: 'rejected' }));
+    let calls = 0;
+    const router = new WorkflowRouter();
+    router.register('strategy.onboard', async () => { calls += 1; });
+    startWorker({ queue, router, services });
+    await queue.enqueue(env());
+    await queue.drain();
+    expect(calls).toBe(0);
+    expect((await services.researchTasks.findById('id-1'))?.status).toBe('rejected');
+  });
+
   it('marks task failed when the handler throws', async () => {
     const queue = new InMemoryQueueAdapter();
     const services = makeServices();
@@ -53,6 +81,7 @@ describe('startWorker', () => {
       },
       listByCorrelationAndTypes: (correlationId: string, taskTypes: ResearchTask['taskType'][]) =>
         base.researchTasks.listByCorrelationAndTypes(correlationId, taskTypes),
+      startRunUnlessTerminal: (id: string) => base.researchTasks.startRunUnlessTerminal(id),
     };
     const services = { ...base, researchTasks };
     const router = new WorkflowRouter();

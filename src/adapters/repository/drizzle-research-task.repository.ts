@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { researchTask } from '../../db/schema.ts';
 import type { AgentTaskType, ResearchTask, TaskStatus } from '../../domain/types.ts';
@@ -55,6 +55,24 @@ export class DrizzleResearchTaskRepository implements ResearchTaskRepository {
       .where(eq(researchTask.id, id))
       .returning({ id: researchTask.id });
     if (updated.length === 0) throw new Error(`research_task not found: ${id}`);
+  }
+
+  async startRunUnlessTerminal(id: string): Promise<boolean> {
+    // Atomic TERMINAL fence (P1-3): one conditional UPDATE that transitions to 'running' unless the
+    // row is already terminal. This guarantees a completed/rejected task is never re-run; it does NOT
+    // serialize two concurrent non-terminal deliveries (both pass running->running) — that needs a
+    // lease token, a separate follow-up.
+    const updated = await this.db
+      .update(researchTask)
+      .set({ status: 'running', updatedAt: new Date() })
+      .where(and(eq(researchTask.id, id), notInArray(researchTask.status, ['completed', 'rejected'])))
+      .returning({ id: researchTask.id });
+    if (updated.length > 0) return true;
+    // 0 rows: the task is either terminal (a no-op → false) or absent (→ throw), same contract as
+    // updateStatus. One extra read, only on the rare no-transition path.
+    const exists = await this.db.select({ id: researchTask.id }).from(researchTask).where(eq(researchTask.id, id)).limit(1);
+    if (exists.length === 0) throw new Error(`research_task not found: ${id}`);
+    return false;
   }
 
   async listByCorrelationAndTypes(correlationId: string, taskTypes: AgentTaskType[]): Promise<ResearchTask[]> {

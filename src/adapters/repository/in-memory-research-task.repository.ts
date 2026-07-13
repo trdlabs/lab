@@ -30,4 +30,12 @@ export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
     if (!existing) throw new Error(`research_task not found: ${id}`);
     this.byId.set(id, { ...existing, status, updatedAt: new Date().toISOString() });
   }
+
+  async startRunUnlessTerminal(id: string): Promise<boolean> {
+    const existing = this.byId.get(id);
+    if (!existing) throw new Error(`research_task not found: ${id}`);
+    if (existing.status === 'completed' || existing.status === 'rejected') return false;
+    this.byId.set(id, { ...existing, status: 'running', updatedAt: new Date().toISOString() });
+    return true;
+  }
 }
