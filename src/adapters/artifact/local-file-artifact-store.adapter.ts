@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, writeFile, readFile, rename, rm, access } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import type { ArtifactRef } from '../../domain/types.ts';
@@ -21,7 +21,22 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     const contentHash = `sha256:${hex}`;
     await mkdir(this.baseDir, { recursive: true });
     const filePath = join(this.baseDir, hex);
-    await writeFile(filePath, buf);
+    // Publish atomically (P1-21). The file is named by its content hash, so an existing blob already
+    // holds the exact bytes — skip it (idempotent, and never truncates a file a reader may hold open).
+    // Otherwise write to a unique temp then rename() into place: a concurrent reader on the shared
+    // .artifacts CAS sees either the old file or the complete new one, never a half-written blob.
+    if (!(await this.exists(filePath))) {
+      const tmp = join(this.baseDir, `.${hex}.${randomUUID()}.tmp`);
+      await writeFile(tmp, buf);
+      try {
+        await rename(tmp, filePath);
+      } catch (err) {
+        await rm(tmp, { force: true });
+        // A concurrent writer may have created filePath between our exists() check and the rename;
+        // its bytes are identical (same hash), so tolerate that and only surface a genuine failure.
+        if (!(await this.exists(filePath))) throw err;
+      }
+    }
     return {
       artifact_id: contentHash,
       uri: pathToFileURL(filePath).href,
@@ -61,5 +76,14 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
 
   resolveUri(ref: ArtifactRef): string {
     return ref.uri;
+  }
+
+  private async exists(p: string): Promise<boolean> {
+    try {
+      await access(p);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
