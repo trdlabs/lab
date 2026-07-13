@@ -174,6 +174,8 @@ revision.build (src/orchestrator/handlers/revision-build.handler.ts:149)
 - Это же лечит ratchet M3: ревизия принимается только при неухудшении на окне, которого не видел отбор.
 *Приёмка: тест «hypothesis merged только после holdout-PASS»; событие с train/holdout метриками в ledger.*
 
+> ↔ **backtester Phase E** (см. `docs/research/2026-07-12-backtester-phase-e-lab-reconciliation.md`): held-out дисциплина усиливается серверным **E4** (server-declared qualification-окно, против которого петля не может итерировать) + lab-двойник **Outcome Embargo** на agent-memory. Lab-часть R3 = consume E4-вердикт + Embargo, а не только своя граница T.
+
 **R4. Донести до LLM то, что считаем, что она видит (закрыть W2/W3).**
 - Прокинуть `feedback` (decision+reasons прошлого FAIL/MODIFY) в промпт ретрая — поле уже в payload.
 - Либо рендерить `minuteContext` (сжатая поминутная таблица по лузерам — формат уже есть для микро-окна), либо перестать фетчить; решение зафиксировать.
@@ -195,6 +197,8 @@ revision.build (src/orchestrator/handlers/revision-build.handler.ts:149)
 - Ledger: на цикл фиксировать N=сколько гипотез реально бэктестили; в scorecard — «champion выбран из N»;
 - финальный holdout-ран merged-ревизии (уже в R3) — структурная защита;
 - опционально: rank-stability сигнал (top-K по train совпадает с top-K по holdout? нет → флаг unstable_selection).
+
+> ↔ **backtester Phase E**: N-счётчик становится **серверным** (E2 trial ledger — backtester видит каждый прогон). Lab владеет только слоями family-identity (L1 `derivedFrom` в манифесте, L2 pre-submit similarity → `familyHint`), которые делают N осмысленным. См. reconciliation §4.
 
 **R8. Бакетирование лузеров по `closeReason` (Perplexity-пункт 1).**
 В отбор и промпт: группировать лузеров по канону (`stop_loss` / `time_exit` / `breakeven`/…), давать per-cluster статистику (count, avg PnL, avg holding) и просить гипотезы адресовать конкретный кластер. Виннерам аналогично headroom-подклассы (уже наполовину есть в `rankWinnersTyped`).
@@ -219,6 +223,8 @@ revision.build (src/orchestrator/handlers/revision-build.handler.ts:149)
 - **≥60 дней:** multi-fold WFA (главная ценность) + **DSR как advisory-поле scorecard** (не гейт): чистая функция от ledger — N испытаний цикла + моменты трейдов holdout-рана. Наблюдаем распределение на наших выборках, порог — только после этого.
 - **PBO — только в WFO-sweep линии** (точки сетки × фолды = естественная матрица испытаний; CSCV ложится на fold-матрицу с умеренной доплатой). В гипотезную линию не тащить — N всегда мал.
 - **Жёсткими гейтами DSR/PBO не делать, пока не работает canary (R12)** — живой параллельный paper-arm сильнее любой post-hoc поправки статистики.
+
+> ↔ **backtester Phase E** (РАЗВОРОТ на consume, 2026-07-12): DSR теперь считается **серверно** (E2, advisory-first, DSR+N в signed evidence) — lab его **НЕ строит**, а потребляет в scorecard. Multi-fold — **делегируется E3** (split-scheme как request-параметр, фолды = детерминир. суб-раны), а не гоняется в lab-`ParamGridRunner`. См. reconciliation §3.
 
 **R14. Regime breakdown в scorecard** (RegimeLabeler из Phase B) — «pass_rate высокий, но только в одном режиме — слабый кандидат» (roadmap §7.5).
 
