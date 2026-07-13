@@ -26,8 +26,7 @@
 
 - **Modify** `src/validation/revision-evaluator.ts` — add `RevisionEvaluatorPolicy` + `DEFAULT_REVISION_EVALUATOR_POLICY` + `RevisionDecision`; make `evaluateRevision(input, policy)`.
 - **Modify** `src/domain/strategy-revision.ts` — `SelectionEvaluation` type + `StrategyRevision.selectionEvaluation?`; extend `HoldoutValidation`.
-- **Create** `migrations/0024_*.sql` — additive `selection_evaluation jsonb`.
-- **Modify** `src/db/schema.ts` — `selectionEvaluation` column on `strategyRevision`.
+- **Modify** `src/db/schema.ts` — `selectionEvaluation` column on `strategyRevision` (THEN run `pnpm db:generate` — it writes `migrations/0024_*.sql` + `migrations/meta/0024_snapshot.json` + updates `migrations/meta/_journal.json`; a hand-written .sql alone is NOT picked up by `drizzle-kit migrate`).
 - **Modify** `src/adapters/repository/drizzle-strategy-revision.repository.ts` — create-map + `toDomain` + updateStatus patch.
 - **Modify** `src/adapters/repository/in-memory-strategy-revision.repository.ts` — round-trip the new field.
 - **Modify** `src/ports/strategy-revision.repository.ts` — add `selectionEvaluation` to the `updateStatus` `Pick<>`.
@@ -50,12 +49,14 @@
 Append to `src/validation/revision-evaluator.test.ts`:
 
 ```ts
+import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import { evaluateRevision, DEFAULT_REVISION_EVALUATOR_POLICY, REVISION_EVALUATOR_VERSION } from './revision-evaluator.ts';
 
-const M = (over: Record<string, number> = {}) => ({
-  netPnlUsd: 1000, maxDrawdownPct: 10, totalTrades: 50, topTradeContributionPct: 20,
-  sharpeRatio: 1, winRatePct: 55, profitFactor: 2, ...over,
-}) as never;
+// Valid BacktestMetricBlock (exact 9 fields — NO `as never`, so a wrong field name fails tsc).
+const M = (over: Partial<BacktestMetricBlock> = {}): BacktestMetricBlock => ({
+  netPnlUsd: 1000, netPnlPct: 10, totalTrades: 50, winRate: 0.55, profitFactor: 2,
+  maxDrawdownPct: 10, expectancyUsd: 20, sharpe: 1, topTradeContributionPct: 20, ...over,
+});
 
 describe('evaluateRevision — policy-driven thresholds', () => {
   it('DEFAULT policy carries the exact shipped values', () => {
@@ -65,28 +66,35 @@ describe('evaluateRevision — policy-driven thresholds', () => {
     });
   });
 
-  it('uses policy.maxDrawdownRegressionPct (not a literal 2.0)', () => {
-    const input = { accepted: M(), candidate: M({ netPnlUsd: 1100, maxDrawdownPct: 13 }) }; // +3pp drawdown
-    // default (2.0) → REJECT drawdown_regression; loosened (5.0) → ACCEPT
-    expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).decision).toBe('REJECT');
-    expect(evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, maxDrawdownRegressionPct: 5.0 }).decision).toBe('ACCEPT');
-  });
-
-  it('uses policy.topTradeContributionPct (not a literal 50)', () => {
-    const input = { accepted: M(), candidate: M({ netPnlUsd: 1100, topTradeContributionPct: 45 }) };
-    expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).decision).toBe('ACCEPT'); // 45 < 50
-    expect(evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, topTradeContributionPct: 40 }).decision).toBe('REJECT'); // 45 >= 40
-  });
-
-  it('uses policy.minTrades', () => {
+  it('uses policy.minTrades (rung 1)', () => {
     const input = { accepted: M(), candidate: M({ netPnlUsd: 1100, totalTrades: 10 }) };
     expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).reasons).toEqual(['insufficient_sample']); // 10 < 20
     expect(evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, minTrades: 5 }).decision).toBe('ACCEPT'); // 10 >= 5
   });
+
+  it('uses policy.minNetPnlImprovementUsd (rung 2)', () => {
+    const input = { accepted: M({ netPnlUsd: 1000 }), candidate: M({ netPnlUsd: 1050 }) }; // +50 improvement
+    expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).decision).toBe('ACCEPT'); // 50 > 0
+    const strict = evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, minNetPnlImprovementUsd: 100 });
+    expect(strict.decision).toBe('REJECT'); // 50 <= 100
+    expect(strict.reasons).toEqual(['no_improvement_over_accepted']);
+  });
+
+  it('uses policy.maxDrawdownRegressionPct (rung 3, not a literal 2.0)', () => {
+    const input = { accepted: M(), candidate: M({ netPnlUsd: 1100, maxDrawdownPct: 13 }) }; // +3pp drawdown
+    expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).decision).toBe('REJECT'); // default 2.0
+    expect(evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, maxDrawdownRegressionPct: 5.0 }).decision).toBe('ACCEPT');
+  });
+
+  it('uses policy.topTradeContributionPct (rung 4, not a literal 50)', () => {
+    const input = { accepted: M(), candidate: M({ netPnlUsd: 1100, topTradeContributionPct: 45 }) };
+    expect(evaluateRevision(input, DEFAULT_REVISION_EVALUATOR_POLICY).decision).toBe('ACCEPT'); // 45 < 50
+    expect(evaluateRevision(input, { ...DEFAULT_REVISION_EVALUATOR_POLICY, topTradeContributionPct: 40 }).decision).toBe('REJECT'); // 45 >= 40
+  });
 });
 ```
 
-Also UPDATE every EXISTING call in this test file from `evaluateRevision({ accepted, candidate, minTrades: N })` to `evaluateRevision({ accepted, candidate }, { ...DEFAULT_REVISION_EVALUATOR_POLICY, minTrades: N })` — the signature changed.
+Also UPDATE every EXISTING call in this test file from `evaluateRevision({ accepted, candidate, minTrades: N })` to `evaluateRevision({ accepted, candidate }, { ...DEFAULT_REVISION_EVALUATOR_POLICY, minTrades: N })`, and replace any existing `as never` metric fixtures with the valid `M()` helper above — the signature changed and `as never` would hide field-name errors.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -200,16 +208,23 @@ git commit -m "feat(r5a): versioned RevisionEvaluatorPolicy as explicit evaluate
 - Consumes: `RevisionEvaluatorPolicy`, `RevisionDecision` (Task 1); `BacktestMetricBlock` (`../ports/platform-gateway.port.ts`).
 - Produces: `SelectionEvaluation`; `StrategyRevision.selectionEvaluation?: SelectionEvaluation`; `HoldoutValidation` gains `trainBaselineMetrics?`, `holdoutBaselineMetrics?: BacktestMetricBlock`, `holdoutDecision?: RevisionDecision`, `holdoutReasons?: string[]`, `policy?: RevisionEvaluatorPolicy`.
 
-- [ ] **Step 1: Write the failing test** — a type-shape assertion via a constructed value
+- [ ] **Step 1: Write the failing test** — RED is a TYPECHECK failure, not a Vitest failure
+
+> These are type-shape assertions. `import type` is erased by `--experimental-strip-types`, so Vitest would pass even without the types — the RED gate here is `pnpm typecheck`. The `expect` calls are real runtime asserts on constructed values (non-vacuous smoke), but the meaningful failure is at tsc.
 
 Append to `src/domain/strategy-revision.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
+import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import type { SelectionEvaluation, HoldoutValidation, StrategyRevision } from './strategy-revision.ts';
 import { DEFAULT_REVISION_EVALUATOR_POLICY } from '../validation/revision-evaluator.ts';
 
-const metrics = { netPnlUsd: 1000, maxDrawdownPct: 10, totalTrades: 50, topTradeContributionPct: 20, sharpeRatio: 1, winRatePct: 55, profitFactor: 2 } as never;
+// Valid BacktestMetricBlock — NO `as never`; tsc flags any wrong field.
+const metrics: BacktestMetricBlock = {
+  netPnlUsd: 1000, netPnlPct: 10, totalTrades: 50, winRate: 0.55, profitFactor: 2,
+  maxDrawdownPct: 10, expectancyUsd: 20, sharpe: 1, topTradeContributionPct: 20,
+};
 
 describe('R5a domain types', () => {
   it('SelectionEvaluation carries baseline+candidate+policy+verdict', () => {
@@ -230,16 +245,17 @@ describe('R5a domain types', () => {
   });
 
   it('StrategyRevision carries optional selectionEvaluation', () => {
-    const r = { selectionEvaluation: undefined } as Partial<StrategyRevision>;
+    const r: Partial<StrategyRevision> = { selectionEvaluation: undefined };
     expect('selectionEvaluation' in r).toBe(true);
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run typecheck to verify it fails (RED is at tsc, not Vitest)**
 
-Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/domain/strategy-revision.test.ts`
-Expected: FAIL — `SelectionEvaluation` not exported / new `HoldoutValidation` fields rejected by tsc.
+Run: `pnpm typecheck`
+Expected: FAIL — `SelectionEvaluation` not exported; `HoldoutValidation` has no `holdoutDecision`/`trainBaselineMetrics`/…; `StrategyRevision` has no `selectionEvaluation`.
+(Note: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/domain/strategy-revision.test.ts` would PASS even now because type imports are erased — that is exactly why the RED gate is `pnpm typecheck`.)
 
 - [ ] **Step 3: Add the types**
 
@@ -336,25 +352,41 @@ Add `selectionEvaluation: null` to the `baseRow()` factory in that test file.
 
 Append to `src/adapters/repository/in-memory-strategy-revision.repository.test.ts` a round-trip: create a revision, `updateStatus(id, { selectionEvaluation: se, ... })`, `findById`, assert `selectionEvaluation` and the new `holdoutValidation` fields survive (whitelist-drop guard).
 
+**Gated Postgres integration (covers insert → update → read, not just the pure mapper).** The `toDomain` unit tests above only exercise the row→domain mapper; they do NOT prove `create`/`updateStatus` actually persist the column. Add a gated integration block to `drizzle-strategy-revision.repository.test.ts`, mirroring the existing gated pattern in the repo (`const url = process.env.DATABASE_URL; (url ? describe : describe.skip)('… (integration)', …)` with `createDbClient(url)` in `beforeAll` — copy the setup from `drizzle-hypothesis.repository.test.ts`):
+
+```ts
+const url = process.env.DATABASE_URL;
+(url ? describe : describe.skip)('DrizzleStrategyRevisionRepository — selectionEvaluation persistence (integration)', () => {
+  // beforeAll: createDbClient(url), run migrations, instantiate the repo (copy the sibling file's setup)
+  it('persists selectionEvaluation through create → updateStatus → findById', async () => {
+    const se = { evaluatorVersion: 'revision-combo-v1', baselineMetrics: metrics, candidateMetrics: metrics,
+      thresholds: DEFAULT_REVISION_EVALUATOR_POLICY, decision: 'REJECT' as const, reasons: ['drawdown_regression'] };
+    await repo.create(revisionFixture({ id: 'rev-int-1' }));                 // no selectionEvaluation yet
+    await repo.updateStatus('rev-int-1', { status: 'rejected', selectionEvaluation: se, updatedAt: now });
+    const back = await repo.findById('rev-int-1');
+    expect(back!.selectionEvaluation).toEqual(se);                           // survived a real DB insert+update+read
+  });
+});
+```
+> If the file has no such gated block yet, add one; `metrics` is the valid `BacktestMetricBlock` fixture, `revisionFixture` mirrors the existing create-fixture in that file. This test is skipped without `DATABASE_URL` (matches every other drizzle integration test), so the default suite stays green; the operator runs it against a real Postgres.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/adapters/repository/drizzle-strategy-revision.repository.test.ts src/adapters/repository/in-memory-strategy-revision.repository.test.ts`
 Expected: FAIL — `selectionEvaluation` column/field unknown.
 
-- [ ] **Step 3: Migration**
-
-Create `migrations/0024_r5a_selection_evaluation.sql`:
-```sql
-ALTER TABLE "strategy_revision" ADD COLUMN "selection_evaluation" jsonb;
-```
-
-- [ ] **Step 4: Schema column**
+- [ ] **Step 3: Schema column FIRST**
 
 In `src/db/schema.ts`, in the `strategyRevision` table (after the `holdoutValidation` line :376), add:
 ```ts
   selectionEvaluation: jsonb('selection_evaluation').$type<SelectionEvaluation>(),
 ```
 Import `SelectionEvaluation` from `../domain/strategy-revision.ts` in schema.ts (follow how `HoldoutValidation` is imported there).
+
+- [ ] **Step 4: Generate the migration via drizzle-kit (Critical — do NOT hand-write the .sql)**
+
+Run: `pnpm db:generate`
+Expected: drizzle-kit emits `migrations/0024_<name>.sql` (containing `ALTER TABLE "strategy_revision" ADD COLUMN "selection_evaluation" jsonb;`), `migrations/meta/0024_snapshot.json`, and updates `migrations/meta/_journal.json`. Open the generated `.sql` and confirm it is exactly the additive `ADD COLUMN` (no unexpected drops/renames from schema drift). All three files must be committed together — a hand-written .sql without the snapshot/journal is silently skipped by `drizzle-kit migrate`.
 
 - [ ] **Step 5: Drizzle repo**
 
@@ -379,8 +411,8 @@ Expected: PASS; no type errors.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add migrations/0024_r5a_selection_evaluation.sql src/db/schema.ts src/adapters/repository/drizzle-strategy-revision.repository.ts src/adapters/repository/in-memory-strategy-revision.repository.ts src/ports/strategy-revision.repository.ts src/adapters/repository/drizzle-strategy-revision.repository.test.ts src/adapters/repository/in-memory-strategy-revision.repository.test.ts
-git commit -m "feat(r5a): persist selectionEvaluation (migration 0024) + round-trip both repos"
+git add migrations/0024_*.sql migrations/meta/0024_snapshot.json migrations/meta/_journal.json src/db/schema.ts src/adapters/repository/drizzle-strategy-revision.repository.ts src/adapters/repository/in-memory-strategy-revision.repository.ts src/ports/strategy-revision.repository.ts src/adapters/repository/drizzle-strategy-revision.repository.test.ts src/adapters/repository/in-memory-strategy-revision.repository.test.ts
+git commit -m "feat(r5a): persist selectionEvaluation (drizzle-generated migration 0024) + round-trip both repos"
 ```
 
 ---
@@ -435,6 +467,23 @@ it('comparison_baseline_unavailable leaves selectionEvaluation undefined', async
   expect(v.verdictReason).toBe('comparison_baseline_unavailable');
   expect(v.selectionEvaluation).toBeUndefined();             // no comparison → no snapshot
 });
+
+it('aggregate ACCEPT + preservation veto → snapshot ACCEPT, revision rejected, preservation fired', async () => {
+  // ...seed: aggregate ladder ACCEPT but R2 preservation gate vetoes (winner_degradation), gateOn...
+  const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+  expect(v.status).toBe('rejected');
+  expect(v.preservationGate?.fired).toBe(true);
+  expect(v.selectionEvaluation).toBeDefined();
+  expect(v.selectionEvaluation!.decision).toBe('ACCEPT');    // AGGREGATE verdict, NOT the preservation downgrade
+});
+
+it('stale reset: first attempt evaluated REJECT, next attempt unavailable → final snapshot absent', async () => {
+  // ...seed a 2-hypothesis cycle: attempt 1 (both) completes with an aggregate REJECT (e.g. drawdown_regression);
+  //    greedy drops the worst; attempt 2 (remaining) returns a NON-completed candidate run (candidate_run_unavailable)...
+  const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+  expect(v.status).toBe('rejected');
+  expect(v.selectionEvaluation).toBeUndefined();             // reset each iteration → no stale snapshot from attempt 1
+});
 ```
 
 > Adapt seeding to the file's actual executor fixtures. If a fixture for the `comparison_baseline_unavailable` path doesn't exist, add a minimal executor returning a non-`completed` `comparison_baseline` run (mirror the existing `makeVetoExecutor`/`makeRejectExecutor` shape).
@@ -444,24 +493,46 @@ it('comparison_baseline_unavailable leaves selectionEvaluation undefined', async
 Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/revision-flow.integration.test.ts`
 Expected: FAIL — `selectionEvaluation`/new holdout fields undefined.
 
-- [ ] **Step 3: Capture the selection-window snapshot after each real verdict**
+- [ ] **Step 3: Capture the AGGREGATE snapshot (before preservation) + reset it each iteration**
+
+Two correctness rules:
+- **The snapshot's `decision`/`reasons` are the pure aggregate evaluator verdict — captured BEFORE the R2 preservation gate can downgrade `verdict`.** Otherwise `selectionEvaluation` would record a REJECT `winner_degradation` even though the aggregate ladder returned ACCEPT (mixing AGGREGATE with TRADE-SPLIT). The final `verdict` still absorbs the preservation downgrade; `selectionEvaluation` does not.
+- **Reset `selectionEvaluation = undefined` at the top of every greedy iteration**, so a later `candidate_run_unavailable` attempt cannot leave a stale snapshot from a previous bundle. The final snapshot reflects the FINAL attempt (or is absent if the final attempt had no comparison).
 
 In `revision-build.handler.ts`, declare before the greedy loop (near `let firedPreservation`):
 ```ts
   let selectionEvaluation: import('../../domain/strategy-revision.ts').SelectionEvaluation | undefined;
 ```
-Inside `if (result.status === 'completed' && result.metrics) { ... }`, AFTER the preservation-gate block finalizes `verdict` (i.e. as the last statement of that `if`), add:
+At the **top of each greedy-loop iteration body** (before the candidate run is submitted/evaluated), reset it:
 ```ts
+    selectionEvaluation = undefined;
+```
+Rewrite the verdict block so the aggregate verdict is captured before preservation:
+```ts
+    if (result.status === 'completed' && result.metrics) {
+      const aggregateVerdict = evaluateRevision(
+        { accepted: selectionBaselineMetrics, candidate: result.metrics },
+        DEFAULT_REVISION_EVALUATOR_POLICY,
+      );
+      verdict = aggregateVerdict;
+      // Snapshot the AGGREGATE verdict (pre-preservation) — comparison actually happened here.
       selectionEvaluation = {
         evaluatorVersion: DEFAULT_REVISION_EVALUATOR_POLICY.evaluatorVersion,
         baselineMetrics: selectionBaselineMetrics,
         candidateMetrics: result.metrics,
         thresholds: DEFAULT_REVISION_EVALUATOR_POLICY,
-        decision: verdict.decision,
-        reasons: verdict.reasons,
+        decision: aggregateVerdict.decision,   // NOT the post-preservation verdict
+        reasons: aggregateVerdict.reasons,
       };
+      if (gateOn && verdict.decision === 'ACCEPT') {
+        // ...existing preservation-gate block... verdict = gated.verdict;  (may downgrade FINAL verdict only)
+      }
+    } else {
+      verdict = { decision: 'REJECT', reasons: ['candidate_run_unavailable'] };
+      // selectionEvaluation stays undefined (reset above) — no comparison happened
+    }
 ```
-(This captures the LAST real comparison; on the `else` branch — `candidate_run_unavailable` — it is not set, so no snapshot for a comparison that didn't happen.)
+(Keep the existing preservation-gate body verbatim inside the `if (gateOn ...)`; only the surrounding capture + reset are new.)
 
 - [ ] **Step 4: Extend the holdout-validation writes**
 
@@ -503,4 +574,10 @@ git commit -m "feat(r5a): revision-build persists selectionEvaluation + holdout 
 
 **3. Type consistency:** `RevisionEvaluatorPolicy`/`RevisionDecision`/`evaluateRevision(input, policy)` consistent Task 1↔2↔4; `SelectionEvaluation` fields identical Task 2 (def) ↔ Task 3 (persist) ↔ Task 4 (write); `HoldoutValidation` new fields identical Task 2 ↔ Task 4; migration `selection_evaluation` ↔ schema `jsonb('selection_evaluation')` ↔ domain `selectionEvaluation`. ✅
 
-**Flagged risk for implementer/reviewer:** Task 1 changes `evaluateRevision`'s arity — the two revision-build call-sites are updated in the same task (Step 4) to keep typecheck green; a reviewer should confirm no third call-site exists (`rg -n "evaluateRevision(" src/` — only revision-build + tests today). Task 4's terminal edits must land `selectionEvaluation` at exactly the three comparison-happened terminals and NOT at `comparison_baseline_unavailable` — the four Step-1 tests pin this.
+**Review-fix checklist (folded in):**
+- **Migration (Critical):** Task 3 changes schema FIRST, then `pnpm db:generate` emits the .sql + `0024_snapshot.json` + `_journal.json` (all committed) — no hand-written .sql (drizzle-kit would skip it).
+- **AGGREGATE vs preservation (Important):** Task 4 snapshots the aggregate verdict BEFORE the R2 gate; final `verdict` still absorbs the downgrade. Test: aggregate ACCEPT + veto → snapshot ACCEPT, revision rejected, `preservationGate.fired`.
+- **Stale snapshot (Important):** Task 4 resets `selectionEvaluation` at each greedy iteration. Test: attempt-1 REJECT then attempt-2 unavailable → final snapshot absent.
+- **Test rigor (Important):** all four policy thresholds tested incl. `minNetPnlImprovementUsd`; valid `BacktestMetricBlock` fixture (no `as never`); Task 2 RED is `pnpm typecheck` (type imports erase under strip-types); Task 3 adds a gated Postgres integration test covering insert→update→read, not just the `toDomain` mapper.
+
+**Flagged risk for implementer/reviewer:** Task 1 changes `evaluateRevision`'s arity — the two revision-build call-sites are updated in the same task (Step 4) to keep typecheck green; a reviewer should confirm no third call-site exists (`rg -n "evaluateRevision(" src/` — only revision-build + tests today). Task 4's terminal edits must land `selectionEvaluation` at exactly the three comparison-happened terminals and NOT at `comparison_baseline_unavailable` — the Step-1 tests pin this.
