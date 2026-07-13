@@ -723,9 +723,15 @@ describe('revision-flow integration (R3a Task 3): trade_based holdout gate activ
     // primary run-context is the holdout run, not the train-window candidate run:
     expect(v2!.comboBacktestRunId).toBe('cand-holdout-run');
 
-    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    const allEvents = await services.events.listByTask('task-rev-build');
+    const events = allEvents.map((e) => e.type);
     expect(events).toContain('revision.holdout_validated');
     expect(events).toContain('revision.accepted');
+    // the validated event carries the full arbitration context (spec §3.4): both windows' metrics + the confidence flag.
+    const validated = allEvents.find((e) => e.type === 'revision.holdout_validated');
+    expect(validated?.payload).toMatchObject({ decision: 'ACCEPT', lowConfidence: false });
+    expect(validated?.payload.trainMetrics).toBeDefined();
+    expect(validated?.payload.holdoutMetrics).toBeDefined();
 
     // sanity: the train-window candidate + the holdout confirm runs both actually happened.
     expect(calls.some((c) => c.label === 'train_baseline')).toBe(true);
@@ -753,9 +759,41 @@ describe('revision-flow integration (R3a Task 3): trade_based holdout gate activ
     expect(v2!.holdoutValidation?.trainMetrics).toBeDefined();
     expect(v2!.holdoutValidation?.holdoutMetrics).toBeDefined();
 
-    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    const allEvents = await services.events.listByTask('task-rev-build');
+    const events = allEvents.map((e) => e.type);
     expect(events).toContain('revision.holdout_validated');
     expect(events).toContain('revision.rejected');
     expect(events).not.toContain('revision.accepted');
+    // the FAIL validated event must ALSO carry both windows' metrics + the confidence flag (spec §3.4).
+    const validated = allEvents.find((e) => e.type === 'revision.holdout_validated');
+    expect(validated?.payload).toMatchObject({ decision: 'REJECT', lowConfidence: false });
+    expect(validated?.payload.trainMetrics).toBeDefined();
+    expect(validated?.payload.holdoutMetrics).toBeDefined();
+  });
+
+  it('trade_based + lowConfidence: still runs the holdout gate and records the flag (70 trades → 50 train / 20 holdout)', async () => {
+    // 70 trades: full-confidence holdout (>=30) would need train <40 (<minTradesTrain 50), so the resolver
+    // falls to a low-confidence split — holdout h=20 in [lowConfidenceThreshold 15, minTradesHoldout 30) →
+    // boundary.lowConfidence === true. Per spec §3.2 the gate STILL runs; the flag is only recorded.
+    const runTrades = new FakeRunTradesAdapter({ 'base-full': syntheticTrades(70) });
+    const { executor, calls } = makeHoldoutExecutor({ holdoutPasses: true });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2!.status).toBe('accepted');
+    expect(v2!.holdoutValidation?.mode).toBe('trade_based');
+    expect(v2!.holdoutValidation?.lowConfidence).toBe(true);
+    expect(v2!.holdoutValidation?.reason).toBe('holdout_passed');
+    // the gate actually ran despite low confidence:
+    expect(calls.some((c) => c.label === 'holdout_candidate')).toBe(true);
+    const validated = (await services.events.listByTask('task-rev-build')).find((e) => e.type === 'revision.holdout_validated');
+    expect(validated?.payload).toMatchObject({ decision: 'ACCEPT', lowConfidence: true });
   });
 });

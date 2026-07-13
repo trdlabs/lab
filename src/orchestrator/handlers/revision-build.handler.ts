@@ -520,6 +520,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
       });
       await services.events.append(event(task.id, 'revision.holdout_validated', {
         revisionId, version, mode: 'trade_based', t: boundary.t, decision: holdoutVerdict.decision, reasons: holdoutVerdict.reasons,
+        lowConfidence: boundary.lowConfidence, trainMetrics, holdoutMetrics: (hCandM as unknown as Record<string, unknown>) ?? undefined,
       }));
       await services.events.append(event(task.id, 'revision.rejected', { revisionId, version, reasons: ['holdout_failed'] }));
       return;
@@ -532,7 +533,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     acceptedRun = hCand;
     acceptedMetrics = hCandM;
     await services.events.append(event(task.id, 'revision.holdout_validated', {
-      revisionId, version, mode: 'trade_based', t: boundary.t, decision: 'ACCEPT', trainMetrics, holdoutMetrics: hCandM,
+      revisionId, version, mode: 'trade_based', t: boundary.t, decision: 'ACCEPT', lowConfidence: boundary.lowConfidence, trainMetrics, holdoutMetrics: hCandM,
     }));
   }
 
