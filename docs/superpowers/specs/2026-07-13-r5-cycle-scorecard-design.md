@@ -17,7 +17,7 @@
 
 ## 1. Проблема / цель
 
-Итог цикла (что предложено/оценено, из какого пула отобран champion, насколько робастен, почему исход такой) рассеян по ledger. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, exactly-once, выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
+Итог цикла (что предложено/оценено, из какого пула отобран champion, насколько робастен, почему исход такой) рассеян по ledger. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, **идемпотентно персистится после успешного запуска `cycle.scorecard`-task** (enqueue-gap §5.5 честно допускает отсутствие артефакта при сбое постановки — reconciliation вне R5), выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
 
 ## 2. Что уже персистится
 
@@ -63,7 +63,7 @@ selectionEvaluation?: {
 }
 ```
 - Пишется на **окне отбора** (train для `trade_based`, full для `mode:'none'`) — то, на чём revision-build принял accept/reject.
-- Пишется **и для финального rejected candidate**, не только accepted (объяснить no-champion).
+- Пишется для accepted **и для rejected candidate** — **только если baseline/candidate comparison фактически состоялся**. Для `comparison_baseline_unavailable` (baseline-ран не получен) snapshot **невозможен** → `selectionEvaluation` отсутствует, scorecard пишет `aggregate: null` (revisionAssessment всё равно строится: status=rejected + verdictReason).
 - `deltas` **не хранятся** — scorecard-builder вычисляет детерминированно из `baselineMetrics`/`candidateMetrics`.
 
 ### 4.3 Расширение `holdoutValidation` (объяснимый ROBUSTNESS)
@@ -107,7 +107,7 @@ cycle.scorecard handler:
 - `cycleHypothesisIds` ← build-задачи correlation, unique.
 - На гипотезу: `hypotheses.findById` (status для roster) + `backtests.listByHypothesis(hypId)` → **фильтр `run.correlationId === correlationId`** (listByHypothesis может вернуть исторические раны) → `evaluations.listByBacktestRun` → **последняя завершённая = детерминированный max по `(createdAt, id)`** (id-tiebreak). Даёт `evaluated` + `lastDecision`.
 - `eligible`/`considered` — из `outcome.eligibleHypIds`/`consideredHypIds` (не из evaluations).
-- Ревизия (если `revisionId`): `revisions.findById` → `selectionEvaluation` (AGGREGATE), `preservationGate` (TRADE-SPLIT), расширенный `holdoutValidation` (ROBUSTNESS), `status`, `verdictReason`, `hypothesisIds`, `dropped`.
+- Ревизия (если `revisionId`): `revisions.findById` → `selectionEvaluation` (AGGREGATE), `preservationGate` (TRADE-SPLIT), расширенный `holdoutValidation` (ROBUSTNESS), `status`, `verdictReason`, `hypothesisIds`, `dropped`. `revisionAssessment` строится для **accepted И rejected** (объяснимость no-champion: holdout failure / preservation veto / aggregate reject видны); `champion` = тонкий указатель, **только accepted**.
 
 ### 5.3 Терминальность (явные фиксации)
 - Terminal outcomes = **{accepted, rejected, skipped, abandoned}**. `revision.build.abandoned` (исчерпание wait-cap) — **терминал**.
@@ -123,13 +123,16 @@ CycleScorecard {
   counts: { built, evaluated, eligible, considered, selected, dropped }
   eligibleUnavailableReason?, consideredUnavailableReason?: string
   provenance: { mergeAttempted, candidateIncluded, revisionId?, sourceTaskId }
-  champion: null | {                          // только при accepted
+  revisionAssessment: null | {                // для accepted И rejected — объясняет любой исход
     revisionId, version,
-    aggregate:  { evaluatorVersion, baselineMetrics, candidateMetrics, deltas, thresholds, decision, reasons }
-                //  deltas ВЫЧИСЛЯЮТСЯ builder'ом из baseline/candidate; всё прочее — из selectionEvaluation
-    tradeSplit: preservationGate | null
-    robustness: holdoutValidation | null      // расширенный (train+holdout baseline+candidate+verdict)
+    status: 'accepted' | 'rejected',
+    aggregate:  null | { evaluatorVersion, baselineMetrics, candidateMetrics, deltas, thresholds, decision, reasons }
+                //  из selectionEvaluation; null если comparison не состоялся (comparison_baseline_unavailable, §4.2).
+                //  deltas ВЫЧИСЛЯЮТСЯ builder'ом из baseline/candidate
+    tradeSplit: preservationGate | null       // §TRADE-SPLIT (R2 veto виден и для rejected)
+    robustness: holdoutValidation | null      // §ROBUSTNESS: holdout failure виден и для rejected (train+holdout baseline+candidate+verdict)
   }
+  champion: null | { revisionId, version }    // ТОЛЬКО accepted (тонкий указатель; детали — в revisionAssessment)
   selectionBias: { n: eligible, considered, selected }
   roster: [ { hypId, lastDecision, terminalStatus, considered } ]   // тонкий; ссылки, не метрики
   verdict: { decision, reason }               // детерминированный
@@ -140,7 +143,7 @@ CycleScorecard {
 ### 5.5 Ошибки / enqueue-gap / дедлеттер (правка 2)
 **Generic dead-letter hook отсутствует.** worker.ts на throw ставит task `'failed'` + re-throw; BullMQ `attempts:3` + `removeOnFail:5000` — лишь удержание failed-job, **не** финальное событие и **не** hook (worker не знает `attemptsMade/maxAttempts`). Поэтому:
 - Handler на сбое gather/upsert **бросает** → task `'failed'` + BullMQ retry (attempts:3) → при исчерпании job остаётся в failed-set (наблюдаемость = failed job + task.status, **НЕ** событие). Спека **не обещает** `cycle.scorecard.failed`.
-- **Enqueue-gap:** `createAndEnqueueTask` создаёт DB-row, **затем** enqueue. Если enqueue падает после row-create, повтор видит dedupe-row и не энкьюит снова. Поэтому terminal revision-build **нельзя безоговорочно ретраить** — это может переиграть доменное решение ревизии. Значит **`finalizeCycle`-enqueue — FAIL-SOFT**: сбой → `cycle.scorecard_enqueue_failed` event + признанный **reconciliation gap** (scorecard может не построиться, цикл всё равно завершён). Полное закрытие gap = зависимость от **P1-2 (task-intake dedupeKey на строке) / outbox** — вне R5.
+- **Enqueue-gap:** `createAndEnqueueTask` создаёт DB-row, **затем** enqueue. Если enqueue падает после row-create, повтор видит dedupe-row и не энкьюит снова. Поэтому terminal revision-build **нельзя безоговорочно ретраить** — это может переиграть доменное решение ревизии. Значит **`finalizeCycle`-enqueue — FAIL-SOFT**: сбой → `cycle.scorecard_enqueue_failed` event + признанный **reconciliation gap** (scorecard может не построиться, цикл всё равно завершён). Полное закрытие gap = зависимость от **P1-1 (task-intake create+enqueue reconciliation) / outbox** — вне R5.
 - Инвариант: сбой scorecard **ретраится независимо и не переигрывает ревизию**; финальный failed-job оставляет цикл завершённым.
 
 ### 5.6 Хранение R5b + идемпотентность
@@ -152,7 +155,7 @@ CycleScorecard {
 ## 7. Тестирование
 **R5a:** versioned policy как явный вход + сохранён тот же объект (не константа); `selectionEvaluation` пишется на accepted И rejected; holdout-расширение (baseline+verdict) round-trip (drizzle+in-memory, whitelist-drop RED); миграция `selection_evaluation`.
 **R5b:**
-- Pure builder по-веточно: accepted (deltas вычислены из baseline/candidate) / rejected→selected=0,champion=null / skipped / abandoned / dropped union-дедуп / eligible+considered из наборов vs null+reason.
+- Pure builder по-веточно: accepted (champion={revisionId,version}, revisionAssessment.aggregate deltas вычислены из baseline/candidate) / **rejected → champion=null, но revisionAssessment несёт aggregate/tradeSplit/robustness (holdout failure / preservation veto видны), selected=0** / rejected с `comparison_baseline_unavailable` → revisionAssessment.aggregate=null / skipped / abandoned / dropped union-дедуп / eligible+considered из наборов vs null+reason.
 - Snapshot: evaluation scope по correlation (ран другой correlation игнорируется); max по (createdAt,id) при tie.
 - Handler: upsert-идемпотентность (двойной прогон = 1 строка, идентичный payload); throw на gather-сбое (проброс, НЕ self-dead-letter).
 - finalizeCycle: энкьюит на 4 терминалах; НЕ на deferred; **fail-soft** enqueue → `cycle.scorecard_enqueue_failed` (не бросает из revision-build); dedupeKey с schemaVersion.
@@ -165,7 +168,7 @@ CycleScorecard {
 - `selectionEvaluation`/holdout — **сохранённые входы** оценки (versioned policy), не реконструкция из констант; пишутся и для rejected.
 - `deltas` builder считает из сохранённых metrics (не хранятся).
 - dedupeKey несёт schemaVersion; `cycle.scorecard` вне `CYCLE_CHAIN_TYPES`; abandoned=терминал; deferred≠терминал; `generatedAt` вне payload.
-- `finalizeCycle`-enqueue fail-soft (enqueue-gap + row-then-enqueue → нельзя безоговорочно ретраить ревизию); reconciliation gap признан (P1-2/outbox — вне R5).
+- `finalizeCycle`-enqueue fail-soft (enqueue-gap + row-then-enqueue → нельзя безоговорочно ретраить ревизию); reconciliation gap признан (P1-1/outbox — вне R5).
 - Нет generic dead-letter hook → спека не обещает финальное failed-событие; наблюдаемость = failed task/job.
 - `cycle.scorecard.built` — **at-least-once** (upsert прошёл, append события упал → retry повторит событие): потребители обязаны быть толерантны/идемпотентны (документировано; дедуп события — вне v1).
 
@@ -173,4 +176,4 @@ CycleScorecard {
 - **markdown-рендер** — отдельный слайс; v1 = pure jsonb → рендер = чистая функция поверх payload.
 - **Funnel-top** (proposed/deduped/rejected-на-валидации) — требует upstream `correlationId` на `hypothesis_proposal`; follow-up. R7 (N=eligible) покрыт без него.
 - **DSR** advisory — consume из backtester E2, не строим. **R11** bootstrap-CI, **R14** regime — later.
-- Полное закрытие enqueue reconciliation gap — **P1-2/outbox**, вне R5.
+- Полное закрытие enqueue reconciliation gap — **P1-1/outbox**, вне R5.
