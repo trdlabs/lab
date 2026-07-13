@@ -1,7 +1,26 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { rm, readFile, writeFile, utimes, stat, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+// Fault-injection seam for the "failed publication leaves no temp" test: when the flag is set, the
+// next writeFile creates a partial file at its target and then rejects — the one failure mode real
+// fs can't produce deterministically. Everything else delegates to the real module.
+vi.mock('node:fs/promises', async (importActual) => {
+  const actual = await importActual<typeof import('node:fs/promises')>();
+  const { writeFileSync } = await import('node:fs');
+  return {
+    ...actual,
+    writeFile: (async (p: unknown, data: unknown) => {
+      if ((globalThis as Record<string, unknown>).__casFailNextWrite) {
+        (globalThis as Record<string, unknown>).__casFailNextWrite = false;
+        writeFileSync(p as string, 'partial'); // orphan a partial temp...
+        throw new Error('disk full'); // ...then fail
+      }
+      return actual.writeFile(p as never, data as never);
+    }) as typeof actual.writeFile,
+  };
+});
 import { LocalFileArtifactStore } from './local-file-artifact-store.adapter.ts';
 
 const DIR = '.artifacts-test';
@@ -69,6 +88,33 @@ describe('LocalFileArtifactStore', () => {
     const entries = await readdir(DIR);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('put() self-heals a tampered blob: re-putting the original bytes restores it (skip must verify hash, not just existence)', async () => {
+    // P1-21 review: skip-if-exists must not trust a file by existence alone — that contradicts P1-20.
+    // If a blob was tampered, re-putting the original must atomically replace the corrupt bytes so
+    // get() succeeds again, rather than silently returning a ref to a file get() will keep rejecting.
+    const store = new LocalFileArtifactStore(DIR);
+    const ref = await store.put('healme', { kind: 'logs', mime_type: 'text/plain', producer: 'test' });
+    await writeFile(new URL(ref.uri), 'EVIL'); // corrupt the on-disk blob under its hash name
+    await expect(store.get(ref)).rejects.toThrow(/hash|mismatch|integrity/i); // P1-20 rejects it now
+    const ref2 = await store.put('healme', { kind: 'logs', mime_type: 'text/plain', producer: 'test' });
+    expect(ref2.content_hash).toBe(ref.content_hash);
+    expect((await store.get(ref2)).toString()).toBe('healme'); // restored
+  });
+
+  it('a failed publication leaves no .tmp behind (write+rename share a finally cleanup)', async () => {
+    // P1-21 review: the temp write must be inside the try/finally, else a partial temp from a failed
+    // writeFile is orphaned in the shared CAS dir.
+    const store = new LocalFileArtifactStore(DIR);
+    (globalThis as Record<string, unknown>).__casFailNextWrite = true;
+    try {
+      await expect(store.put('boom', { kind: 'logs', mime_type: 'text/plain', producer: 'test' })).rejects.toThrow('disk full');
+    } finally {
+      (globalThis as Record<string, unknown>).__casFailNextWrite = false;
+    }
+    const entries = await readdir(DIR);
+    expect(entries.filter((e) => e.endsWith('.tmp'))).toHaveLength(0);
   });
 
   it('concurrent puts of identical content settle to exactly one intact file (benign race)', async () => {

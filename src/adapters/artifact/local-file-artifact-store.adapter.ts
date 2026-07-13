@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, rename, rm, access } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import type { ArtifactRef } from '../../domain/types.ts';
@@ -21,20 +21,20 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     const contentHash = `sha256:${hex}`;
     await mkdir(this.baseDir, { recursive: true });
     const filePath = join(this.baseDir, hex);
-    // Publish atomically (P1-21). The file is named by its content hash, so an existing blob already
-    // holds the exact bytes — skip it (idempotent, and never truncates a file a reader may hold open).
-    // Otherwise write to a unique temp then rename() into place: a concurrent reader on the shared
-    // .artifacts CAS sees either the old file or the complete new one, never a half-written blob.
-    if (!(await this.exists(filePath))) {
+    // Publish atomically and self-heal (P1-21). Skip ONLY when an existing file's bytes actually hash
+    // to `hex` — trusting existence alone would contradict get()'s P1-20 hash-verify: a tampered blob
+    // under the content-hash name would be left corrupt forever, with get() rejecting it every time.
+    // Otherwise write to a unique temp then rename() into place (a reader on the shared .artifacts CAS
+    // sees either the old file or the complete new one, never a half-written blob); rename() overwrites
+    // atomically on POSIX, so the last of two racing writers of identical bytes wins. The temp write and
+    // rename share one try/finally so a partial temp from a failed writeFile is always cleaned up.
+    if (!(await this.hasValidBlob(filePath, hex))) {
       const tmp = join(this.baseDir, `.${hex}.${randomUUID()}.tmp`);
-      await writeFile(tmp, buf);
       try {
+        await writeFile(tmp, buf);
         await rename(tmp, filePath);
-      } catch (err) {
+      } finally {
         await rm(tmp, { force: true });
-        // A concurrent writer may have created filePath between our exists() check and the rename;
-        // its bytes are identical (same hash), so tolerate that and only surface a genuine failure.
-        if (!(await this.exists(filePath))) throw err;
       }
     }
     return {
@@ -78,12 +78,15 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     return ref.uri;
   }
 
-  private async exists(p: string): Promise<boolean> {
+  // True only when `filePath` exists AND its bytes hash to `hex` — an absent, unreadable, or
+  // tampered blob returns false so put() (re)writes correct bytes. Mirrors get()'s integrity check.
+  private async hasValidBlob(filePath: string, hex: string): Promise<boolean> {
+    let buf: Buffer;
     try {
-      await access(p);
-      return true;
+      buf = await readFile(filePath);
     } catch {
       return false;
     }
+    return createHash('sha256').update(buf).digest('hex') === hex;
   }
 }
