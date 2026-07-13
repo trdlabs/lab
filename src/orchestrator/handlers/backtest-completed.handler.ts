@@ -8,6 +8,8 @@ import { enqueueCycleClose } from '../cycle-close.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { withinTokenBudget } from '../token-budget.ts';
 import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
+import { PlatformRunConfigSchema } from './platform-run-config.schema.ts';
+import type { PlatformRunConfig } from '../../ports/research-platform.port.ts';
 
 export const BacktestCompletedPayloadSchema = z.object({
   backtestRunId: z.string().min(1),
@@ -23,6 +25,8 @@ export const BacktestCompletedPayloadSchema = z.object({
   /** Originating symbol for this backtest run. Absent on older in-flight tasks enqueued before
    *  this field existed, or on non-symbol-scoped runs — retry falls back to the default symbol. */
   symbol: z.string().optional(),
+  /** The eval window this run executed on; threaded into the retry cycle (R3b-1 §3.3). */
+  evalPlatformRun: PlatformRunConfigSchema.optional(),
 });
 
 export type BacktestCompletedPayload = z.infer<typeof BacktestCompletedPayloadSchema>;
@@ -53,6 +57,7 @@ async function enqueueResearchRetry(
   feedback: { hypothesisId: string; decision: string; reasons: string[] },
   nextCycleDepth: number,
   symbol?: string,
+  evalPlatformRun?: PlatformRunConfig,
 ): Promise<void> {
   const retryTaskId = randomUUID();
   const retryTask: ResearchTask = {
@@ -61,7 +66,11 @@ async function enqueueResearchRetry(
     source: task.source,
     correlationId: task.correlationId,
     status: 'queued',
-    payload: { strategyProfileId, cycleDepth: nextCycleDepth, feedback, ...(symbol ? { symbol } : {}) },
+    payload: {
+      strategyProfileId, cycleDepth: nextCycleDepth, feedback,
+      ...(symbol ? { symbol } : {}),
+      ...(evalPlatformRun ? { evalPlatformRun } : {}),
+    },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -83,7 +92,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
   }
   const {
     backtestRunId, hypothesisId, strategyProfileId, decision, reasons, cycleDepth,
-    deltaNetPnlUsd, deltaMaxDrawdownPct, symbol,
+    deltaNetPnlUsd, deltaMaxDrawdownPct, symbol, evalPlatformRun,
   } = parsed.data;
 
   const cumulativeTokens = await services.tokenUsage.get(task.correlationId);
@@ -111,7 +120,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       }));
       if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
-          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol);
+          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol, evalPlatformRun);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
           strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
         }));
@@ -134,7 +143,7 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       }));
       if (cycleDepth < MAX_CYCLE_DEPTH && withinBudget) {
         await enqueueResearchRetry(task, services, strategyProfileId,
-          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol);
+          { hypothesisId, decision, reasons }, cycleDepth + 1, symbol, evalPlatformRun);
         await services.events.append(event(task.id, 'research.retry_enqueued', {
           strategyProfileId, cycleDepth: cycleDepth + 1, trigger: decision,
         }));

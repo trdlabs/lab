@@ -111,6 +111,7 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
       // Sourced from the input PlatformRunConfig (always present for a research_platform submit) —
       // cheaper and more reliable than re-reading it back off the persisted run.
       symbol: platformRun.symbols[0],
+      ...(again.platformRun ? { evalPlatformRun: again.platformRun } : {}),
     });
   }
 }

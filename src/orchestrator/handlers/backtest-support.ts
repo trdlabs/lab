@@ -136,6 +136,9 @@ export async function enqueueBacktestCompleted(
     /** Originating symbol for this run — threaded through so a retry `research.run_cycle`
      *  researches the same instrument instead of falling back to the default. */
     symbol?: string;
+    /** The Cycle-2 eval window this run executed on (BacktestRun.platformRun), threaded so a
+     *  retry researches the SAME window (R3b-1 §3.3). Absent on runs before this field existed. */
+    evalPlatformRun?: PlatformRunConfig;
   },
 ): Promise<void> {
   const completedTaskId = randomUUID();

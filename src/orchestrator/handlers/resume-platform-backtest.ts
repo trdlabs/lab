@@ -67,6 +67,7 @@ export async function resumePlatformRun(services: AppServices, run: BacktestRun)
       // BacktestRun domain type (sp4_mock backend never sets it), so this is optional-chained;
       // absent here falls back to the default symbol on the eventual retry.
       symbol: again.platformRun?.symbols[0],
+      ...(again.platformRun ? { evalPlatformRun: again.platformRun } : {}),
     });
     await services.events.append(event(task.id, 'backtest.resume.completed', { runId }));
     return { kind: 'completed', runId };
