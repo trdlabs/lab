@@ -53,6 +53,9 @@ export interface Env {
   TURN_INTERPRETER_MODEL: string;
   TURN_INTERPRETER_MIN_CONFIDENCE: number;
   CHAT_MAX_MESSAGE_CHARS: number;
+  /** Max chat turns served per window across all sessions on this instance (P1-22). 0 = disabled. */
+  CHAT_RATE_MAX_TURNS: number;
+  CHAT_RATE_WINDOW_MS: number;
   AGENT_ACTIVITY_REBUILD_WINDOW_HOURS: number;
   AGENT_ACTIVITY_TRACE_LIMIT: number;
   AGENT_EVENT_STREAM_SAFETY_TICK_MS: number;
@@ -284,6 +287,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     TURN_INTERPRETER_MODEL: source.TURN_INTERPRETER_MODEL ?? 'openrouter/google/gemini-3.1-flash-lite',
     TURN_INTERPRETER_MIN_CONFIDENCE: parseFloatOr(source.TURN_INTERPRETER_MIN_CONFIDENCE, 0.6),
     CHAT_MAX_MESSAGE_CHARS: parsePositiveInt(source.CHAT_MAX_MESSAGE_CHARS, 4000),
+    CHAT_RATE_MAX_TURNS: parseNonNegativeInt(source.CHAT_RATE_MAX_TURNS, 30),
+    CHAT_RATE_WINDOW_MS: parsePositiveInt(source.CHAT_RATE_WINDOW_MS, 60_000),
     AGENT_ACTIVITY_REBUILD_WINDOW_HOURS: parsePositiveInt(source.AGENT_ACTIVITY_REBUILD_WINDOW_HOURS, 24),
     AGENT_ACTIVITY_TRACE_LIMIT: parsePositiveInt(source.AGENT_ACTIVITY_TRACE_LIMIT, 50),
     AGENT_EVENT_STREAM_SAFETY_TICK_MS: parsePositiveInt(source.AGENT_EVENT_STREAM_SAFETY_TICK_MS, 5000),

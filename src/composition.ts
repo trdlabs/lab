@@ -92,6 +92,7 @@ import type { Db } from './db/client.ts';
 import type { StrategyProfileRepository } from './ports/strategy-profile.repository.ts';
 import type { AgentEventRepository } from './ports/agent-event.repository.ts';
 import type { ChatAppDeps } from './chat/chat-app.ts';
+import { ChatRateLimiter } from './chat/chat-rate-limiter.ts';
 import { sql } from 'drizzle-orm';
 import { DrizzleHypothesisReadAdapter } from './adapters/read/drizzle-hypothesis-read.adapter.ts';
 import { DrizzleBacktestReadAdapter } from './adapters/read/drizzle-backtest-read.adapter.ts';
@@ -503,6 +504,7 @@ export function composeRuntime() {
     defaultPlatformRun: services.defaultPlatformRun,
     maxMessageChars: env.CHAT_MAX_MESSAGE_CHARS,
     authToken: env.TRADING_LAB_CHAT_TOKEN,
+    rateLimiter: new ChatRateLimiter({ maxTurns: env.CHAT_RATE_MAX_TURNS, windowMs: env.CHAT_RATE_WINDOW_MS }),
   };
 
   const agentEventsRead = new DrizzleAgentEventReadAdapter(db);
