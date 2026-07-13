@@ -26,6 +26,7 @@ import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../doma
 import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.port.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import { FakeRunTradesAdapter } from '../../adapters/platform/fake-run-trades.adapter.ts';
+import type { PlatformRunConfig } from '../../ports/research-platform.port.ts';
 import { FakeStrategyConsolidator } from '../../adapters/consolidator/fake-strategy-consolidator.ts';
 
 // ---------------------------------------------------------------------------
@@ -795,5 +796,123 @@ describe('revision-flow integration (R3a Task 3): trade_based holdout gate activ
     expect(calls.some((c) => c.label === 'holdout_candidate')).toBe(true);
     const validated = (await services.events.listByTask('task-rev-build')).find((e) => e.type === 'revision.holdout_validated');
     expect(validated?.payload).toMatchObject({ decision: 'ACCEPT', lowConfidence: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3b-1 Task 5: revision-build extracts the canonical cycle window + consistency gate
+// ---------------------------------------------------------------------------
+//
+// research-run-cycle.handler.ts (Tasks 3/4) now stamps the resolved eval window onto every
+// hypothesis.build task's payload.platformRun for the cycle. revision.build must extract that
+// window from ITS cycle's hypothesis.build tasks (cycleTasks, already fetched at Step 2) instead
+// of re-resolving services.defaultPlatformRun — and reject rather than silently mix windows if
+// the cycle's tasks disagree. `seedTwoHypotheses` (used throughout this file) seeds each
+// hypothesis.build task WITHOUT payload.platformRun -- that is the fallback/back-compat case,
+// already exercised by every other describe block in this file (additive eval_window.fallback
+// event, unchanged defaultPlatformRun runConfig). This block adds the window-bearing cases.
+
+const windowA: PlatformRunConfig = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2026-01-01', to: '2026-03-01' }, seed: 7 };
+const windowB: PlatformRunConfig = { ...windowA, period: { from: '2026-02-01', to: '2026-04-01' } };
+const windowSeedDiff: PlatformRunConfig = { ...windowA, seed: 99 };
+
+/** Like seedTwoHypotheses, but each hypothesis.build task's payload.platformRun is set from
+ * `windows[i]` (undefined -> task seeded WITHOUT a platformRun key, matching production shape). */
+async function seedTwoHypothesesWithWindows(
+  services: AppServices,
+  windows: [PlatformRunConfig | undefined, PlatformRunConfig | undefined],
+): Promise<void> {
+  await services.strategyProfiles.create(profile());
+  const h1 = proposal('h1', { ruleAction: ruleAction('short', 'skip_entry', { lookback: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+  const h2 = proposal('h2', { ruleAction: ruleAction('long', 'tighten_stop', { pct: 1 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 200, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h2' } });
+  const hyps = [h1, h2];
+  for (let i = 0; i < hyps.length; i++) {
+    const p = hyps[i]!;
+    const w = windows[i];
+    await services.hypotheses.create(p);
+    await seedBuild(services, p.id, functionalOverlaySource());
+    await services.researchTasks.create({
+      id: `build-task-${p.id}`, taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+      status: 'completed',
+      payload: w === undefined ? { hypothesisId: p.id } : { hypothesisId: p.id, platformRun: w },
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+  }
+}
+
+describe('revision-flow integration (R3b-1 Task 5): eval-window extraction + consistency gate', () => {
+  it('runs the full-window comparison baseline on the single cycle window (not defaultPlatformRun)', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypothesesWithWindows(services, [windowA, windowA]);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    // Assert BY LABEL: the comparison_baseline executor run always uses the full cycle window
+    // (runConfig). Do NOT assert every() call shares windowA.period — R3a's train/holdout runs
+    // deliberately carry SPLIT periods, and every() is vacuously true on an empty calls array.
+    expect(calls.length).toBeGreaterThan(0);
+    const baselineCall = calls.find((c) => c.label === 'comparison_baseline');
+    expect(baselineCall).toBeDefined();
+    expect(baselineCall!.run.period).toEqual(windowA.period);
+  });
+
+  it('rejects the candidate with eval_window_inconsistent when windows disagree (period)', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypothesesWithWindows(services, [windowA, windowB]);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('eval_window.inconsistent');
+    expect(events).toContain('revision.rejected');
+    // executor NOT invoked for a comparison/holdout run on an inconsistent cycle:
+    expect(calls.length).toBe(0);
+    const rev = (await services.revisions.listByProfile('p1')).at(-1);
+    expect(rev?.verdictReason).toBe('eval_window_inconsistent');
+  });
+
+  it('treats a seed-only difference as inconsistent (whole-config distinct)', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypothesesWithWindows(services, [windowA, windowSeedDiff]);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('eval_window.inconsistent');
+    expect(calls.length).toBe(0);
+  });
+
+  it('falls back to defaultPlatformRun + eval_window.fallback when no cycle window is present', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const fallback = (await services.events.listByTask('task-rev-build')).find((e) => e.type === 'eval_window.fallback');
+    expect(fallback?.payload).toMatchObject({ reason: 'no_cycle_window' });
+
+    // fallback is behavior-neutral: still accepts normally on defaultPlatformRun.
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2?.status).toBe('accepted');
   });
 });

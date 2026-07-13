@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
+import { PlatformRunConfigSchema } from './platform-run-config.schema.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
 import { assembleBundle, SDK_CONTRACT_VERSION, MODULE_BUNDLE_CONTRACT_VERSION } from '../../domain/module-bundle.ts';
 import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
@@ -21,13 +22,7 @@ export const HypothesisBuildPayloadSchema = z.object({
   backtestBackend: z.enum(['research_platform']).optional(),
   /** Depth in the research→build→backtest cycle chain, propagated from research.run_cycle. */
   cycleDepth: z.number().int().min(0).default(0),
-  platformRun: z.object({
-    datasetId: z.string().min(1),
-    symbols: z.array(z.string().min(1)).min(1),
-    timeframe: z.string().min(1),
-    period: z.object({ from: z.string().min(1), to: z.string().min(1) }),
-    seed: z.number().int(),
-  }).optional(),
+  platformRun: PlatformRunConfigSchema.optional(),
 });
 
 export const hypothesisBuildHandler: WorkflowHandler = async (task, services) => {

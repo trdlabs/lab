@@ -73,6 +73,17 @@ describe('runPlatformBacktest', () => {
     expect(completedTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
   });
 
+  it('enqueued backtest.completed payload carries evalPlatformRun = the run window (submit)', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const { s, common } = await setup({ researchPlatform: new MockResearchPlatformAdapter(), backtestBackend: 'research_platform', taskQueue: queue });
+    await runPlatformBacktest(common);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload.evalPlatformRun).toEqual(PLATFORM_RUN); // = again.platformRun (persisted)
+  });
+
   it('pending: poll never terminal → run stays submitted, backtest.pending, no evaluation', async () => {
     const stub = {
       ...new MockResearchPlatformAdapter(),

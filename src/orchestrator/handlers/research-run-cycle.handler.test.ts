@@ -10,7 +10,8 @@ import {
 } from './research-run-cycle.handler.ts';
 import { makeServices } from '../../../test/support/make-services.ts';
 import { FakeCritic } from '../../adapters/critic/fake-critic.ts';
-import type { HypothesisProposalDraft, ResearcherOutput } from '../../domain/hypothesis.ts';
+import { stubResearcher, draft } from './research-run-cycle.test-fixtures.ts';
+import type { ResearcherOutput } from '../../domain/hypothesis.ts';
 import type { ResearcherInput, ResearcherPort } from '../../ports/researcher.port.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
@@ -40,19 +41,6 @@ function task(payload: Record<string, unknown>): ResearchTask {
     id: 't1', taskType: 'research.run_cycle', source: 'operator', correlationId: 'c1',
     status: 'running', payload, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
   };
-}
-
-function draft(thesis: string, action: 'skip_entry' | 'no_op' = 'skip_entry', bars = 1): HypothesisProposalDraft {
-  return {
-    thesis, targetBehavior: 'filter entries',
-    ruleAction: { appliesTo: 'long', rules: [{ when: 'oi trend', action, params: { bars } }] },
-    requiredFeatures: ['oi'], validationPlan: 'backtest', expectedEffect: { metric: 'win_rate', direction: 'increase' },
-    invalidationCriteria: ['no improvement'], confidence: 0.5,
-  };
-}
-
-function stubResearcher(out: ResearcherOutput): ResearcherPort {
-  return { adapter: 'fake', model: 'stub', async propose(_in: ResearcherInput) { return out; } };
 }
 
 function capturingResearcher(out: ResearcherOutput): { port: ResearcherPort; captured: () => ResearcherInput | undefined; capturedOpts: () => AgentCallOpts | undefined } {

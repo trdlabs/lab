@@ -67,6 +67,22 @@ describe('resumePlatformRun', () => {
     expect(completedTask!.payload).toMatchObject({ symbol: 'ETHUSDT' });
   });
 
+  it('enqueued backtest.completed payload carries evalPlatformRun from the fresh re-read, not the stale input (resume)', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const s = makeServices({ researchPlatform: new MockResearchPlatformAdapter(), taskQueue: queue });
+    // Persist the canonical run with the REAL window.
+    const persistedWindow = { datasetId: 'ds', symbols: ['ETHUSDT'], timeframe: '1h', period: { from: '2026-01-01', to: '2026-03-01' }, seed: 7 };
+    const r = await seed(s, { platformRun: persistedWindow });
+    // Caller passes a STALE copy with a different window; the producer must ignore it.
+    const staleInput = { ...r, platformRun: { ...persistedWindow, period: { from: '1999-01-01', to: '1999-02-01' } } };
+    await resumePlatformRun(s, staleInput);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload.evalPlatformRun).toEqual(persistedWindow); // fresh read wins over stale input
+  });
+
   it('second resume after finalize → already_evaluated, no duplicate Evaluation', async () => {
     const s = makeServices();
     const r = await seed(s);
