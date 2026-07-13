@@ -62,8 +62,13 @@ export function registerStreamRoutes(app: Hono, deps: StreamRouteDeps): void {
       const pump = async (): Promise<void> => {
         if (pumping) return;
         pumping = true;
-        while (buffer.length) await emit(buffer.shift()!);
-        pumping = false;
+        // finally so a rejected emit (dead socket) can't leave pumping=true and wedge every later
+        // pump() at the `if (pumping) return` guard.
+        try {
+          while (buffer.length) await emit(buffer.shift()!);
+        } finally {
+          pumping = false;
+        }
       };
       // pump()'s writes can reject once the client socket closes. This is a fire-and-forget path
       // (a live event arriving), so swallow the rejection — an escaped one is an unhandled rejection
