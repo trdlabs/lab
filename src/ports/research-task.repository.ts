@@ -6,12 +6,14 @@ export interface ResearchTaskRepository {
   findByDedupeKey(dedupeKey: string): Promise<ResearchTask | null>;
   updateStatus(id: string, status: TaskStatus): Promise<void>;
   /**
-   * Atomically claim a task for execution: set status='running' iff it is NOT already terminal
-   * (completed | rejected). Returns true when the row was claimed, false when it was already
-   * terminal (a redelivery of finished work). This is the worker's idempotency fence + claim in one
-   * step, so a stalled redelivery never re-runs a completed handler (P1-3).
+   * Atomic TERMINAL fence: set status='running' iff the task is NOT already terminal
+   * (completed | rejected). Returns true when it transitioned, false when it was terminal (a
+   * redelivery of finished work). Guarantees ONLY that a completed/rejected task never re-runs its
+   * handler (P1-3). It does NOT provide mutual exclusion between two concurrent non-terminal
+   * deliveries: both would pass the fence (running -> running) and dispatch. Single-flight for
+   * concurrent delivery needs an owner/lease token — a separate follow-up before raising concurrency.
    */
-  tryStartRun(id: string): Promise<boolean>;
+  startRunUnlessTerminal(id: string): Promise<boolean>;
   /** All tasks in a correlation chain whose taskType is one of the given types. */
   listByCorrelationAndTypes(correlationId: string, taskTypes: AgentTaskType[]): Promise<ResearchTask[]>;
 }

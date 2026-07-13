@@ -22,28 +22,37 @@ correctness hazard independent of concurrency (it fires at `LAB_QUEUE_CONCURRENC
 
 ## Fix
 
-Replace the unconditional `updateStatus(id, 'running')` with a single **atomic claim**:
+Replace the unconditional `updateStatus(id, 'running')` with a single conditional UPDATE —
+an **atomic terminal fence**:
 
 ```
-tryStartRun(id): Promise<boolean>
+startRunUnlessTerminal(id): Promise<boolean>
   UPDATE research_task SET status='running', updated_at=now()
   WHERE id = :id AND status NOT IN ('completed','rejected')
   -> true iff a row was updated
 ```
 
-The worker skips a task it could not claim:
+The worker skips a task that did not transition:
 
 ```ts
-const claimed = await services.researchTasks.tryStartRun(task.id);
-if (!claimed) {
-  await services.events.append(event(task.id, 'task.redelivery_skipped', { status: task.status }));
+const started = await services.researchTasks.startRunUnlessTerminal(task.id);
+if (!started) {
+  const current = await services.researchTasks.findById(task.id); // authoritative status for the audit
+  await services.events.append(event(task.id, 'task.redelivery_skipped', { status: current?.status }));
   return; // ack the redelivery; do NOT re-run the handler
 }
 ```
 
-This is fence + claim in **one** step — there is no TOCTOU window between reading the
-status and flipping it (the earlier `findById` is only for the audit payload; the claim
-is authoritative).
+### What this does and does NOT guarantee
+
+- **Guaranteed:** a `completed`/`rejected` task never re-runs its handler. The check-and-set is a
+  single UPDATE, so there is no TOCTOU between reading the status and flipping it.
+- **NOT guaranteed:** mutual exclusion between two concurrent *non-terminal* deliveries. Both pass
+  the fence (`running -> running`) and dispatch. Serializing concurrent delivery needs an owner /
+  lease token (claim the row for THIS worker, e.g. `WHERE owner IS NULL OR lease_expired`), which is
+  a **separate follow-up** and a prerequisite for raising `LAB_QUEUE_CONCURRENCY`. This slice does
+  not attempt it — BullMQ already delivers a job to one consumer at a time; the residual is the
+  stalled-redelivery window, which the terminal fence closes for the dangerous (completed) case.
 
 ## Terminal stop-set
 
@@ -60,15 +69,16 @@ Skip re-run only when the task is already terminal: **`completed` or `rejected`*
 
 ## Invariants
 
-1. A `completed`/`rejected` task is never re-dispatched.
-2. The claim is atomic — two concurrent deliveries cannot both dispatch.
+1. A `completed`/`rejected` task is never re-dispatched (the terminal fence).
+2. The status check-and-set is atomic — no TOCTOU between reading and flipping. (This does NOT
+   imply concurrent-delivery mutual exclusion — see "What this does and does NOT guarantee".)
 3. Handlers are unchanged. **Cycle-2 handlers (research-run-cycle, revision-*,
    backtest-*, paper-*) are not touched** — this is purely the generic worker lifecycle.
 4. No schema change (a conditional `UPDATE`), so no migration.
 
 ## Scope
 
-- `src/ports/research-task.repository.ts` — add `tryStartRun`.
+- `src/ports/research-task.repository.ts` — add `startRunUnlessTerminal`.
 - `src/adapters/repository/drizzle-research-task.repository.ts` — conditional UPDATE + rowCount.
 - `src/adapters/repository/in-memory-research-task.repository.ts` — mirror the guard.
 - `src/worker/worker.ts` — claim + skip-with-audit.
@@ -77,6 +87,7 @@ Skip re-run only when the task is already terminal: **`completed` or `rejected`*
 
 ## Out of scope (do not pull in)
 
-P1-2 (route all enqueues through task-intake), P1-25 (23505 handling), per-profile
-advisory lock (P1-7) — these are the rest of the concurrency-unblock package and are
-owned elsewhere / land later.
+- **Concurrent-delivery mutual exclusion** (owner/lease token). The follow-up that upgrades this
+  terminal fence into a real single-flight claim; a prerequisite for raising `LAB_QUEUE_CONCURRENCY`.
+- P1-2 (route all enqueues through task-intake), P1-25 (23505 handling), per-profile advisory lock
+  (P1-7) — the rest of the concurrency-unblock package, owned elsewhere / land later.

@@ -31,4 +31,28 @@ d('DrizzleResearchTaskRepository (integration)', () => {
   it('throws when updating a missing id', async () => {
     await expect(repo.updateStatus('does-not-exist', 'completed')).rejects.toThrow(/not found/);
   });
+
+  describe('startRunUnlessTerminal (P1-3 terminal fence — the load-bearing conditional UPDATE)', () => {
+    it('transitions a non-terminal task (accepted/queued/running/failed) to running → true', async () => {
+      for (const status of ['accepted', 'queued', 'running', 'failed'] as const) {
+        const t = task({ status });
+        await repo.create(t);
+        expect(await repo.startRunUnlessTerminal(t.id)).toBe(true);
+        expect((await repo.findById(t.id))?.status).toBe('running');
+      }
+    });
+
+    it('refuses a terminal task (completed/rejected) → false, status unchanged', async () => {
+      for (const status of ['completed', 'rejected'] as const) {
+        const t = task({ status });
+        await repo.create(t);
+        expect(await repo.startRunUnlessTerminal(t.id)).toBe(false);
+        expect((await repo.findById(t.id))?.status).toBe(status);
+      }
+    });
+
+    it('throws when the task does not exist', async () => {
+      await expect(repo.startRunUnlessTerminal('p13-missing')).rejects.toThrow(/not found/);
+    });
+  });
 });

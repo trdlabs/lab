@@ -16,15 +16,19 @@ export function startWorker(deps: WorkerDeps): void {
   queue.process(async (envelope) => {
     const task = await services.researchTasks.findById(envelope.taskId);
     if (!task) throw new Error(`research_task not found for envelope: ${envelope.taskId}`);
-    // Idempotency fence + claim (P1-3): atomically move the task to 'running' only if it is not
-    // already terminal. A stalled redelivery of a completed/rejected task fails the claim — ack it
+    // Idempotency terminal fence (P1-3): atomically move the task to 'running' unless it is already
+    // terminal. A stalled redelivery of a completed/rejected task does not transition — ack it
     // without re-running the handler, or a crash between dispatch and ack would repeat the LLM cycle
-    // (fresh fingerprints, a duplicate batch of hypotheses under the same correlationId).
-    const claimed = await services.researchTasks.tryStartRun(task.id);
-    if (!claimed) {
+    // (fresh fingerprints, a duplicate batch of hypotheses under the same correlationId). This does
+    // NOT serialize concurrent non-terminal deliveries (that needs a lease — separate follow-up).
+    const started = await services.researchTasks.startRunUnlessTerminal(task.id);
+    if (!started) {
+      // Re-read the authoritative status for the audit payload: a concurrent worker may have
+      // terminalized the row after our findById above.
+      const current = await services.researchTasks.findById(task.id);
       await services.events.append({
         id: randomUUID(), taskId: task.id, type: 'task.redelivery_skipped',
-        payload: { status: task.status }, createdAt: new Date().toISOString(),
+        payload: { status: current?.status ?? task.status }, createdAt: new Date().toISOString(),
       });
       return;
     }

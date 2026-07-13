@@ -81,7 +81,7 @@ describe('startWorker', () => {
       },
       listByCorrelationAndTypes: (correlationId: string, taskTypes: ResearchTask['taskType'][]) =>
         base.researchTasks.listByCorrelationAndTypes(correlationId, taskTypes),
-      tryStartRun: (id: string) => base.researchTasks.tryStartRun(id),
+      startRunUnlessTerminal: (id: string) => base.researchTasks.startRunUnlessTerminal(id),
     };
     const services = { ...base, researchTasks };
     const router = new WorkflowRouter();
