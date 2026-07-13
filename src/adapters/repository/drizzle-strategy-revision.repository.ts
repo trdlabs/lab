@@ -21,6 +21,7 @@ export function strategyRevisionToDomain(r: StrategyRevisionRow): StrategyRevisi
     metrics: r.metrics ?? undefined,
     verdictReason: r.verdictReason ?? undefined,
     preservationGate: r.preservationGate ?? undefined,
+    holdoutValidation: r.holdoutValidation ?? undefined,
     kind: r.kind ?? 'composed',
     consolidatedFromRevisionId: r.consolidatedFromRevisionId ?? undefined,
     semanticParentRevisionId: r.semanticParentRevisionId ?? undefined,
@@ -49,6 +50,7 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
       status: r.status,
       metrics: r.metrics ?? null,
       verdictReason: r.verdictReason ?? null,
+      holdoutValidation: r.holdoutValidation ?? null,
       kind: r.kind ?? 'composed',
       consolidatedFromRevisionId: r.consolidatedFromRevisionId ?? null,
       semanticParentRevisionId: r.semanticParentRevisionId ?? null,
@@ -83,13 +85,14 @@ export class DrizzleStrategyRevisionRepository implements StrategyRevisionReposi
   }
 
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'preservationGate' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'preservationGate' | 'holdoutValidation' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void> {
     const set: Record<string, unknown> = {};
     if (patch.status !== undefined) set.status = patch.status;
     if (patch.comboBacktestRunId !== undefined) set.comboBacktestRunId = patch.comboBacktestRunId;
     if (patch.metrics !== undefined) set.metrics = patch.metrics;
     if (patch.verdictReason !== undefined) set.verdictReason = patch.verdictReason;
     if (patch.preservationGate !== undefined) set.preservationGate = patch.preservationGate;
+    if (patch.holdoutValidation !== undefined) set.holdoutValidation = patch.holdoutValidation;
     if (patch.dropped !== undefined) set.dropped = patch.dropped;
     if (patch.hypothesisIds !== undefined) set.hypothesisIds = patch.hypothesisIds;
     if (patch.mergedRuleSet !== undefined) set.mergedRuleSet = patch.mergedRuleSet;

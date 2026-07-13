@@ -6,7 +6,7 @@ import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
-import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
+import type { DroppedHypothesis, HoldoutValidation, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { sortEligible } from '../../research/hypothesis-score.ts';
@@ -23,7 +23,10 @@ import type { RevisionRunResult } from '../../ports/strategy-revision-run-execut
 import { evaluateRevision, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
 import { applyRevisionPreservationGate } from '../../validation/apply-preservation-gate.ts';
 import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
-import type { TradeRecord } from '../../domain/research-experiment.ts';
+import type { TradeRecord, HoldoutBoundary } from '../../domain/research-experiment.ts';
+import { resolveHoldoutBoundary } from '../../research/holdout-boundary-resolver.ts';
+import { DEFAULT_HOLDOUT_POLICY } from '../../domain/research-experiment.ts';
+import { encodeTrainPeriod, encodeHoldoutPeriod } from '../../research/period-encoding.ts';
 
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -349,6 +352,60 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     return;
   }
 
+  // --- R3a Task 2: OOS holdout boundary (fixed once from the full-window baseline trades) ---
+  // Computed here so it is available to Task 3's activation, but this slice only records an
+  // observable skip (fail-soft, never a silent drop) on any non-trade_based outcome — the greedy
+  // loop and ACCEPT below still run on the full window unchanged.
+  let boundary: HoldoutBoundary = { mode: 'none', lowConfidence: false, reason: 'insufficient_history' };
+  let holdoutValidation: HoldoutValidation | undefined;
+  try {
+    const fullBaselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
+    boundary = resolveHoldoutBoundary(fullBaselineTrades, runConfig.period, DEFAULT_HOLDOUT_POLICY);
+  } catch (err) {
+    holdoutValidation = { mode: 'none', reason: 'boundary_unavailable' };
+    await services.events.append(event(task.id, 'revision.holdout_skipped', {
+      revisionId, reason: 'boundary_unavailable', detail: errMsg(err),
+    }));
+  }
+  if (!holdoutValidation && boundary.mode === 'none') {
+    const reason = boundary.reason === 'insufficient_trades' ? 'skipped_insufficient_trades' : 'skipped_insufficient_history';
+    holdoutValidation = { mode: 'none', reason };
+    await services.events.append(event(task.id, 'revision.holdout_skipped', { revisionId, reason }));
+  }
+
+  // --- R3a Task 3: selection window/baseline swap ---
+  // Selection (the greedy loop below) runs on the TRAIN window against a TRAIN baseline when a
+  // trade_based boundary exists; otherwise it runs on the full window against the full-window
+  // baseline (unchanged behavior for mode:'none'/unavailable). The train baseline is a SEPARATE
+  // executor call, not a reuse of the full-window baselineMetrics/baselinePlatformRunId — those
+  // only derived T (the boundary), and comparing a train-window candidate against a full-window
+  // baseline would be an apples-to-oranges evaluateRevision/R2-veto comparison.
+  let selectionConfig = runConfig;
+  let selectionBaselineMetrics = baselineMetrics;
+  let selectionBaselinePlatformRunId = baselinePlatformRunId;
+  if (boundary.mode === 'trade_based' && boundary.t) {
+    selectionConfig = { ...runConfig, period: encodeTrainPeriod(runConfig.period.from, boundary.t, runConfig.timeframe) };
+    const tb = await services.revisionRunExecutor.execute({
+      revisionId, label: 'train_baseline', strategyBundle: baseBundle,
+      strategyProfileId, run: selectionConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
+    });
+    if (tb.status !== 'completed' || !tb.metrics) {
+      // train baseline unavailable: fall back to the full-window gate-skipped path — selection
+      // (and the ACCEPT path) proceeds on the full window exactly as mode:'none' would.
+      holdoutValidation = { mode: 'none', reason: 'boundary_unavailable' };
+      await services.events.append(event(task.id, 'revision.holdout_skipped', {
+        revisionId, reason: 'boundary_unavailable', detail: 'train_baseline_unavailable',
+      }));
+      boundary = { mode: 'none', lowConfidence: false, reason: 'insufficient_history' };
+      selectionConfig = runConfig;
+      selectionBaselineMetrics = baselineMetrics;
+      selectionBaselinePlatformRunId = baselinePlatformRunId;
+    } else {
+      selectionBaselineMetrics = tb.metrics;
+      selectionBaselinePlatformRunId = tb.platformRunId;
+    }
+  }
+
   // --- Steps 9-10: candidate run + evaluate, greedy degradation (<= 3 candidate runs total) ---
   let currentIds = [...compose.included];
   let verdict: RevisionVerdict = { decision: 'REJECT', reasons: ['not_attempted'] };
@@ -356,7 +413,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   let acceptedMetrics: BacktestMetricBlock | undefined;
   const allRejectReasons: string[] = [];
 
-  const gateOn = services.preservationGateEnabled && baselinePlatformRunId !== null;
+  const gateOn = services.preservationGateEnabled && selectionBaselinePlatformRunId !== null;
   // Baseline trades are fetched lazily on the first would-accept verdict and cached across greedy
   // retries. A candidate that never reaches ACCEPT (aggregate-reject) triggers no trade fetch at
   // all, so a trades-read failure can't turn into a spurious revision.build abort for a build the
@@ -367,18 +424,18 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   for (let attempt = 0; ; attempt++) {
     const result = await services.revisionRunExecutor.execute({
       revisionId, label: 'candidate', strategyBundle: assembled,
-      strategyProfileId, run: runConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
+      strategyProfileId, run: selectionConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
     });
 
     if (result.status === 'completed' && result.metrics) {
-      verdict = evaluateRevision({ accepted: baselineMetrics, candidate: result.metrics, minTrades: 20 });
+      verdict = evaluateRevision({ accepted: selectionBaselineMetrics, candidate: result.metrics, minTrades: 20 });
       if (gateOn && verdict.decision === 'ACCEPT') {
         try {
-          if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
+          if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(selectionBaselinePlatformRunId!);
           const variantTrades = await services.runTrades.getRunTrades(result.platformRunId);
           const gated = applyRevisionPreservationGate(
             verdict, baselineTrades, variantTrades,
-            { baseline: { netPnlUsd: baselineMetrics.netPnlUsd, totalTrades: baselineMetrics.totalTrades },
+            { baseline: { netPnlUsd: selectionBaselineMetrics.netPnlUsd, totalTrades: selectionBaselineMetrics.totalTrades },
               variant: { netPnlUsd: result.metrics.netPnlUsd, totalTrades: result.metrics.totalTrades } },
             services.preservationThresholds,
           );
@@ -432,11 +489,60 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     });
   }
 
+  // --- R3a Task 3: holdout confirmation ---
+  // A train-accepted candidate must not degrade on the held-out [T..to) window. Downgrade-only:
+  // this stage runs ONLY when the greedy loop already reached ACCEPT on the train window, and it
+  // can only turn that ACCEPT into a reject — it never manufactures an accept from a reject.
+  if (boundary.mode === 'trade_based' && boundary.t && verdict.decision === 'ACCEPT' && acceptedRun && acceptedMetrics) {
+    const holdoutConfig = { ...runConfig, period: encodeHoldoutPeriod(boundary.t, runConfig.period.to) };
+    const hBase = await services.revisionRunExecutor.execute({
+      revisionId, label: 'holdout_baseline', strategyBundle: baseBundle,
+      strategyProfileId, run: holdoutConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
+    });
+    const hCand = await services.revisionRunExecutor.execute({
+      revisionId, label: 'holdout_candidate', strategyBundle: assembled,
+      strategyProfileId, run: holdoutConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
+    });
+    const hBaseM = hBase.status === 'completed' ? hBase.metrics : undefined;
+    const hCandM = hCand.status === 'completed' ? hCand.metrics : undefined;
+    const holdoutVerdict: RevisionVerdict = hBaseM && hCandM
+      ? evaluateRevision({ accepted: hBaseM, candidate: hCandM, minTrades: 20 })
+      : { decision: 'REJECT', reasons: ['holdout_run_unavailable'] };
+    const trainMetrics = acceptedMetrics as unknown as Record<string, unknown>;
+    if (holdoutVerdict.decision !== 'ACCEPT') {
+      holdoutValidation = {
+        mode: 'trade_based', t: boundary.t, reason: 'holdout_failed', lowConfidence: boundary.lowConfidence,
+        trainMetrics, holdoutMetrics: (hCandM as unknown as Record<string, unknown>) ?? undefined,
+      };
+      await services.revisions.updateStatus(revisionId, {
+        status: 'rejected', verdictReason: 'holdout_failed', preservationGate: firedPreservation ?? undefined,
+        holdoutValidation, updatedAt: now(),
+      });
+      await services.events.append(event(task.id, 'revision.holdout_validated', {
+        revisionId, version, mode: 'trade_based', t: boundary.t, decision: holdoutVerdict.decision, reasons: holdoutVerdict.reasons,
+        lowConfidence: boundary.lowConfidence, trainMetrics, holdoutMetrics: (hCandM as unknown as Record<string, unknown>) ?? undefined,
+      }));
+      await services.events.append(event(task.id, 'revision.rejected', { revisionId, version, reasons: ['holdout_failed'] }));
+      return;
+    }
+    // holdout passed: the holdout run becomes the accepted run-context (primary comboBacktestRunId/metrics).
+    holdoutValidation = {
+      mode: 'trade_based', t: boundary.t, reason: 'holdout_passed', lowConfidence: boundary.lowConfidence,
+      trainMetrics, holdoutMetrics: hCandM as unknown as Record<string, unknown>,
+    };
+    acceptedRun = hCand;
+    acceptedMetrics = hCandM;
+    await services.events.append(event(task.id, 'revision.holdout_validated', {
+      revisionId, version, mode: 'trade_based', t: boundary.t, decision: 'ACCEPT', lowConfidence: boundary.lowConfidence, trainMetrics, holdoutMetrics: hCandM,
+    }));
+  }
+
   if (verdict.decision === 'ACCEPT' && acceptedRun && acceptedMetrics) {
     await services.revisions.updateStatus(revisionId, {
       status: 'accepted', metrics: acceptedMetrics as unknown as Record<string, unknown>,
       comboBacktestRunId: acceptedRun.runId, verdictReason: verdict.reasons.join(', '),
-      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
+      preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
+      updatedAt: now(),
     });
     for (const id of currentIds) {
       await services.hypotheses.updateStatus(id, 'merged');
@@ -479,7 +585,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   } else {
     await services.revisions.updateStatus(revisionId, {
       status: 'rejected', verdictReason: allRejectReasons.join(', '),
-      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
+      preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
+      updatedAt: now(),
     });
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: allRejectReasons,
