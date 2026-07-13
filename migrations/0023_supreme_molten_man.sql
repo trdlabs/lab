@@ -1,0 +1,1 @@
+ALTER TABLE "strategy_revision" ADD COLUMN "holdout_validation" jsonb;

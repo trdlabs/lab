@@ -161,6 +161,15 @@ describe('InMemoryStrategyRevisionRepository', () => {
     expect(got?.preservationGate?.fired).toBe(true);
     expect(got?.preservationGate?.metrics.totalDelta).toBe(1);
   });
+
+  it('round-trips holdoutValidation through create + updateStatus + findById', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    const now = '2026-01-01T00:00:00Z';
+    await repo.create({ id: 'R', strategyProfileId: 'p', version: 2, hypothesisIds: [], mergedRuleSet: {}, status: 'accepted', kind: 'composed', createdAt: now, updatedAt: now } as StrategyRevision);
+    const hv = { mode: 'trade_based', t: '2026-06-25T00:00:00Z', reason: 'holdout_passed', lowConfidence: false, trainMetrics: { netPnlUsd: 10 }, holdoutMetrics: { netPnlUsd: 8 } } as const;
+    await repo.updateStatus('R', { holdoutValidation: hv, updatedAt: now });
+    expect((await repo.findById('R'))?.holdoutValidation).toEqual(hv);
+  });
 });
 
 describe('InMemoryStrategyRevisionRepository.findMaxVersion (P0-3)', () => {

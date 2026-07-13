@@ -15,7 +15,7 @@ import type { PendingOperatorInteraction } from '../ports/chat-session.repositor
 import type { EvidenceRef, StrategyRetrievalMetadata } from '../domain/strategy-retrieval.ts';
 import type { ExperimentType, ExperimentStatus, MemberRole, ExperimentVerdict, DatasetScope, HoldoutPolicy, HoldoutBoundary, MemberResultSummary, ExperimentFlags } from '../domain/research-experiment.ts';
 import type { PaperSubmissionStatus } from '../domain/paper-submission.ts';
-import type { RevisionStatus, DroppedHypothesis } from '../domain/strategy-revision.ts';
+import type { RevisionStatus, DroppedHypothesis, HoldoutValidation } from '../domain/strategy-revision.ts';
 import type { PreservationMetadata } from '../validation/trade-preservation.ts';
 
 // Postgres tsvector has no first-class Drizzle column type. This customType lets us
@@ -373,6 +373,7 @@ export const strategyRevision = pgTable('strategy_revision', {
   metrics: jsonb('metrics').$type<Record<string, unknown>>(),
   verdictReason: text('verdict_reason'),
   preservationGate: jsonb('preservation_gate').$type<PreservationMetadata>(),
+  holdoutValidation: jsonb('holdout_validation').$type<HoldoutValidation>(),
   kind: text('kind').notNull().default('composed').$type<'composed' | 'consolidated'>(),
   consolidatedFromRevisionId: text('consolidated_from_revision_id'),
   semanticParentRevisionId: text('semantic_parent_revision_id'),

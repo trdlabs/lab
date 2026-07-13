@@ -10,6 +10,22 @@ export interface DroppedHypothesis {
   detail: string;
 }
 
+export type HoldoutValidationReason =
+  | 'skipped_insufficient_history'
+  | 'skipped_insufficient_trades'
+  | 'boundary_unavailable'
+  | 'holdout_passed'
+  | 'holdout_failed';
+
+export interface HoldoutValidation {
+  mode: 'none' | 'trade_based';
+  t?: string;
+  reason: HoldoutValidationReason;
+  lowConfidence?: boolean;
+  trainMetrics?: Record<string, unknown>;
+  holdoutMetrics?: Record<string, unknown>;
+}
+
 export interface StrategyRevision {
   id: string;
   strategyProfileId: string;
@@ -25,6 +41,7 @@ export interface StrategyRevision {
   metrics?: Record<string, unknown>;      // BacktestMetricBlock of the accepted run
   verdictReason?: string;
   preservationGate?: PreservationMetadata;
+  holdoutValidation?: HoldoutValidation;
   kind?: 'composed' | 'consolidated';        // default 'composed' when absent
   consolidatedFromRevisionId?: string;       // consolidated: the R it materializes
   semanticParentRevisionId?: string;         // composed: baseRevisionId; consolidated: R.id
