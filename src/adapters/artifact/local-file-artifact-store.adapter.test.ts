@@ -27,6 +27,13 @@ vi.mock('node:fs/promises', async (importActual) => {
       }
       return actual.rm(p as never, opts as never);
     }) as typeof actual.rm,
+    realpath: (async (p: unknown, opts?: unknown) => {
+      if ((globalThis as Record<string, unknown>).__casFailNextRealpath) {
+        (globalThis as Record<string, unknown>).__casFailNextRealpath = false;
+        throw new Error('realpath boom'); // containment check must fail closed, not fall back
+      }
+      return actual.realpath(p as never, opts as never);
+    }) as typeof actual.realpath,
   };
 });
 import { LocalFileArtifactStore } from './local-file-artifact-store.adapter.ts';
@@ -96,6 +103,19 @@ describe('LocalFileArtifactStore', () => {
     const entries = await readdir(DIR);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('get() fails closed when realpath cannot resolve the path (no lexical fallback — never reads unvetted)', async () => {
+    // A containment guard that falls back to the lexical path on realpath failure is fail-open.
+    // Since get() needs an existing file anyway, a realpath error must reject, not read.
+    const store = new LocalFileArtifactStore(DIR);
+    const ref = await store.put('vetted', { kind: 'logs', mime_type: 'text/plain', producer: 'test' });
+    (globalThis as Record<string, unknown>).__casFailNextRealpath = true;
+    try {
+      await expect(store.get(ref)).rejects.toThrow(/resolve|containment/i);
+    } finally {
+      (globalThis as Record<string, unknown>).__casFailNextRealpath = false;
+    }
   });
 
   it('get() rejects a symlink inside baseDir that resolves outside it (realpath containment, not just lexical)', async () => {

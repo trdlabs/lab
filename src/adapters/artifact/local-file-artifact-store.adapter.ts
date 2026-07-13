@@ -68,15 +68,18 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     if (lexical !== this.baseDir && !lexical.startsWith(this.baseDir + sep)) {
       throw new Error(`artifact uri escapes baseDir (containment violation): ${ref.uri}`);
     }
-    // Symlink containment: resolve links before reading. The file must exist to be read, so realpath
-    // is expected to succeed; on failure (absent) fall back to the lexical path so readFile surfaces ENOENT.
+    // Symlink containment: resolve links on BOTH the target and baseDir, then require containment.
+    // Fail CLOSED — get() needs an existing file anyway, so a realpath error (missing file, permission,
+    // race) must reject rather than fall back to the lexical path and read something the symlink check
+    // never vetted.
     let real: string;
+    let realBase: string;
     try {
       real = await realpath(lexical);
+      realBase = await realpath(this.baseDir);
     } catch {
-      real = lexical;
+      throw new Error(`artifact path could not be resolved for containment check: ${ref.uri}`);
     }
-    const realBase = await this.realBaseDir();
     if (real !== realBase && !real.startsWith(realBase + sep)) {
       throw new Error(`artifact uri resolves outside baseDir via symlink (containment violation): ${ref.uri}`);
     }
@@ -86,15 +89,6 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
       throw new Error(`artifact content_hash mismatch (integrity violation) for ${ref.uri}: expected ${ref.content_hash}, got ${actual}`);
     }
     return buf;
-  }
-
-  /** realpath of baseDir (so symlinks in the base path itself don't cause false containment failures); falls back to the lexical base when it doesn't exist yet. */
-  private async realBaseDir(): Promise<string> {
-    try {
-      return await realpath(this.baseDir);
-    } catch {
-      return this.baseDir;
-    }
   }
 
   resolveUri(ref: ArtifactRef): string {
