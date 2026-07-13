@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { WorkflowHandler } from '../workflow-router.ts';
 import { validateWithSchema } from '../../validation/validator.ts';
+import { PlatformRunConfigSchema } from './platform-run-config.schema.ts';
+import { resolveEvalPeriod } from '../../research/eval-period-resolver.ts';
+import type { PlatformRunConfig } from '../../ports/research-platform.port.ts';
+import type { DatasetDescriptor } from '../../ports/research-run-lifecycle.ts';
 import type { BotRunResultDetail, CloseReason, DecisionLogEntry } from '../../ports/bot-results-read.port.ts';
 import type { ClosedTrade } from '../../ports/bot-results-read.port.ts';
 import type { TradeEvidenceBundle } from '../../ports/trade-evidence-read.port.ts';
@@ -43,6 +47,9 @@ export const ResearchRunCyclePayloadSchema = z.object({
   /** The paper run the paper-monitor is watching; when present, loaded regardless of status
    *  so Cycle 2 is not blind to the very run it was triggered for. */
   paperRunId: z.string().optional(),
+  /** The Cycle-2 eval window, resolved once at the head of the cycle and inherited by retries
+   *  (R3b-1 §3.3). When present, this handler uses it verbatim instead of re-resolving. */
+  evalPlatformRun: PlatformRunConfigSchema.optional(),
 });
 
 function errMsg(err: unknown): string {
@@ -164,6 +171,32 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
     criticEnabled: services.critic !== null,
     effectiveMax,
   }));
+
+  // R3b-1: resolve the Cycle-2 eval window ONCE. A retry inherits it via payload.evalPlatformRun
+  // (no re-resolve); a fresh cycle derives it from the dataset dateRange. Fail-soft to the fixture.
+  let evalRun: PlatformRunConfig;
+  if (payload.evalPlatformRun) {
+    evalRun = payload.evalPlatformRun;
+  } else {
+    let datasets: readonly DatasetDescriptor[] | undefined;
+    try {
+      ({ datasets } = await services.researchPlatform.listDatasets());
+    } catch {
+      datasets = undefined;
+    }
+    if (datasets === undefined) {
+      evalRun = services.defaultPlatformRun;
+      await services.events.append(event(task.id, 'eval_window.fallback', { reason: 'dataset_discovery_failed' }));
+    } else {
+      const resolved = resolveEvalPeriod(datasets, services.defaultPlatformRun);
+      evalRun = resolved.runConfig;
+      if (resolved.source === 'dataset') {
+        await services.events.append(event(task.id, 'eval_window.resolved', { source: 'dataset', period: resolved.runConfig.period }));
+      } else {
+        await services.events.append(event(task.id, 'eval_window.fallback', { reason: resolved.fallbackReason }));
+      }
+    }
+  }
 
   const symbol = payload.symbol ?? services.researchDefaultSymbol ?? RESEARCH_DEFAULT_SYMBOL;
   const ts = payload.ts ?? new Date().toISOString();
@@ -457,7 +490,7 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
       const buildTask: import('../../domain/types.ts').ResearchTask = {
         id: buildTaskId, taskType: 'hypothesis.build', source: task.source,
         correlationId: task.correlationId, status: 'queued',
-        payload: { hypothesisId: hypothesis.id, platformRun: services.defaultPlatformRun, cycleDepth: payload.cycleDepth },
+        payload: { hypothesisId: hypothesis.id, platformRun: evalRun, cycleDepth: payload.cycleDepth },
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       await services.researchTasks.create(buildTask);
