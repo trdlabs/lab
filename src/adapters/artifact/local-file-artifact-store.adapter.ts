@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, rm, realpath } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import type { ArtifactRef } from '../../domain/types.ts';
@@ -34,7 +34,8 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
         await writeFile(tmp, buf);
         await rename(tmp, filePath);
       } finally {
-        await rm(tmp, { force: true });
+        // Best-effort cleanup — a failing rm must never mask the primary write/rename error.
+        try { await rm(tmp, { force: true }); } catch { /* ignore */ }
       }
     }
     return {
@@ -52,7 +53,8 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
 
   // Reads must not trust a stored ref blindly. Two guards (P1-20):
   //  1. containment — the resolved file:// path must live under baseDir, so a forged ref can't turn
-  //     get() into an arbitrary-filesystem read.
+  //     get() into an arbitrary-filesystem read. Checked both lexically (cheap, catches ../ escapes
+  //     on absent paths) AND via realpath (resolves symlinks, so a link inside baseDir can't point out).
   //  2. hash-verify — recompute sha256 and compare to ref.content_hash, so a blob swapped in place
   //     under the same content-hash name (TOCTOU on the shared .artifacts CAS) is rejected, not served.
   async get(ref: ArtifactRef): Promise<Buffer> {
@@ -62,16 +64,37 @@ export class LocalFileArtifactStore implements ArtifactStorePort {
     } catch {
       throw new Error(`artifact uri is not a readable file:// path: ${ref.uri}`);
     }
-    const resolved = resolve(filePath);
-    if (resolved !== this.baseDir && !resolved.startsWith(this.baseDir + sep)) {
+    const lexical = resolve(filePath);
+    if (lexical !== this.baseDir && !lexical.startsWith(this.baseDir + sep)) {
       throw new Error(`artifact uri escapes baseDir (containment violation): ${ref.uri}`);
     }
-    const buf = await readFile(resolved);
+    // Symlink containment: resolve links before reading. The file must exist to be read, so realpath
+    // is expected to succeed; on failure (absent) fall back to the lexical path so readFile surfaces ENOENT.
+    let real: string;
+    try {
+      real = await realpath(lexical);
+    } catch {
+      real = lexical;
+    }
+    const realBase = await this.realBaseDir();
+    if (real !== realBase && !real.startsWith(realBase + sep)) {
+      throw new Error(`artifact uri resolves outside baseDir via symlink (containment violation): ${ref.uri}`);
+    }
+    const buf = await readFile(real);
     const actual = `sha256:${createHash('sha256').update(buf).digest('hex')}`;
     if (actual !== ref.content_hash) {
       throw new Error(`artifact content_hash mismatch (integrity violation) for ${ref.uri}: expected ${ref.content_hash}, got ${actual}`);
     }
     return buf;
+  }
+
+  /** realpath of baseDir (so symlinks in the base path itself don't cause false containment failures); falls back to the lexical base when it doesn't exist yet. */
+  private async realBaseDir(): Promise<string> {
+    try {
+      return await realpath(this.baseDir);
+    } catch {
+      return this.baseDir;
+    }
   }
 
   resolveUri(ref: ArtifactRef): string {
