@@ -320,6 +320,44 @@ describe('handleChatMessage — confirmation consumption (second turn)', () => {
     expect(classifySpy).not.toHaveBeenCalled();
   });
 
+  it('[P1-23] already_confirmed clears the stuck pending state (crash between confirm and task creation)', async () => {
+    const { d, sessions, proposals } = deps();
+    const savedSession = await firstTurn(d, strategyMsg, sessions);
+    const proposalId = savedSession.pendingInteraction!.proposalId;
+    // Simulate a crash after confirmPending but before the session was cleared / a task attached:
+    // the proposal is 'confirmed' yet the persisted session still carries pendingInteraction.
+    await proposals.confirmPending(proposalId, 's1', new Date().toISOString());
+    await sessions.upsert(savedSession);
+
+    const replay = await handleChatMessage({ message: 'да', session: savedSession, source: 'web' }, d);
+    expect(replay.kind).toBe('assistant_message'); // no task attached → "уже подтверждена"
+    // The session must NOT stay wedged: the interpreter is never consulted while pending is set, so a
+    // stuck pendingInteraction traps the session in the "не понял" loop forever.
+    expect((await sessions.get('s1'))?.pendingInteraction).toBeUndefined();
+  });
+
+  it('[P1-23] cancel on an already-confirmed proposal does not falsely claim cancellation', async () => {
+    const base = deps();
+    const captured: { type: string; payload: Record<string, unknown> }[] = [];
+    const spyEvents = {
+      append: async (e: { type: string; payload: Record<string, unknown> }) => { captured.push({ type: e.type, payload: e.payload }); },
+      listByTask: async () => [],
+    };
+    const d = { ...base.d, events: spyEvents as unknown as ChatHandlerDeps['events'] };
+    const { sessions, proposals } = base;
+    const savedSession = await firstTurn(d, strategyMsg, sessions);
+    const proposalId = savedSession.pendingInteraction!.proposalId;
+    // Proposal already confirmed → its task is running; cancelPending() will return false.
+    await proposals.confirmPending(proposalId, 's1', new Date().toISOString());
+
+    const r = await handleChatMessage({ message: 'отмена', session: savedSession, source: 'web' }, d);
+    expect(r.kind).toBe('assistant_message');
+    if (r.kind === 'assistant_message') expect(r.message).not.toContain('Отменил'); // must not lie
+    expect(captured.some((e) => e.type === 'chat.proposal.cancelled')).toBe(false); // no false event
+    expect((await proposals.findById(proposalId))?.status).toBe('confirmed'); // still confirmed/running
+    expect((await sessions.get('s1'))?.pendingInteraction).toBeUndefined(); // pending cleared, not wedged
+  });
+
   it('an EXPIRED proposal explains the timeout, enqueues nothing, and clears pending state', async () => {
     // Tiny TTL so the proposal is already past expiry by the follow-up turn.
     const { d, queue, sessions, proposals } = deps({ proposalTtlMs: -1 });
