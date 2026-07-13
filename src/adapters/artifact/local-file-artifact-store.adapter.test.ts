@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { rm, readFile, writeFile, utimes, stat, readdir } from 'node:fs/promises';
+import { rm, readFile, writeFile, utimes, stat, readdir, mkdir, symlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// Fault-injection seam for the "failed publication leaves no temp" test: when the flag is set, the
-// next writeFile creates a partial file at its target and then rejects — the one failure mode real
-// fs can't produce deterministically. Everything else delegates to the real module.
+// Fault-injection seam: when a flag is set, the next writeFile orphans a partial temp then rejects,
+// and the next rm rejects — the failure modes real fs can't produce deterministically. Everything
+// else delegates to the real module.
 vi.mock('node:fs/promises', async (importActual) => {
   const actual = await importActual<typeof import('node:fs/promises')>();
   const { writeFileSync } = await import('node:fs');
@@ -19,6 +20,20 @@ vi.mock('node:fs/promises', async (importActual) => {
       }
       return actual.writeFile(p as never, data as never);
     }) as typeof actual.writeFile,
+    rm: (async (p: unknown, opts: unknown) => {
+      if ((globalThis as Record<string, unknown>).__casFailNextRm) {
+        (globalThis as Record<string, unknown>).__casFailNextRm = false;
+        throw new Error('rm boom'); // cleanup failure — must not mask the primary error
+      }
+      return actual.rm(p as never, opts as never);
+    }) as typeof actual.rm,
+    realpath: (async (p: unknown, opts?: unknown) => {
+      if ((globalThis as Record<string, unknown>).__casFailNextRealpath) {
+        (globalThis as Record<string, unknown>).__casFailNextRealpath = false;
+        throw new Error('realpath boom'); // containment check must fail closed, not fall back
+      }
+      return actual.realpath(p as never, opts as never);
+    }) as typeof actual.realpath,
   };
 });
 import { LocalFileArtifactStore } from './local-file-artifact-store.adapter.ts';
@@ -90,6 +105,33 @@ describe('LocalFileArtifactStore', () => {
     expect(entries[0]).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('get() fails closed when realpath cannot resolve the path (no lexical fallback — never reads unvetted)', async () => {
+    // A containment guard that falls back to the lexical path on realpath failure is fail-open.
+    // Since get() needs an existing file anyway, a realpath error must reject, not read.
+    const store = new LocalFileArtifactStore(DIR);
+    const ref = await store.put('vetted', { kind: 'logs', mime_type: 'text/plain', producer: 'test' });
+    (globalThis as Record<string, unknown>).__casFailNextRealpath = true;
+    try {
+      await expect(store.get(ref)).rejects.toThrow(/resolve|containment/i);
+    } finally {
+      (globalThis as Record<string, unknown>).__casFailNextRealpath = false;
+    }
+  });
+
+  it('get() rejects a symlink inside baseDir that resolves outside it (realpath containment, not just lexical)', async () => {
+    // A link whose path is lexically under baseDir but whose target escapes it must not read the
+    // target. content_hash is set to the SECRET's hash so hash-verify would PASS if it read through —
+    // isolating containment as the only guard that can stop the leak.
+    const store = new LocalFileArtifactStore(DIR);
+    await mkdir(DIR, { recursive: true });
+    await writeFile(OUTSIDE, 'SECRET');
+    const linkPath = resolve(DIR, 'inside-link');
+    await symlink(OUTSIDE, linkPath);
+    const secretHash = `sha256:${createHash('sha256').update('SECRET').digest('hex')}`;
+    const ref = { ...(await store.put('x', { kind: 'logs', mime_type: 'text/plain', producer: 'test' })), uri: pathToFileURL(linkPath).href, content_hash: secretHash };
+    await expect(store.get(ref)).rejects.toThrow(/baseDir|containment|outside/i);
+  });
+
   it('put() self-heals a tampered blob: re-putting the original bytes restores it (skip must verify hash, not just existence)', async () => {
     // P1-21 review: skip-if-exists must not trust a file by existence alone — that contradicts P1-20.
     // If a blob was tampered, re-putting the original must atomically replace the corrupt bytes so
@@ -115,6 +157,20 @@ describe('LocalFileArtifactStore', () => {
     }
     const entries = await readdir(DIR);
     expect(entries.filter((e) => e.endsWith('.tmp'))).toHaveLength(0);
+  });
+
+  it('a cleanup failure in the finally does not mask the original write error', async () => {
+    // If rm(tmp) throws in the finally, put() must still surface the primary failure (disk full),
+    // not the cleanup error — the finally's rm has to be best-effort.
+    const store = new LocalFileArtifactStore(DIR);
+    (globalThis as Record<string, unknown>).__casFailNextWrite = true;
+    (globalThis as Record<string, unknown>).__casFailNextRm = true;
+    try {
+      await expect(store.put('boom2', { kind: 'logs', mime_type: 'text/plain', producer: 'test' })).rejects.toThrow('disk full');
+    } finally {
+      (globalThis as Record<string, unknown>).__casFailNextWrite = false;
+      (globalThis as Record<string, unknown>).__casFailNextRm = false;
+    }
   });
 
   it('concurrent puts of identical content settle to exactly one intact file (benign race)', async () => {
