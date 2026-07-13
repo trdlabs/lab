@@ -40,11 +40,12 @@
 
 **Files:**
 - Create: `src/orchestrator/handlers/platform-run-config.schema.ts`
+- Modify: `src/orchestrator/handlers/hypothesis-build.handler.ts:24-30` (replace the inline `platformRun` shape with the shared schema — proves byte-identity)
 - Test: `src/orchestrator/handlers/platform-run-config.schema.test.ts`
 
 **Interfaces:**
-- Consumes: the `PlatformRunConfig` interface (`src/ports/research-platform.port.ts`): `{ datasetId: string; symbols: readonly string[]; timeframe: string; period: { from: string; to: string }; seed: number }`.
-- Produces: `export const PlatformRunConfigSchema` (a `z.ZodType`) and `export type PlatformRunConfigInput = z.infer<typeof PlatformRunConfigSchema>`. Later tasks add `evalPlatformRun: PlatformRunConfigSchema.optional()` to three payload schemas.
+- Consumes: the `PlatformRunConfig` interface (`src/ports/research-platform.port.ts`): `{ datasetId: string; symbols: readonly string[]; timeframe: string; period: { from: string; to: string }; seed: number }`. Must stay byte-identical to the existing inline `HypothesisBuildPayloadSchema.platformRun` shape (`hypothesis-build.handler.ts:24`), which enforces `symbols: z.array(z.string().min(1)).min(1)` (non-empty array).
+- Produces: `export const PlatformRunConfigSchema` (a `z.ZodType`) and `export type PlatformRunConfigInput = z.infer<typeof PlatformRunConfigSchema>`. This task wires it into `HypothesisBuildPayloadSchema.platformRun` (collapsing the first inline copy). Later tasks add `evalPlatformRun: PlatformRunConfigSchema.optional()` to two more payload schemas (research.run_cycle, backtest.completed).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -78,6 +79,10 @@ describe('PlatformRunConfigSchema', () => {
   it('rejects a non-integer seed', () => {
     expect(PlatformRunConfigSchema.safeParse({ ...valid, seed: 1.5 }).success).toBe(false);
   });
+
+  it('rejects an empty symbols array (preserves the HypothesisBuildPayloadSchema invariant)', () => {
+    expect(PlatformRunConfigSchema.safeParse({ ...valid, symbols: [] }).success).toBe(false);
+  });
 });
 ```
 
@@ -99,7 +104,7 @@ import { z } from 'zod';
  *  every payload schema that carries an eval window so the three sites never drift (R3b-1 §3.0). */
 export const PlatformRunConfigSchema = z.object({
   datasetId: z.string().min(1),
-  symbols: z.array(z.string().min(1)),
+  symbols: z.array(z.string().min(1)).min(1),
   timeframe: z.string().min(1),
   period: z.object({ from: z.string().min(1), to: z.string().min(1) }),
   seed: z.number().int(),
@@ -111,18 +116,41 @@ export type PlatformRunConfigInput = z.infer<typeof PlatformRunConfigSchema>;
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/platform-run-config.schema.test.ts`
-Expected: PASS (4/4).
+Expected: PASS (5/5).
 
-- [ ] **Step 5: Typecheck**
+- [ ] **Step 5: Wire the shared schema into `HypothesisBuildPayloadSchema` (collapse the first inline copy)**
 
-Run: `npx tsc --noEmit`
+In `src/orchestrator/handlers/hypothesis-build.handler.ts`, add the import (near the top, after the `zod` import):
+
+```ts
+import { PlatformRunConfigSchema } from './platform-run-config.schema.ts';
+```
+
+Replace the inline `platformRun` shape (`:24-30`) with the shared schema — keeping `.optional()`:
+
+```ts
+  cycleDepth: z.number().int().min(0).default(0),
+  platformRun: PlatformRunConfigSchema.optional(),
+});
+```
+
+This is a pure DRY collapse: the shared schema is byte-identical to the inline shape (same `symbols: z.array(z.string().min(1)).min(1)` invariant), so all downstream `payload.platformRun!` uses at `:104`/`:131-133` and the `platformRun === undefined` guard at `:61` are unaffected.
+
+- [ ] **Step 6: Run the hypothesis-build tests to confirm the collapse is behavior-neutral**
+
+Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/hypothesis-build.handler.test.ts`
+Expected: PASS (unchanged — the schema is identical).
+
+- [ ] **Step 7: Typecheck**
+
+Run: `pnpm typecheck`
 Expected: no errors.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/orchestrator/handlers/platform-run-config.schema.ts src/orchestrator/handlers/platform-run-config.schema.test.ts
-git commit -m "feat(r3b1): shared PlatformRunConfigSchema for eval-window payloads"
+git add src/orchestrator/handlers/platform-run-config.schema.ts src/orchestrator/handlers/platform-run-config.schema.test.ts src/orchestrator/handlers/hypothesis-build.handler.ts
+git commit -m "feat(r3b1): shared PlatformRunConfigSchema, wired into HypothesisBuildPayloadSchema"
 ```
 
 ---
@@ -271,7 +299,7 @@ Expected: PASS (8/8).
 
 - [ ] **Step 5: Typecheck**
 
-Run: `npx tsc --noEmit`
+Run: `pnpm typecheck`
 Expected: no errors.
 
 - [ ] **Step 6: Commit**
@@ -463,7 +491,7 @@ Expected: PASS. The existing handler test must stay green (its mock `listDataset
 
 - [ ] **Step 7: Typecheck**
 
-Run: `npx tsc --noEmit`
+Run: `pnpm typecheck`
 Expected: no errors.
 
 - [ ] **Step 8: Commit**
@@ -482,7 +510,7 @@ git commit -m "feat(r3b1): research-run-cycle resolves eval window once + thread
 - Modify: `src/orchestrator/handlers/run-platform-backtest.ts` (`:102`)
 - Modify: `src/orchestrator/handlers/resume-platform-backtest.ts` (`:57`)
 - Modify: `src/orchestrator/handlers/backtest-completed.handler.ts` (schema `:22-25`; `enqueueResearchRetry` `:49-76`; extract `:86`; retry calls `:113`, `:136`)
-- Test: `src/orchestrator/handlers/backtest-completed.eval-window.test.ts`
+- Test: `src/orchestrator/handlers/backtest-completed.eval-window.test.ts` (retry-inheritance) + assertions appended to `src/orchestrator/handlers/run-platform-backtest.test.ts` and `src/orchestrator/handlers/resume-platform-backtest.test.ts` (producer-path — each producer actually stamps the window)
 
 **Interfaces:**
 - Consumes: `PlatformRunConfigSchema` (Task 1). `BacktestRun.platformRun: PlatformRunConfig` (already persisted at `run-platform-backtest.ts:76`). `again.platformRun` (submit) / `run.platformRun` (resume).
@@ -531,10 +559,51 @@ describe('backtest-completed retry inherits evalPlatformRun', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 1b: Write the producer-path tests (prove submit AND resume stamp the window)**
 
-Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/backtest-completed.eval-window.test.ts`
-Expected: FAIL — first test: `retry.payload.evalPlatformRun` is `undefined` (field not threaded).
+The retry-inheritance test above only exercises `backtestCompletedHandler`. Add one test per producer proving the `backtest.completed` payload actually carries the window. Mirror the existing `symbol` producer test (`run-platform-backtest.test.ts:65-73`) which uses `InMemoryQueueAdapter` + `queue.queued.filter(...)` + `researchTasks.findById(taskId).payload`.
+
+Append to `src/orchestrator/handlers/run-platform-backtest.test.ts` (inside its `describe`, reusing its `setup`/`PLATFORM_RUN`):
+
+```ts
+  it('enqueued backtest.completed payload carries evalPlatformRun = the run window (submit)', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const { s, common } = await setup({ researchPlatform: new MockResearchPlatformAdapter(), backtestBackend: 'research_platform', taskQueue: queue });
+    await runPlatformBacktest(common);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload.evalPlatformRun).toEqual(PLATFORM_RUN); // = again.platformRun (persisted)
+  });
+```
+
+Append the resume analogue to `src/orchestrator/handlers/resume-platform-backtest.test.ts`. Its setup persists a `submitted` `BacktestRun` (with `platformRun`) then calls `resumePlatformRun(s, run)`. Assert the window comes from the **persisted (fresh) run**, not the input object — pass a `run` argument whose `.platformRun` is deliberately DIFFERENT from the persisted row, and assert the payload carries the PERSISTED window:
+
+```ts
+  it('enqueued backtest.completed payload carries evalPlatformRun from the fresh re-read, not the stale input (resume)', async () => {
+    const queue = new InMemoryQueueAdapter();
+    const s = makeServices({ researchPlatform: new MockResearchPlatformAdapter(), taskQueue: queue });
+    // Persist the canonical run with the REAL window (adapt to this file's existing seeding helper).
+    const persistedWindow = { datasetId: 'ds', symbols: ['ETHUSDT'], timeframe: '1h', period: { from: '2026-01-01', to: '2026-03-01' }, seed: 7 };
+    const run = await seedSubmittedRun(s, { platformRun: persistedWindow }); // this file's helper
+    // Caller passes a STALE copy with a different window; the producer must ignore it.
+    const staleInput = { ...run, platformRun: { ...persistedWindow, period: { from: '1999-01-01', to: '1999-02-01' } } };
+    await resumePlatformRun(s, staleInput);
+
+    const enqueued = queue.queued.filter((q) => q.taskType === 'backtest.completed');
+    expect(enqueued).toHaveLength(1);
+    const completedTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+    expect(completedTask!.payload.evalPlatformRun).toEqual(persistedWindow); // fresh read wins over stale input
+  });
+```
+
+> Adapt `seedSubmittedRun` to the resume test file's actual setup (it already builds a submitted run + its task + a completed poll outcome — reuse that; only ensure the persisted `platformRun` differs from the `staleInput` you pass). If the file has no reusable seeder, factor its inline setup into one. The KEY assertion is `evalPlatformRun === persistedWindow` (the guard-#2 `again` read), which is exactly what refinement #2 requires.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/backtest-completed.eval-window.test.ts src/orchestrator/handlers/run-platform-backtest.test.ts src/orchestrator/handlers/resume-platform-backtest.test.ts`
+Expected: FAIL — retry test: `retry.payload.evalPlatformRun` is `undefined`; producer tests: `completedTask.payload.evalPlatformRun` is `undefined` (field not stamped yet).
 
 - [ ] **Step 3: Add `evalPlatformRun` to `enqueueBacktestCompleted` args**
 
@@ -565,13 +634,13 @@ In `src/orchestrator/handlers/run-platform-backtest.ts`, at the `enqueueBacktest
 
 (Insert as the last property of the args object, after the existing delta fields.)
 
-In `src/orchestrator/handlers/resume-platform-backtest.ts`, at its `enqueueBacktestCompleted(services, task, { ... })` call (`:57`), add the same, sourced from the persisted `run` object in that scope:
+In `src/orchestrator/handlers/resume-platform-backtest.ts`, at its `enqueueBacktestCompleted(services, task, { ... })` call (`:57`), add the same — sourced from **`again`, the fresh re-read from Guard #2** (`:50`), NOT the `run` input parameter (which is the potentially-stale object the caller passed in):
 
 ```ts
-      ...(run.platformRun ? { evalPlatformRun: run.platformRun } : {}),
+      ...(again.platformRun ? { evalPlatformRun: again.platformRun } : {}),
 ```
 
-> If the resume scope names the persisted run differently (e.g. `fresh`), use that variable — it is the `BacktestRun` whose `.platformRun` holds the window. Confirm with `rg -n "platformRun|BacktestRun|const (run|fresh|again)" src/orchestrator/handlers/resume-platform-backtest.ts`.
+> Rationale: `again = await services.backtests.findById(runId)` is the guard-#2 re-read the resume path already uses for `platformRunId` (`applyPlatformTerminalOutcome({ ..., platformRunId: again.platformRunId }`, `:53`). Sourcing the window from the same fresh read keeps the eval window consistent with the terminal outcome and avoids a stale input. Confirm `again` is in scope with `rg -n "const again|again.platformRun" src/orchestrator/handlers/resume-platform-backtest.ts`.
 
 - [ ] **Step 5: Add `evalPlatformRun` to the `backtest.completed` payload schema**
 
@@ -617,20 +686,20 @@ Pass it at BOTH retry call sites (`:113` FAIL, `:136` MODIFY) — append the arg
           { hypothesisId, decision, reasons }, cycleDepth + 1, symbol, evalPlatformRun);
 ```
 
-- [ ] **Step 7: Run the new test + existing backtest-completed tests**
+- [ ] **Step 7: Run the new tests + existing backtest-completed tests**
 
 Run: `node --experimental-strip-types node_modules/vitest/vitest.mjs run src/orchestrator/handlers/backtest-completed.eval-window.test.ts src/orchestrator/handlers/backtest-completed.handler.test.ts src/orchestrator/handlers/run-platform-backtest.test.ts src/orchestrator/handlers/resume-platform-backtest.test.ts`
-Expected: PASS. Existing tests stay green (field is optional; producers add it only when `platformRun` is present, which it always is on a real run).
+Expected: PASS — including the two producer-path tests (submit → `again.platformRun`, resume → `again.platformRun` from the fresh guard-#2 read). Existing tests stay green (field is optional; producers add it only when `platformRun` is present, which it always is on a real run).
 
 - [ ] **Step 8: Typecheck**
 
-Run: `npx tsc --noEmit`
+Run: `pnpm typecheck`
 Expected: no errors.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/orchestrator/handlers/backtest-support.ts src/orchestrator/handlers/run-platform-backtest.ts src/orchestrator/handlers/resume-platform-backtest.ts src/orchestrator/handlers/backtest-completed.handler.ts src/orchestrator/handlers/backtest-completed.eval-window.test.ts
+git add src/orchestrator/handlers/backtest-support.ts src/orchestrator/handlers/run-platform-backtest.ts src/orchestrator/handlers/resume-platform-backtest.ts src/orchestrator/handlers/backtest-completed.handler.ts src/orchestrator/handlers/backtest-completed.eval-window.test.ts src/orchestrator/handlers/run-platform-backtest.test.ts src/orchestrator/handlers/resume-platform-backtest.test.ts
 git commit -m "feat(r3b1): both backtest.completed producers thread evalPlatformRun into retries"
 ```
 
@@ -665,13 +734,18 @@ const windowB = { ...windowA, period: { from: '2026-02-01', to: '2026-04-01' } }
 const windowSeedDiff = { ...windowA, seed: 99 };
 
 describe('revision-build eval-window extraction', () => {
-  it('runs the executor on the single cycle window (not defaultPlatformRun)', async () => {
+  it('runs the full-window comparison baseline on the single cycle window (not defaultPlatformRun)', async () => {
     const { services, task } = await seedMergeableCycle({ platformRun: windowA });
     await revisionBuildHandler(task, services);
-    // the executor ran on windowA.period — assert via the executor spy the harness exposes,
-    // or via the accepted revision's run metadata; adapt to the harness's actual accessor.
-    const runs = services.revisionRunExecutor.calls ?? [];
-    expect(runs.every((c: { run: { period: unknown } }) => JSON.stringify(c.run.period) === JSON.stringify(windowA.period))).toBe(true);
+    // Assert BY LABEL: the comparison_baseline executor run always uses the full cycle window
+    // (runConfig). Do NOT assert every() call shares windowA.period — R3a's train/holdout runs
+    // deliberately carry SPLIT periods (encodeTrain/HoldoutPeriod), and every() is vacuously true
+    // on an empty calls array. Anchor on the labeled call + a non-empty guard.
+    const calls = services.revisionRunExecutor.calls ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    const baselineCall = calls.find((c: { label: string }) => c.label === 'comparison_baseline');
+    expect(baselineCall).toBeDefined();
+    expect(baselineCall!.run.period).toEqual(windowA.period);
   });
 
   it('rejects the candidate with eval_window_inconsistent when windows disagree (period)', async () => {
@@ -770,7 +844,7 @@ Expected: PASS.
 
 - [ ] **Step 7: Typecheck + full suite**
 
-Run: `npx tsc --noEmit && node --experimental-strip-types node_modules/vitest/vitest.mjs run`
+Run: `pnpm typecheck && node --experimental-strip-types node_modules/vitest/vitest.mjs run`
 Expected: no type errors; full suite green (0 failures).
 
 - [ ] **Step 8: Commit**
