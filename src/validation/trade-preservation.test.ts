@@ -81,3 +81,70 @@ it('returns fired:false with populated metrics when nothing triggers', () => {
   expect(r.reason).toBeNull();
   expect(r.metrics.totalDelta).toBe(6);
 });
+
+describe('side partitioning', () => {
+  it('does not match a long against a short at the same entry', () => {
+    const base = [tr({ entryTs: 100, side: 'short' })];
+    const variant = [tr({ entryTs: 100, side: 'long' })];
+    const r = evaluateTradePreservation(base, variant, agg(10, 1, 10, 1), T);
+    expect(r.metrics.matchedCount).toBe(0);
+    expect(r.metrics.disappearedCount).toBe(1);
+    expect(r.metrics.newCount).toBe(1);
+  });
+  it('matches short trades among themselves, independent of the long partition', () => {
+    const base = [tr({ entryTs: 100, side: 'short' }), tr({ entryTs: 200, side: 'short' }), tr({ entryTs: 100, side: 'long' })];
+    const variant = [tr({ entryTs: 100, side: 'short' }), tr({ entryTs: 100, side: 'long' })];
+    const r = evaluateTradePreservation(base, variant, agg(30, 3, 20, 2), T);
+    expect(r.metrics.matchedCount).toBe(2); // one short + one long
+    expect(r.metrics.disappearedCount).toBe(1); // the entryTs:200 short
+    expect(r.metrics.newCount).toBe(0);
+  });
+});
+
+describe('match tolerance', () => {
+  it('matches a variant within matchToleranceMs (greedy nearest)', () => {
+    const thresholds = { ...T, matchToleranceMs: 50 };
+    const base = [tr({ entryTs: 100 }), tr({ entryTs: 100 })];
+    const variant = [tr({ entryTs: 130 })]; // 30ms away → within tolerance
+    const r = evaluateTradePreservation(base, variant, agg(20, 2, 10, 1), thresholds);
+    expect(r.metrics.matchedCount).toBe(1);
+    expect(r.metrics.disappearedCount).toBe(1);
+  });
+  it('does not match beyond matchToleranceMs', () => {
+    const thresholds = { ...T, matchToleranceMs: 50 };
+    const base = [tr({ entryTs: 100 })];
+    const variant = [tr({ entryTs: 200 })]; // 100ms > 50 tolerance
+    const r = evaluateTradePreservation(base, variant, agg(10, 1, 10, 1), thresholds);
+    expect(r.metrics.matchedCount).toBe(0);
+    expect(r.metrics.disappearedCount).toBe(1);
+    expect(r.metrics.newCount).toBe(1);
+  });
+});
+
+describe('threshold boundaries', () => {
+  it('winner_degradation does NOT fire when contribution is exactly at retention (strict <)', () => {
+    // gross 100, retention 0.9 → threshold 90; variant contributes exactly 90
+    const base = [tr({ entryTs: 1, realizedPnl: 40 }), tr({ entryTs: 2, realizedPnl: 30 }), tr({ entryTs: 3, realizedPnl: 30 })];
+    const variant = [tr({ entryTs: 1, realizedPnl: 40 }), tr({ entryTs: 2, realizedPnl: 30 }), tr({ entryTs: 3, realizedPnl: 20 })];
+    const r = evaluateTradePreservation(base, variant, agg(100, 3, 90, 3), T); // totalDelta -10 → EOD/abstention skip
+    expect(r.fired).toBe(false);
+  });
+  it('winner_degradation fires one unit below retention', () => {
+    const base = [tr({ entryTs: 1, realizedPnl: 40 }), tr({ entryTs: 2, realizedPnl: 30 }), tr({ entryTs: 3, realizedPnl: 30 })];
+    const variant = [tr({ entryTs: 1, realizedPnl: 40 }), tr({ entryTs: 2, realizedPnl: 30 }), tr({ entryTs: 3, realizedPnl: 19 })]; // 89 < 90
+    const r = evaluateTradePreservation(base, variant, agg(100, 3, 89, 3), T);
+    expect(r.fired).toBe(true);
+    expect(r.reason).toBe('winner_degradation');
+  });
+  it('runs the winner check at exactly minWinnerSample winners (inclusive >=)', () => {
+    const base = [tr({ entryTs: 1, realizedPnl: 40 }), tr({ entryTs: 2, realizedPnl: 40 }), tr({ entryTs: 3, realizedPnl: 40 })];
+    const r = evaluateTradePreservation(base, [], agg(120, 3, 0, 0), T); // exactly 3 winners, none retained
+    expect(r.reason).toBe('winner_degradation');
+  });
+  it('end_of_data_position fires when eodDelta is exactly eodShare*totalDelta (inclusive >=)', () => {
+    const variant = [tr({ entryTs: 999999, realizedPnl: 10, closeReason: 'end_of_data' })];
+    const r = evaluateTradePreservation([], variant, agg(0, 0, 20, 1), T); // totalDelta 20, threshold 10, eodDelta 10
+    expect(r.fired).toBe(true);
+    expect(r.reason).toBe('end_of_data_position');
+  });
+});

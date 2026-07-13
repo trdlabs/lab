@@ -6,6 +6,7 @@ import {
   type PreservationAggregates,
   type PreservationThresholds,
   type PreservationMetadata,
+  type PreservationReason,
 } from './trade-preservation.ts';
 
 export interface RevisionGateResult {
@@ -40,7 +41,7 @@ const BACKTEST_VETO_DECISION = {
   end_of_data_position: 'INCONCLUSIVE',
   abstention_gaming: 'MODIFY',
   winner_degradation: 'MODIFY',
-} as const;
+} as const satisfies Record<PreservationReason, EvaluationOutcome['decision']>;
 
 /**
  * Downgrade-only preservation veto for the hypothesis proxy lane. Evaluates trades only when the
