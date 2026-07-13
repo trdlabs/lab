@@ -20,7 +20,7 @@ const boundDataset: DatasetDescriptor = {
 
 function task(over: Partial<ResearchTask> = {}): ResearchTask {
   return {
-    id: 't1', taskType: 'research.run_cycle', source: 'chat', correlationId: 'c1',
+    id: 't1', taskType: 'research.run_cycle', source: 'operator', correlationId: 'c1',
     status: 'queued',
     payload: { strategyProfileId: 'p1', cycleDepth: 0 },
     createdAt: '2026-07-12T00:00:00Z', updatedAt: '2026-07-12T00:00:00Z', ...over,
