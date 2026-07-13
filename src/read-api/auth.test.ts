@@ -27,4 +27,18 @@ describe('readAuthMiddleware', () => {
     expect(safeEqual('abc', 'abc')).toBe(true);
     expect(safeEqual('', 'x')).toBe(false);
   });
+
+  it('fail-closed on empty token: `Bearer ` (empty presented) does NOT authenticate — 503, not 200', async () => {
+    // P1-19: parseBearer('Bearer ') === '' and safeEqual('','') === true, so an empty configured
+    // token used to let `Authorization: Bearer ` through with 200 — opening the whole read surface.
+    const app = appWithToken('');
+    expect((await app.request('/x', { headers: { authorization: 'Bearer ' } })).status).toBe(503);
+    expect((await app.request('/x')).status).toBe(503);
+  });
+
+  it('empty-token 503 body uses the service_unavailable envelope', async () => {
+    const res = await appWithToken('').request('/x');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: { code: 'service_unavailable', message: expect.any(String) } });
+  });
 });
