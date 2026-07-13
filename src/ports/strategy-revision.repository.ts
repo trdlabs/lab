@@ -12,7 +12,7 @@ export interface StrategyRevisionRepository {
   // Patches only the named fields (defined keys only); throws with the id in the
   // message when no row exists for it.
   updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'preservationGate' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void>;
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'preservationGate' | 'holdoutValidation' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId'>>): Promise<void>;
   listByProfile(strategyProfileId: string): Promise<StrategyRevision[]>; // version asc
   /** The consolidated revision that materializes `revisionId` (kind='consolidated', consolidatedFromRevisionId=revisionId), or null. */
   findConsolidatedOf(revisionId: string): Promise<StrategyRevision | null>;

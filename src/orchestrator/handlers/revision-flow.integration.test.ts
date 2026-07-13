@@ -342,7 +342,12 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     expect(v2!.preservationGate?.reason).toBe('abstention_gaming');
   });
 
-  it('kill-switch off: same combo is accepted and runTrades is never called', async () => {
+  it('kill-switch off: same combo is accepted and the R2 gate\'s own trade fetch never runs', async () => {
+    // R3a note: getRunTrades IS called once now, independently of the preservation-gate
+    // kill-switch — R3a's boundary computation (revision-build.handler.ts) unconditionally fetches
+    // the full-window baseline trades right after Step 8, regardless of preservationGateEnabled.
+    // What this test actually guards (the R2 kill-switch) is that the GATE's own candidate-variant
+    // fetch ('cand-pr') never happens when the gate is off.
     const getRunTrades = vi.fn(async () => []);
     const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
@@ -360,13 +365,16 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     const v2 = revisions.find((r) => r.version === 2);
     expect(v2).toBeDefined();
     expect(v2!.status).toBe('accepted');
-    expect(getRunTrades).not.toHaveBeenCalled();
+    expect(getRunTrades).toHaveBeenCalledTimes(1);
+    expect(getRunTrades).toHaveBeenCalledWith('base-pr'); // R3a boundary fetch only
   });
 
-  it('gate on but candidate aggregate-rejects: preservation never runs and runTrades is never called (lazy baseline fetch)', async () => {
+  it('gate on but candidate aggregate-rejects: preservation never runs and the R2 gate\'s own trade fetch never runs (lazy baseline fetch)', async () => {
     // Regression for the eager-fetch fix: with the gate enabled, a build whose candidate never
-    // reaches an ACCEPT verdict must trigger NO trade fetch — the baseline fetch is lazy, gated on
-    // a would-accept verdict — so a trades-read failure can't abort an aggregate-reject build.
+    // reaches an ACCEPT verdict must trigger NO trade fetch FROM THE GATE — the gate's own baseline
+    // fetch is lazy, gated on a would-accept verdict — so a trades-read failure can't abort an
+    // aggregate-reject build. R3a note: getRunTrades IS still called once, independently, for R3a's
+    // (unconditional) boundary computation right after Step 8.
     const getRunTrades = vi.fn(async () => []);
     const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
     const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
@@ -382,7 +390,8 @@ describe('revision-flow integration (Task 6): trade-preservation veto', () => {
     const v2 = revisions.find((r) => r.version === 2);
     expect(v2).toBeDefined();
     expect(v2!.status).toBe('rejected');
-    expect(getRunTrades).not.toHaveBeenCalled();
+    expect(getRunTrades).toHaveBeenCalledTimes(1);
+    expect(getRunTrades).toHaveBeenCalledWith('base-pr'); // R3a boundary fetch only
   });
 
   it('revision lane fail-open: a getRunTrades throw skips the veto and emits revision.preservation_skipped', async () => {
@@ -569,5 +578,64 @@ describe('revision-flow integration (R1 Task 4): revision.build Step-0 self-gate
     const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
     expect(events).not.toContain('revision.build.deferred');
     expect(events).not.toContain('revision.build.abandoned');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3a Task 2: OOS holdout boundary computation + observable skip paths
+// ---------------------------------------------------------------------------
+//
+// Task 2 only computes the boundary and records an observable `holdoutValidation` skip on any
+// non-trade_based outcome — it does NOT activate the gate (Task 3). The greedy loop / ACCEPT path
+// still runs on the full window regardless of what the boundary resolves to.
+//
+// makeServices()'s default runTrades (MockRunTradesAdapter) always returns [] and
+// defaultPlatformRun's period spans 180 days (>= DEFAULT_HOLDOUT_POLICY.minHistoryDays 30), so
+// resolveHoldoutBoundary clears the history-length check but has zero trades to place a train/
+// holdout split over -> mode:'none', reason:'insufficient_trades' (NOT 'insufficient_history').
+describe('revision-flow integration (R3a Task 2): OOS holdout boundary + skip paths', () => {
+  it('records a holdout skip on insufficient trades and still accepts (full-window)', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    expect(v2!.status).toBe('accepted');
+    expect(v2!.holdoutValidation?.mode).toBe('none');
+    expect(v2!.holdoutValidation?.reason).toBe('skipped_insufficient_trades');
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.holdout_skipped');
+  });
+
+  it('fails soft to boundary_unavailable when baseline trades cannot be fetched', async () => {
+    const getRunTrades = vi.fn(async () => { throw new Error('trades fetch boom'); });
+    const runTrades = { getRunTrades, getBaselineRunTrades: vi.fn(async () => null) };
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v2).toBeDefined();
+    // still accepted on the full window — fail-soft, never a silent drop:
+    expect(v2!.status).toBe('accepted');
+    expect(v2!.holdoutValidation?.mode).toBe('none');
+    expect(v2!.holdoutValidation?.reason).toBe('boundary_unavailable');
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.holdout_skipped');
   });
 });

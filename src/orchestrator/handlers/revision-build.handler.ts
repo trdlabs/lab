@@ -6,7 +6,7 @@ import { event, errMsg } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
-import type { DroppedHypothesis, StrategyRevision } from '../../domain/strategy-revision.ts';
+import type { DroppedHypothesis, HoldoutValidation, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { sortEligible } from '../../research/hypothesis-score.ts';
@@ -23,7 +23,9 @@ import type { RevisionRunResult } from '../../ports/strategy-revision-run-execut
 import { evaluateRevision, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
 import { applyRevisionPreservationGate } from '../../validation/apply-preservation-gate.ts';
 import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
-import type { TradeRecord } from '../../domain/research-experiment.ts';
+import type { TradeRecord, HoldoutBoundary } from '../../domain/research-experiment.ts';
+import { resolveHoldoutBoundary } from '../../research/holdout-boundary-resolver.ts';
+import { DEFAULT_HOLDOUT_POLICY } from '../../domain/research-experiment.ts';
 
 export const RevisionBuildPayloadSchema = z.object({
   strategyProfileId: z.string().min(1),
@@ -349,6 +351,27 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     return;
   }
 
+  // --- R3a Task 2: OOS holdout boundary (fixed once from the full-window baseline trades) ---
+  // Computed here so it is available to Task 3's activation, but this slice only records an
+  // observable skip (fail-soft, never a silent drop) on any non-trade_based outcome — the greedy
+  // loop and ACCEPT below still run on the full window unchanged.
+  let boundary: HoldoutBoundary = { mode: 'none', lowConfidence: false, reason: 'insufficient_history' };
+  let holdoutValidation: HoldoutValidation | undefined;
+  try {
+    const fullBaselineTrades = await services.runTrades.getRunTrades(baselinePlatformRunId!);
+    boundary = resolveHoldoutBoundary(fullBaselineTrades, runConfig.period, DEFAULT_HOLDOUT_POLICY);
+  } catch (err) {
+    holdoutValidation = { mode: 'none', reason: 'boundary_unavailable' };
+    await services.events.append(event(task.id, 'revision.holdout_skipped', {
+      revisionId, reason: 'boundary_unavailable', detail: errMsg(err),
+    }));
+  }
+  if (!holdoutValidation && boundary.mode === 'none') {
+    const reason = boundary.reason === 'insufficient_trades' ? 'skipped_insufficient_trades' : 'skipped_insufficient_history';
+    holdoutValidation = { mode: 'none', reason };
+    await services.events.append(event(task.id, 'revision.holdout_skipped', { revisionId, reason }));
+  }
+
   // --- Steps 9-10: candidate run + evaluate, greedy degradation (<= 3 candidate runs total) ---
   let currentIds = [...compose.included];
   let verdict: RevisionVerdict = { decision: 'REJECT', reasons: ['not_attempted'] };
@@ -436,7 +459,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.revisions.updateStatus(revisionId, {
       status: 'accepted', metrics: acceptedMetrics as unknown as Record<string, unknown>,
       comboBacktestRunId: acceptedRun.runId, verdictReason: verdict.reasons.join(', '),
-      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
+      preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
+      updatedAt: now(),
     });
     for (const id of currentIds) {
       await services.hypotheses.updateStatus(id, 'merged');
@@ -479,7 +503,8 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   } else {
     await services.revisions.updateStatus(revisionId, {
       status: 'rejected', verdictReason: allRejectReasons.join(', '),
-      preservationGate: firedPreservation ?? undefined, updatedAt: now(),
+      preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
+      updatedAt: now(),
     });
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: allRejectReasons,
