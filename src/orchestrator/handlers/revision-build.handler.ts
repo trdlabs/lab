@@ -20,7 +20,7 @@ import { RESEARCH_RUN_METRICS } from '../../domain/platform-comparison.ts';
 import type { StrategyManifestMeta } from '../../ports/strategy-builder.port.ts';
 import type { BacktestMetricBlock } from '../../ports/platform-gateway.port.ts';
 import type { RevisionRunResult } from '../../ports/strategy-revision-run-executor.ts';
-import { evaluateRevision, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
+import { evaluateRevision, DEFAULT_REVISION_EVALUATOR_POLICY, type RevisionVerdict } from '../../validation/revision-evaluator.ts';
 import { applyRevisionPreservationGate } from '../../validation/apply-preservation-gate.ts';
 import type { PreservationMetadata } from '../../validation/trade-preservation.ts';
 import type { TradeRecord, HoldoutBoundary } from '../../domain/research-experiment.ts';
@@ -453,7 +453,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     });
 
     if (result.status === 'completed' && result.metrics) {
-      verdict = evaluateRevision({ accepted: selectionBaselineMetrics, candidate: result.metrics, minTrades: 20 });
+      verdict = evaluateRevision({ accepted: selectionBaselineMetrics, candidate: result.metrics }, DEFAULT_REVISION_EVALUATOR_POLICY);
       if (gateOn && verdict.decision === 'ACCEPT') {
         try {
           if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(selectionBaselinePlatformRunId!);
@@ -531,7 +531,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     const hBaseM = hBase.status === 'completed' ? hBase.metrics : undefined;
     const hCandM = hCand.status === 'completed' ? hCand.metrics : undefined;
     const holdoutVerdict: RevisionVerdict = hBaseM && hCandM
-      ? evaluateRevision({ accepted: hBaseM, candidate: hCandM, minTrades: 20 })
+      ? evaluateRevision({ accepted: hBaseM, candidate: hCandM }, DEFAULT_REVISION_EVALUATOR_POLICY)
       : { decision: 'REJECT', reasons: ['holdout_run_unavailable'] };
     const trainMetrics = acceptedMetrics as unknown as Record<string, unknown>;
     if (holdoutVerdict.decision !== 'ACCEPT') {
