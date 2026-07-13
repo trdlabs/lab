@@ -41,6 +41,7 @@ export function registerStreamRoutes(app: Hono, deps: StreamRouteDeps): void {
     return streamSSE(c, async (stream) => {
       const status = new Map<AgentId, AgentLifecycle>();
       let lastKey: Cursor | undefined = after;
+      const signal = c.req.raw.signal;
 
       const emit = async (row: AgentEventRow): Promise<void> => {
         const k = keyOf(row);
@@ -64,13 +65,19 @@ export function registerStreamRoutes(app: Hono, deps: StreamRouteDeps): void {
         while (buffer.length) await emit(buffer.shift()!);
         pumping = false;
       };
-      const unsub = deps.agentStream.subscribe((row) => { buffer.push(row); if (live) void pump(); });
+      // pump()'s writes can reject once the client socket closes. This is a fire-and-forget path
+      // (a live event arriving), so swallow the rejection — an escaped one is an unhandled rejection
+      // that, with the process safety net (P0-7), can be fatal. The abort listener below tears the
+      // stream down cleanly.
+      const unsub = deps.agentStream.subscribe((row) => { buffer.push(row); if (live) void pump().catch(() => {}); });
 
       let hb: ReturnType<typeof setInterval> | undefined;
       try {
-        // 2) Replay from the resume cursor up to the current tail.
+        // 2) Replay from the resume cursor up to the current tail. Bail as soon as the client is
+        //    gone, so a disconnected client with an ancient ?cursor= can't force a full-table scan.
         let cur = after;
         for (;;) {
+          if (signal.aborted) break;
           const rows = await deps.agentEvents.list({ after: cur, limit: pageSize });
           if (rows.length === 0) break;
           for (const row of rows) await emit(row);
@@ -81,10 +88,10 @@ export function registerStreamRoutes(app: Hono, deps: StreamRouteDeps): void {
         live = true;
         await pump();
 
-        // 4) Heartbeat + hold open until the client disconnects.
-        hb = setInterval(() => { void stream.write(': ping\n\n'); }, deps.heartbeatMs);
+        // 4) Heartbeat + hold open until the client disconnects. The heartbeat write is fire-and-
+        //    forget; swallow its rejection on a closed socket (same unhandled-rejection hazard as pump).
+        hb = setInterval(() => { void stream.write(': ping\n\n').catch(() => {}); }, deps.heartbeatMs);
         await new Promise<void>((resolve) => {
-          const signal = c.req.raw.signal;
           if (signal.aborted) return resolve();
           signal.addEventListener('abort', () => resolve(), { once: true });
         });
