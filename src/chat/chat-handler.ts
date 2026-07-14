@@ -72,11 +72,31 @@ export async function consumeConfirmation(
   const clearPending = (extra: Partial<ChatSessionContext> = {}): Promise<void> =>
     deps.sessions.upsert({ ...session, ...extra, pendingInteraction: undefined, updatedAt: now() });
 
+  // Operator-facing view of an already-confirmed proposal: its task's status, or a "still confirmed"
+  // note when no task is attached yet (confirmed but the create step hasn't landed / crashed).
+  const confirmedReply = async (proposal: ActionProposal): Promise<ChatResponse> => {
+    const taskId = proposal.confirmedTaskId;
+    if (!taskId) return assistantMessage(sid, 'Заявка уже подтверждена. Если задача не появилась — проверьте статус задачи.', { actions: [] });
+    const task = await deps.researchTasks.findById(taskId);
+    return task
+      ? taskStatus(sid, taskId, task.status)
+      : taskCreated(sid, taskId, proposal.task.taskType, 'queued');
+  };
+
   if (decision === 'cancel') {
-    await deps.proposals.cancelPending(proposalId, sid, now());
-    await clearPending();
-    await ev('chat.proposal.cancelled', { proposalId, sessionId: sid });
-    return assistantMessage(sid, 'Отменил. Если нужно — пришлите стратегию или запрос заново.', { actions: [] });
+    const cancelled = await deps.proposals.cancelPending(proposalId, sid, now());
+    await clearPending(); // pending is terminal either way — never leave the session wedged
+    if (cancelled) {
+      await ev('chat.proposal.cancelled', { proposalId, sessionId: sid });
+      return assistantMessage(sid, 'Отменил. Если нужно — пришлите стратегию или запрос заново.', { actions: [] });
+    }
+    // Nothing to cancel: the proposal was already confirmed (task running), expired, or gone. Answer
+    // honestly instead of claiming a cancellation, and never emit a false chat.proposal.cancelled.
+    // findById is unscoped, so re-check session ownership here — a confirmed proposal belonging to
+    // ANOTHER session must not leak its task status (the repo already fails cancelPending on mismatch).
+    const proposal = await deps.proposals.findById(proposalId);
+    if (proposal?.status === 'confirmed' && proposal.sessionId === sid) return confirmedReply(proposal);
+    return assistantMessage(sid, 'Нечего отменять — заявка уже неактивна. Пришлите запрос заново.', { actions: [] });
   }
 
   if (decision === 'unresolved') {
@@ -96,12 +116,11 @@ export async function consumeConfirmation(
     case 'confirmed_now':
       return executeConfirmedProposal(result.proposal, session, deps, ev, now, decision);
     case 'already_confirmed': {
-      const taskId = result.proposal.confirmedTaskId;
-      if (!taskId) return assistantMessage(sid, 'Заявка уже подтверждена. Если задача не появилась — проверьте статус задачи.', { actions: [] });
-      const task = await deps.researchTasks.findById(taskId);
-      return task
-        ? taskStatus(sid, taskId, task.status)
-        : taskCreated(sid, taskId, result.proposal.task.taskType, 'queued');
+      // Clear the (possibly stuck) pending state: a crash between confirmPending and task creation
+      // could leave the session pointing at a confirmed proposal, trapping it in the "не понял" loop
+      // (the interpreter is never consulted while pendingInteraction is set).
+      await clearPending();
+      return confirmedReply(result.proposal);
     }
     case 'expired':
       await clearPending();
