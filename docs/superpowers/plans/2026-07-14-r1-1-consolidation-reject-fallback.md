@@ -216,7 +216,7 @@ Expected: PASS (new fallback + retry-regression tests pass; inverted tests pass;
 
 - [ ] **Step 10: Typecheck + commit**
 
-Run: `npx tsc --noEmit` (expect clean), then:
+Run: `pnpm typecheck` (expect clean), then:
 
 ```bash
 git add src/orchestrator/handlers/revision-consolidate.handler.ts src/orchestrator/handlers/revision-consolidate.handler.test.ts
@@ -262,12 +262,28 @@ it('already_consolidated: recovers a crash-orphaned child baseline (consolidated
   // R itself is NOT fallback-baselined
   expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).toBeNull();
 });
+
+it('ensureBaselineForRevision guard: an existing child with no bundleArtifactRef → handler rejects, no baseline', async () => {
+  const services = makeServices();
+  const R = await seedConsolidatableRevision(services);
+  const child: StrategyRevision = {
+    id: 'rev-child-nobundle', strategyProfileId: R.strategyProfileId, version: R.version + 1,
+    baseRevisionId: R.id, kind: 'consolidated', consolidatedFromRevisionId: R.id, semanticParentRevisionId: R.id,
+    hypothesisIds: [], mergedRuleSet: {}, /* bundleArtifactRef intentionally absent */
+    compositionDepth: 1, status: 'accepted', baselineValidationStatus: 'pending',
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  };
+  await services.revisions.create(child);
+
+  await expect(revisionConsolidateHandler(task(), services)).rejects.toThrow(/no bundleArtifactRef/);
+  expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:consolidated:${child.id}`)).toBeNull();
+});
 ```
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [ ] **Step 2: Run them to confirm they fail**
 
-Run: `npx vitest run src/orchestrator/handlers/revision-consolidate.handler.test.ts -t "already_consolidated: recovers"`
-Expected: FAIL — the current `already_consolidated` branch emits a skip with no `newRevisionId` and enqueues nothing.
+Run: `npx vitest run src/orchestrator/handlers/revision-consolidate.handler.test.ts -t "already_consolidated: recovers|guard: an existing child"`
+Expected: FAIL — the current `already_consolidated` branch emits a skip with no `newRevisionId`, enqueues nothing, and never reaches the bundleArtifactRef guard.
 
 - [ ] **Step 3: Implement `already_consolidated` child recovery**
 
@@ -328,6 +344,18 @@ it('concurrent_revision (snapshot): a consolidated child of R at v+1 → ensure 
   await services.revisions.create(competitor);
   services.consolidator = new FakeStrategyConsolidator();
   services.revisionRunExecutor = fakeExecutor({ metrics: acceptedMetrics() }).executor;
+
+  // The child was pre-created, so the top-of-handler already_consolidated guard would short-circuit
+  // BEFORE create-catch. Model the race: the top guard's FIRST findConsolidatedOf read misses a
+  // concurrently-committing child (returns null), so the handler proceeds to acceptConsolidation,
+  // create(consolidated at v+1) collides, and the create-catch discovers the child via its
+  // listByProfile snapshot — the single-snapshot classification path under test.
+  const realFind = services.revisions.findConsolidatedOf.bind(services.revisions);
+  let first = true;
+  services.revisions.findConsolidatedOf = async (id) => {
+    if (first) { first = false; return null; }
+    return realFind(id);
+  };
 
   await revisionConsolidateHandler(task(), services);
 
@@ -420,7 +448,7 @@ Expected: PASS (Task 1 + Task 2 tests; all pre-existing accept/skip/reject tests
 
 - [ ] **Step 11: Typecheck + commit**
 
-Run: `npx tsc --noEmit` (expect clean), then:
+Run: `pnpm typecheck` (expect clean), then:
 
 ```bash
 git add src/orchestrator/handlers/revision-consolidate.handler.ts src/orchestrator/handlers/revision-consolidate.handler.test.ts
@@ -431,5 +459,6 @@ git commit -m "fix(revision-consolidate): success-path crash-safety — child re
 
 ## Post-implementation
 
-- [ ] Run the broader orchestrator suite to confirm no cross-handler regression: `npx vitest run src/orchestrator`.
+- [ ] `pnpm typecheck` — clean.
+- [ ] `pnpm test` — the FULL suite (not only `src/orchestrator`), to confirm no cross-cutting regression. A clean re-run is authoritative if the first run flakes under load.
 - [ ] Whole-branch review (opus) over `git merge-base main HEAD..HEAD`, with the two intentional spec-correcting test changes (divergent-metrics inversion; UNIQUE-collision split) called out so they are not flagged as weakened tests.
