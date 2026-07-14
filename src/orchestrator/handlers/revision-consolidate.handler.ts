@@ -25,6 +25,35 @@ export const RevisionConsolidatePayloadSchema = z.object({
 const now = (): string => new Date().toISOString();
 
 /**
+ * The single idempotent baseline-enqueue path for this handler. Enqueues a ready-bundle
+ * strategy.baseline for `revision` under `dedupeKey`, unless a task already exists for that key
+ * (then it neither re-enqueues nor touches revision status — never rolls a completed baseline back
+ * to 'pending'). Returns whether it deduped.
+ */
+async function ensureBaselineForRevision(
+  task: ResearchTask,
+  services: AppServices,
+  revision: StrategyRevision,
+  dedupeKey: string,
+): Promise<boolean> {
+  if (!revision.bundleArtifactRef) {
+    throw new Error(`ensureBaselineForRevision: revision ${revision.id} has no bundleArtifactRef`);
+  }
+  const existing = await services.researchTasks.findByDedupeKey(dedupeKey);
+  if (existing) return true;
+  await services.revisions.updateStatus(revision.id, { baselineValidationStatus: 'pending', updatedAt: now() });
+  await createAndEnqueueTask(
+    {
+      taskType: 'strategy.baseline', source: task.source,
+      payload: { strategyProfileId: revision.strategyProfileId, bundleArtifactRef: revision.bundleArtifactRef, revisionId: revision.id },
+      correlationId: task.correlationId, dedupeKey,
+    },
+    { repo: services.researchTasks, queue: services.taskQueue },
+  );
+  return false;
+}
+
+/**
  * ACCEPT path (slice G3b Task 9) — strict-parity success: materialize an equivalent,
  * depth-reset `kind:'consolidated'` revision from R and enqueue a ready-bundle
  * `strategy.baseline` re-baseline. hypothesisIds/mergedRuleSet are inherited VERBATIM from R
@@ -76,15 +105,13 @@ async function acceptConsolidation(
 /**
  * slice G3b Task 8 — `revision.consolidate` handler: guards, run-context source-of-truth,
  * parity (equivalence) gate, and fail-safe reject paths. FAIL-SAFE: every failure leaves the
- * stacked revision R accepted/source-of-truth, emits an event, and does NOT re-baseline.
+ * stacked revision R accepted/source-of-truth, emits an event, and (R1 #1) re-baselines R
+ * directly via `ensureBaselineForRevision` so R is never stranded out of the paper loop.
  */
 export const revisionConsolidateHandler: WorkflowHandler = async (task, services) => {
   const parsed = validateWithSchema(RevisionConsolidatePayloadSchema, task.payload);
   if (parsed.status === 'invalid') throw new Error(`invalid revision.consolidate payload: ${JSON.stringify(parsed.issues)}`);
   const { revisionId, strategyProfileId } = parsed.data;
-  const reject = async (reason: string, extra: Record<string, unknown> = {}) => {
-    await services.events.append(event(task.id, 'revision.consolidation_rejected', { fromRevisionId: revisionId, reason, ...extra }));
-  };
 
   // Idempotency (retryable fail-safe): no-op only if R is already consolidated.
   if (await services.revisions.findConsolidatedOf(revisionId)) {
@@ -96,6 +123,15 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
     await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId, reason: 'not_consolidatable' }));
     return;
   }
+  // Defined after the not_consolidatable guard so it closes over the validated, non-null R.
+  const reject = async (reason: string, extra: Record<string, unknown> = {}): Promise<void> => {
+    await services.events.append(event(task.id, 'revision.consolidation_rejected', { fromRevisionId: R.id, reason, ...extra }));
+    // R1 #1: a terminal consolidation failure must still return R to paper. Re-baseline R directly
+    // (ready-bundle), identical to revision-build's non-consolidation branch. Reusing the
+    // accepted:${R.id} dedupeKey is a safety-net against ever double-baselining R.
+    const deduped = await ensureBaselineForRevision(task, services, R, `strategy.baseline:accepted:${R.id}`);
+    await services.events.append(event(task.id, 'revision.reject_rebaselined', { revisionId: R.id, reason, deduped }));
+  };
   // Run-context = the ACTUAL combo run's platformRun (source of truth; no default fallback).
   if (!R.comboBacktestRunId || !R.metrics) { await reject('missing_run_context'); return; }
   const comboRun = await services.strategyBacktests.findById(R.comboBacktestRunId);

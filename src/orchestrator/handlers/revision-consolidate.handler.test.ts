@@ -206,12 +206,12 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(events[0]!.payload['reason']).toBe('not_consolidatable');
   });
 
-  it('reconstruct_failed: corrupt bundleArtifactRef payload — rejected, R stays accepted, no consolidated revision', async () => {
+  it('reconstruct_failed: corrupt bundleArtifactRef payload — rejected, R stays accepted, no consolidated revision, falls back to accepted-baseline re-baseline (R1 #1)', async () => {
     const services = makeServices();
     const corruptRef = await services.artifacts.put('not-valid-json{{{', {
       kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test-fixture',
     });
-    await seedConsolidatableRevision(services, { revisionOverrides: { bundleArtifactRef: corruptRef } });
+    const R = await seedConsolidatableRevision(services, { revisionOverrides: { bundleArtifactRef: corruptRef } });
     const { consolidator, calls } = spyConsolidator(new FakeStrategyConsolidator());
     services.consolidator = consolidator;
 
@@ -219,17 +219,21 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
 
     expect(calls).toHaveLength(0);
     const events = await services.events.listByTask('task-consolidate-1');
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     expect(events[0]!.type).toBe('revision.consolidation_rejected');
     expect(events[0]!.payload['reason']).toBe('reconstruct_failed');
     expect(events[0]!.payload['detail']).toBeDefined();
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
     expect(await services.revisions.findConsolidatedOf('rev-1')).toBeNull();
+
+    // R1 #1: reconstruct_failed is still a terminal reject — R still gets the accepted:${R.id} fallback.
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
+    expect(events.map((e) => e.type)).toContain('revision.reject_rebaselined');
   });
 
-  it('missing_run_context: comboBacktestRunId absent — rejected, no fallback to defaultPlatformRun', async () => {
+  it('missing_run_context: comboBacktestRunId absent — rejected, no fallback to defaultPlatformRun, falls back to accepted-baseline re-baseline', async () => {
     const services = makeServices();
-    await seedConsolidatableRevision(services, { revisionOverrides: { comboBacktestRunId: undefined } });
+    const R = await seedConsolidatableRevision(services, { revisionOverrides: { comboBacktestRunId: undefined } });
     const { consolidator, calls } = spyConsolidator(new FakeStrategyConsolidator());
     services.consolidator = consolidator;
 
@@ -239,16 +243,20 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     // services.defaultPlatformRun for the missing combo-run context.
     expect(calls).toHaveLength(0);
     const events = await services.events.listByTask('task-consolidate-1');
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     expect(events[0]!.type).toBe('revision.consolidation_rejected');
     expect(events[0]!.payload['reason']).toBe('missing_run_context');
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
     expect(await services.revisions.findConsolidatedOf('rev-1')).toBeNull();
+
+    // R1 #1: missing_run_context is still a terminal reject — R still gets the accepted:${R.id} fallback.
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
+    expect(events.map((e) => e.type)).toContain('revision.reject_rebaselined');
   });
 
-  it('missing_run_context: combo run platformRun is null — rejected, no fallback to defaultPlatformRun', async () => {
+  it('missing_run_context: combo run platformRun is null — rejected, no fallback to defaultPlatformRun, falls back to accepted-baseline re-baseline', async () => {
     const services = makeServices();
-    await seedConsolidatableRevision(services, { platformRun: null });
+    const R = await seedConsolidatableRevision(services, { platformRun: null });
     const { consolidator, calls } = spyConsolidator(new FakeStrategyConsolidator());
     services.consolidator = consolidator;
 
@@ -258,6 +266,10 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     const events = await services.events.listByTask('task-consolidate-1');
     expect(events[0]!.payload['reason']).toBe('missing_run_context');
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
+
+    // R1 #1: missing_run_context is still a terminal reject — R still gets the accepted:${R.id} fallback.
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
+    expect(events.map((e) => e.type)).toContain('revision.reject_rebaselined');
   });
 
   it('consolidator_disabled: null consolidator — rejected', async () => {
@@ -269,6 +281,27 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
 
     const events = await services.events.listByTask('task-consolidate-1');
     expect(events[0]!.payload['reason']).toBe('consolidator_disabled');
+  });
+
+  it('reject fallback: consolidator_disabled re-baselines R directly (accepted:${R.id}) + reject_rebaselined event', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+    services.consolidator = null; // -> reject('consolidator_disabled')
+
+    await revisionConsolidateHandler(task(), services);
+
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events.map((e) => e.type)).toEqual(['revision.consolidation_rejected', 'revision.reject_rebaselined']);
+    expect(events[0]!.payload['reason']).toBe('consolidator_disabled');
+    expect(events[1]!.payload).toMatchObject({ revisionId: R.id, reason: 'consolidator_disabled', deduped: false });
+
+    const baseline = await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`);
+    expect(baseline).not.toBeNull();
+    expect(baseline!.taskType).toBe('strategy.baseline');
+    expect(baseline!.payload).toMatchObject({ strategyProfileId: R.strategyProfileId, bundleArtifactRef: R.bundleArtifactRef, revisionId: R.id });
+
+    const updated = await services.revisions.findById(R.id);
+    expect(updated!.baselineValidationStatus).toBe('pending');
   });
 
   it('consolidator_error: consolidate() throws — rejected with detail', async () => {
@@ -338,9 +371,47 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(events[0]!.payload['reason']).toBe('consolidation_run_unavailable');
   });
 
-  it('divergent metrics: rejected with metric/trade_count reasons + deltas; R stays accepted; no consolidated child; no baseline enqueued', async () => {
+  it.each([
+    ['reconstruct_failed', async (s: AppServices) => {
+      const corruptRef = await s.artifacts.put('not-valid-json{{{', {
+        kind: 'strategy_bundle', mime_type: 'application/json', producer: 'test-fixture',
+      });
+      await s.revisions.updateStatus('rev-1', { bundleArtifactRef: corruptRef });
+    }],
+    ['consolidator_error', (s: AppServices) => {
+      s.consolidator = {
+        adapter: 'fake', model: 'fake',
+        consolidate: async () => { throw new Error('llm blew up'); },
+      };
+    }],
+    ['bundle_invalid', (s: AppServices) => {
+      s.consolidator = {
+        adapter: 'fake', model: 'fake',
+        consolidate: async () => ({ source: AMBIENT_AUTHORITY_SOURCE, manifestMeta: STACK_MANIFEST_META }),
+      };
+    }],
+    ['consolidation_run_unavailable', (s: AppServices) => {
+      s.consolidator = new FakeStrategyConsolidator();
+      const { executor } = fakeExecutor({ status: 'pending', metrics: undefined });
+      s.revisionRunExecutor = executor;
+    }],
+  ] as const)('reject fallback: %s re-baselines R (accepted:${R.id})', async (reason, arrange) => {
     const services = makeServices();
-    await seedConsolidatableRevision(services);
+    const R = await seedConsolidatableRevision(services);
+    await arrange(services);
+
+    await revisionConsolidateHandler(task(), services);
+
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events.find((e) => e.type === 'revision.consolidation_rejected')!.payload['reason']).toContain(reason.split(':')[0]);
+    const rebase = events.find((e) => e.type === 'revision.reject_rebaselined');
+    expect(rebase!.payload).toMatchObject({ revisionId: R.id, deduped: false });
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
+  });
+
+  it('divergent metrics: rejected with metric/trade_count reasons + deltas; R stays accepted; no consolidated child; falls back to accepted-baseline re-baseline (R1 #1)', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
     services.consolidator = new FakeStrategyConsolidator();
     const { executor } = fakeExecutor({ metrics: { ...acceptedMetrics(), totalTrades: 31 } });
     services.revisionRunExecutor = executor;
@@ -348,7 +419,7 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     await revisionConsolidateHandler(task(), services);
 
     const events = await services.events.listByTask('task-consolidate-1');
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     expect(events[0]!.type).toBe('revision.consolidation_rejected');
     const reasons = events[0]!.payload['reasons'] as string[];
     expect(reasons).toContain('trade_count_changed');
@@ -356,8 +427,15 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
 
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
     expect(await services.revisions.findConsolidatedOf('rev-1')).toBeNull();
-    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    expect(queued.some((q) => q.taskType === 'strategy.baseline')).toBe(false);
+
+    // R1 #1: the reject fallback re-baselines R directly — was: expect(queued.some((q) =>
+    // q.taskType === 'strategy.baseline')).toBe(false); that literal assertion encoded the
+    // stranding bug this fix closes, not a coincidental invariant.
+    const fallback = await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`);
+    expect(fallback).not.toBeNull();
+    expect(fallback!.payload['revisionId']).toBe(R.id);
+    const evTypes = events.map((e) => e.type);
+    expect(evTypes).toContain('revision.reject_rebaselined');
   });
 
   it('rejected is retryable: a second invocation with an equivalent executor proceeds past the parity gate', async () => {
@@ -385,6 +463,30 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(consolidatorCalls).toHaveLength(2);
     expect(equivalent.calls).toHaveLength(1);
     expect(await services.revisions.findConsolidatedOf('rev-1')).not.toBeNull();
+  });
+
+  it('reject fallback is idempotent: a completed accepted-baseline is not rolled back, event deduped:true', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+
+    // Simulate a prior fallback that already ran to completion.
+    await services.researchTasks.create({
+      id: 'rt-existing-baseline', taskType: 'strategy.baseline', source: task().source,
+      correlationId: 'c-existing', dedupeKey: `strategy.baseline:accepted:${R.id}`, status: 'completed',
+      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: R.bundleArtifactRef, revisionId: R.id },
+      availableAt: '2026-01-01T00:00:00Z', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+    await services.revisions.updateStatus(R.id, { baselineValidationStatus: 'passed', updatedAt: '2026-01-01T00:00:00Z' });
+
+    services.consolidator = null; // reject('consolidator_disabled')
+    const beforeQueued = (services.taskQueue as InMemoryQueueAdapter).queued.length;
+
+    await revisionConsolidateHandler(task(), services);
+
+    expect((await services.revisions.findById(R.id))!.baselineValidationStatus).toBe('passed'); // NOT rolled back
+    expect((services.taskQueue as InMemoryQueueAdapter).queued.length).toBe(beforeQueued);       // no new job
+    const rebase = (await services.events.listByTask('task-consolidate-1')).find((e) => e.type === 'revision.reject_rebaselined');
+    expect(rebase!.payload['deduped']).toBe(true);
   });
 });
 
