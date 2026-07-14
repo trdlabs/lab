@@ -183,6 +183,13 @@
       "when": 1784019881988,
       "tag": "0025_tiny_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784028228306,
+      "tag": "0026_secret_risque",
+      "breakpoints": true
     }
   ]
 }

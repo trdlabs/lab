@@ -25,6 +25,7 @@ import { FakeGate1 } from '../../adapters/wfo/fake-gate1.ts';
 import { FakeSweepDesigner } from '../../adapters/wfo/fake-sweep-designer.ts';
 import { FakeResultInterpreter } from '../../adapters/wfo/fake-result-interpreter.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
+import { InMemoryCycleScorecardRepository } from '../../adapters/repository/in-memory-cycle-scorecard.repository.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -213,6 +214,7 @@ describe('new-strategy holdout reroute (cycleDepth === 0)', () => {
       tokenUsage: { getCost: async () => 0 },
       phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
       experiments: new ExperimentReadBridge(experiments),
+      cycleScorecards: new InMemoryCycleScorecardRepository(),
     });
 
     const res = await readApp.request(`/v1/experiments/${experimentId}/runs`, { headers: AUTH });

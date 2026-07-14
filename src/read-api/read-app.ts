@@ -11,8 +11,9 @@ import { registerStreamRoutes } from './routes/stream.ts';
 import { registerCompletionSummaryRoutes } from './routes/completion-summary.ts';
 import { registerAgentTraceRoutes } from './routes/agent-traces.ts';
 import { registerExperimentRoutes } from './routes/experiments.ts';
+import { registerCycleScorecardRoutes } from './routes/cycle-scorecard.ts';
 
-const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary', '/experiments', '/experiments/:id', '/experiments/:id/runs'];
+const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary', '/experiments', '/experiments/:id', '/experiments/:id/runs', '/cycles/:correlationId/scorecard'];
 
 export function createReadApp(deps: ReadApiDeps): Hono {
   const app = new Hono();
@@ -38,6 +39,7 @@ export function createReadApp(deps: ReadApiDeps): Hono {
   registerAgentRoutes(v1, deps);
   registerAgentTraceRoutes(v1, deps);
   registerCompletionSummaryRoutes(v1, deps);
+  registerCycleScorecardRoutes(v1, deps);
   registerStreamRoutes(v1, {
     agentEvents: deps.agentEvents,
     agentStream: deps.agentStream,

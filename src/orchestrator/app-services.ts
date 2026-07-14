@@ -41,6 +41,7 @@ import type { PaperRunLocatorPort } from '../ports/paper-run-locator.port.ts';
 import type { SignedEvidenceProviderPort } from '../ports/signed-evidence-provider.port.ts';
 import type { StrategyConsolidatorPort } from '../ports/strategy-consolidator.port.ts';
 import type { ConsolidationTolerances } from '../validation/consolidation-evaluator.ts';
+import type { CycleScorecardRepository } from '../ports/cycle-scorecard.repository.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -131,4 +132,6 @@ export interface AppServices {
   trustedSigners: Record<string, string>;
   /** Fail-closed gate mirrored from env.LAB_PAPER_EVIDENCE_REQUIRED (079). */
   paperEvidenceRequired: boolean;
+  /** Cycle scorecards ledger (R5b) — consumed by cycleScorecardHandler ('cycle.scorecard'). */
+  cycleScorecards: CycleScorecardRepository;
 }

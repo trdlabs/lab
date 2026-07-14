@@ -6,6 +6,7 @@ import { event, errMsg, stableStringify } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
+import { finalizeCycle } from '../finalize-cycle.ts';
 import type { DroppedHypothesis, HoldoutValidation, SelectionEvaluation, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -174,6 +175,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     const waitAttempt = parsed.data.waitAttempt ?? 0;
     if (waitAttempt >= CYCLE_CLOSE_MAX_WAIT_ATTEMPTS) {
       await services.events.append(event(task.id, 'revision.build.abandoned', { correlationId, waitAttempt }));
+      await finalizeCycle({
+        outcome: {
+          correlationId, strategyProfileId, sourceTaskId: task.id,
+          terminalOutcome: { kind: 'abandoned', reason: 'wait_cap_exhausted' },
+        },
+        deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+      });
       return;
     }
     const next = waitAttempt + 1;
@@ -197,6 +205,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   }
   if (!accepted || !accepted.bundleArtifactRef) {
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'no_baseline' }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'skipped', reason: 'no_baseline' },
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
 
@@ -216,9 +231,20 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   );
   const proposals = (await services.hypotheses.listByStrategyProfile(strategyProfileId))
     .filter((p) => cycleHypothesisIds.has(p.id));
-  const eligible = sortEligible(proposals).slice(0, services.revisionBatchMax);
+  const sortedEligible = sortEligible(proposals);
+  const eligibleHypIds = sortedEligible.map((p) => p.id);
+  const eligible = sortedEligible.slice(0, services.revisionBatchMax);
+  const consideredHypIds = eligible.map((p) => p.id);
   if (eligible.length === 0) {
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'no_eligible_hypotheses' }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'skipped', reason: 'no_eligible_hypotheses' },
+        eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
 
@@ -273,6 +299,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     // rejected revision row referencing them, so they don't accumulate as orphaned proxy_*
     // forever. Deliberately not implemented in this fix — user-acknowledged trade-off.
     await services.events.append(event(task.id, 'revision.skipped', { strategyProfileId, reason: 'nothing_composable' }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'skipped', reason: 'nothing_composable' },
+        eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
 
@@ -283,6 +317,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.skipped', {
       strategyProfileId, reason: 'bundle_invalid', violations: initialValidation.violations,
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'skipped', reason: 'bundle_invalid' },
+        eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
   let bundleArtifactRef = await putBundleWrapper(services, assembled);
@@ -305,6 +347,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.skipped', {
       strategyProfileId, reason: 'concurrent_revision', detail: errMsg(err),
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'skipped', reason: 'concurrent_revision' },
+        eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
 
@@ -341,6 +391,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: ['eval_window_inconsistent'],
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'rejected', reason: 'eval_window_inconsistent' },
+        revisionId, eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
   if (distinct.size === 1) {
@@ -374,6 +432,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: ['comparison_baseline_unavailable'],
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'rejected', reason: 'comparison_baseline_unavailable' },
+        revisionId, eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
     return;
   }
 
@@ -568,6 +634,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
         lowConfidence: boundary.lowConfidence, trainMetrics, holdoutMetrics: (hCandM as unknown as Record<string, unknown>) ?? undefined,
       }));
       await services.events.append(event(task.id, 'revision.rejected', { revisionId, version, reasons: ['holdout_failed'] }));
+      await finalizeCycle({
+        outcome: {
+          correlationId, strategyProfileId, sourceTaskId: task.id,
+          terminalOutcome: { kind: 'rejected', reason: 'holdout_failed' },
+          revisionId, eligibleHypIds, consideredHypIds,
+        },
+        deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+      });
       return;
     }
     // holdout passed: the holdout run becomes the accepted run-context (primary comboBacktestRunId/metrics).
@@ -598,6 +672,14 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.accepted', {
       revisionId, version, included: currentIds, metrics: acceptedMetrics,
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'accepted', reason: verdict.reasons.join(', ') },
+        revisionId, eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
 
     // G3b consolidation trigger: fire revision.consolidate once the accepted revision's
     // composition depth crosses the configured threshold. `services.consolidator !== null`
@@ -646,5 +728,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: allRejectReasons,
     }));
+    await finalizeCycle({
+      outcome: {
+        correlationId, strategyProfileId, sourceTaskId: task.id,
+        terminalOutcome: { kind: 'rejected', reason: allRejectReasons.join(', ') },
+        revisionId, eligibleHypIds, consideredHypIds,
+      },
+      deps: { researchTasks: services.researchTasks, taskQueue: services.taskQueue, events: services.events },
+    });
   }
 };

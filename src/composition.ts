@@ -21,6 +21,8 @@ import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.t
 import { revisionBuildHandler } from './orchestrator/handlers/revision-build.handler.ts';
 import { revisionConsolidateHandler } from './orchestrator/handlers/revision-consolidate.handler.ts';
 import { paperMonitorHandler } from './orchestrator/handlers/paper-monitor.handler.ts';
+import { cycleScorecardHandler } from './orchestrator/handlers/cycle-scorecard.handler.ts';
+import { DrizzleCycleScorecardRepository } from './adapters/repository/drizzle-cycle-scorecard.repository.ts';
 import { HeuristicPaperRunLocator } from './adapters/platform/heuristic-paper-run-locator.ts';
 import { backtestResumeHandler } from './orchestrator/handlers/backtest-resume.handler.ts';
 import { buildBacktestCallbackUrl } from './config/backtest-callback-url.ts';
@@ -391,6 +393,7 @@ export function composeRuntime() {
   const paramGridRunner = new ParamGridRunner({ strategyRunExecutor, concurrency: env.RESEARCH_GRID_CONCURRENCY });
   const tokenUsage = new DrizzleTokenUsageRepository(db);
   const revisions = new DrizzleStrategyRevisionRepository(db);
+  const cycleScorecards = new DrizzleCycleScorecardRepository(db);
   const experimentService = new ExperimentService({
     experiments,
     runTrades,
@@ -472,6 +475,7 @@ export function composeRuntime() {
     // key in LAB_TRUSTED_SIGNERS_JSON can never be shadowed by a provider-supplied keyId collision.
     trustedSigners: { ...(signedEvidence.trustedSigners ?? {}), ...env.LAB_TRUSTED_SIGNERS_JSON },
     paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
+    cycleScorecards,
   };
 
   const router = new WorkflowRouter();
@@ -486,6 +490,7 @@ export function composeRuntime() {
   router.register('paper.monitor', paperMonitorHandler);
   router.register('revision.build', revisionBuildHandler);
   router.register('revision.consolidate', revisionConsolidateHandler);
+  router.register('cycle.scorecard', cycleScorecardHandler);
 
   const chat: ChatAppDeps = {
     interpreter: buildTurnInterpreter(mastraRuntime),
@@ -534,6 +539,7 @@ export function composeRuntime() {
       apiKey: env.PHOENIX_API_KEY,
     }),
     experiments: new DrizzleExperimentReadAdapter(db),
+    cycleScorecards,
   };
 
   return { env, db, pool, queue, router, services, chat, read, mastraRuntime };

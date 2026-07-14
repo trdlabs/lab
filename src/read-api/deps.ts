@@ -8,6 +8,7 @@ import type { StrategyProfileRepository } from '../ports/strategy-profile.reposi
 import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
 import type { PhoenixTraceReader } from './phoenix/phoenix-trace-reader.ts';
 import type { ExperimentReadPort } from '../ports/experiment-read.port.ts';
+import type { CycleScorecardRepository } from '../ports/cycle-scorecard.repository.ts';
 
 export interface ReadApiDeps {
   hypotheses: HypothesisReadPort;
@@ -25,4 +26,5 @@ export interface ReadApiDeps {
   tokenUsage: Pick<TokenUsageRepository, 'getCost'>;
   phoenixTraces: Pick<PhoenixTraceReader, 'getAgentTraces'>;
   experiments: ExperimentReadPort;
+  cycleScorecards: CycleScorecardRepository;
 }

@@ -43,6 +43,7 @@ import type { PaperRunLocatorPort } from '../../src/ports/paper-run-locator.port
 import { selectSignedEvidence } from '../../src/adapters/platform/select-signed-evidence.ts';
 import { DEFAULT_CONSOLIDATION_TOLERANCES } from '../../src/validation/consolidation-evaluator.ts';
 import { DEFAULT_PRESERVATION_THRESHOLDS } from '../../src/validation/trade-preservation.ts';
+import { InMemoryCycleScorecardRepository } from '../../src/adapters/repository/in-memory-cycle-scorecard.repository.ts';
 
 export function makeServices(overrides: Partial<AppServices> = {}): AppServices {
   const hypotheses = new InMemoryHypothesisProposalRepository();
@@ -147,6 +148,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     consolidationTolerances: overrides.consolidationTolerances ?? DEFAULT_CONSOLIDATION_TOLERANCES,
     preservationGateEnabled: overrides.preservationGateEnabled ?? true,
     preservationThresholds: overrides.preservationThresholds ?? DEFAULT_PRESERVATION_THRESHOLDS,
+    cycleScorecards: new InMemoryCycleScorecardRepository(),
     ...overrides,
   };
 }
