@@ -5,7 +5,13 @@ export class InMemoryCycleScorecardRepository implements CycleScorecardRepositor
 
   async upsert(row: CycleScorecardRow): Promise<void> {
     const key = `${row.correlationId}::${row.schemaVersion}`;
-    this.byKey.set(key, { ...row });
+    const existing = this.byKey.get(key);
+    // Mirror the drizzle onConflictDoUpdate semantics: on a conflicting (correlationId, schemaVersion)
+    // the `id` and `createdAt` are preserved from the first insert (they are NOT in the drizzle `set`
+    // clause); only payload/strategyProfileId/generatedAt/updatedAt are replaced by the new row.
+    this.byKey.set(key, existing
+      ? { ...row, id: existing.id, createdAt: existing.createdAt }
+      : { ...row });
   }
 
   async findByCorrelationAndSchema(correlationId: string, schemaVersion: string): Promise<CycleScorecardRow | null> {

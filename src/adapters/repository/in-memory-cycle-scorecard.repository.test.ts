@@ -67,6 +67,7 @@ describe('InMemoryCycleScorecardRepository', () => {
 
     const found = await repo.findByCorrelationAndSchema('corr-1', CYCLE_SCORECARD_SCHEMA_VERSION);
     expect(found?.payload.verdict.reason).toBe('second');
+    expect(found?.id).toBe('sc-1'); // id preserved from the FIRST insert (mirrors drizzle onConflictDoUpdate; the 'sc-2' id is ignored)
     expect(found?.updatedAt).toBe('2026-07-14T01:00:00.000Z');
   });
 

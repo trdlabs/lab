@@ -86,7 +86,8 @@ const url = process.env.DATABASE_URL;
     });
 
     const firstPayload = scorecard({ correlationId, verdict: { decision: 'accept', reason: 'first' } });
-    await repo.upsert(rowFixture({ payload: firstPayload }));
+    const firstRow = rowFixture({ payload: firstPayload });
+    await repo.upsert(firstRow);
 
     const secondPayload = scorecard({ correlationId, verdict: { decision: 'accept', reason: 'second' } });
     await repo.upsert(rowFixture({
@@ -100,5 +101,6 @@ const url = process.env.DATABASE_URL;
 
     const found = await repo.findByCorrelationAndSchema(correlationId, CYCLE_SCORECARD_SCHEMA_VERSION);
     expect(found?.payload.verdict.reason).toBe('second');
+    expect(found?.id).toBe(firstRow.id); // drizzle onConflictDoUpdate preserves the FIRST id (not in the set clause)
   });
 });
