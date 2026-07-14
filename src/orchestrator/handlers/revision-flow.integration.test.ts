@@ -1087,3 +1087,302 @@ describe('revision-flow integration (R5a Task 4): selectionEvaluation + holdout 
     expect(v.selectionEvaluation).toBeUndefined(); // reset each iteration -> no stale snapshot from attempt 1
   });
 });
+
+// ---------------------------------------------------------------------------
+// R5b Task 4: finalizeCycle enqueues cycle.scorecard at every domain-terminal
+// ---------------------------------------------------------------------------
+//
+// Enumerates ALL 11 domain-terminal returns of revisionBuildHandler + the ONE deferred
+// non-terminal (:190 self-requeue). Each `it` seeds the minimum fixture needed to hit exactly
+// that branch and asserts: exactly ONE cycle.scorecard task row was created for the triggering
+// correlationId, its payload.terminalOutcome matches {kind, reason}, and its eligible/considered
+// hypothesis-id sets match the documented null/[]/known-set semantics. The deferred case asserts
+// NO cycle.scorecard was enqueued at all.
+
+/** Style-A (data-only) overlay shape — composeRevisionBundle marks it dropped_unsupported_shape.
+ * Using it for BOTH seeded hypotheses drives compose.included to empty -> nothing_composable. */
+function dataOnlyOverlaySourceR5b(): string {
+  return `
+export const overlay = {
+  appliesTo: 'short',
+  rules: [ { when: 'OI trend persists', action: 'skip_entry', params: { lookback: 3 } } ],
+};
+`;
+}
+
+/** Functional-shape overlay (passes compose's shape check) that reaches for ambient authority
+ * (process.env) in its composed source -> validateStrategyBundle rejects forbidden_ambient_authority
+ * -> the initial-validation 'bundle_invalid' skip fires (a DIFFERENT terminal than nothing_composable). */
+function forbiddenOverlaySourceR5b(): string {
+  return `
+export const overlay = function apply(ctx) {
+  const leak = process.env.SECRET;
+  return { kind: 'pass' };
+};
+`;
+}
+
+async function scorecardRows(services: AppServices, correlationId: string) {
+  return services.researchTasks.listByCorrelationAndTypes(correlationId, ['cycle.scorecard']);
+}
+
+describe('revision-flow integration (R5b Task 4): finalizeCycle cycle.scorecard enqueue at every domain-terminal', () => {
+  it('abandoned (:176): enqueues exactly one cycle.scorecard {kind:abandoned, reason:wait_cap_exhausted}, no sets', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    await seedChainTask(services, 'hb-running', 'running');
+
+    await revisionBuildHandler(
+      buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1', waitAttempt: CYCLE_CLOSE_MAX_WAIT_ATTEMPTS }),
+      services,
+    );
+    expect(calls).toHaveLength(0);
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'abandoned', reason: 'wait_cap_exhausted' });
+    expect(payload.eligibleHypIds).toBeUndefined();
+    expect(payload.consideredHypIds).toBeUndefined();
+  });
+
+  it('deferred (:190) is NOT a domain-terminal: no cycle.scorecard is enqueued', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    await seedChainTask(services, 'hb-running', 'running');
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+    expect(calls).toHaveLength(0);
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('no_baseline (:199): enqueues cycle.scorecard {kind:skipped, reason:no_baseline}, no sets', async () => {
+    const services = makeServices();
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'skipped', reason: 'no_baseline' });
+    expect(payload.eligibleHypIds).toBeUndefined();
+    expect(payload.consideredHypIds).toBeUndefined();
+  });
+
+  it('no_eligible_hypotheses (:221): enqueues cycle.scorecard {kind:skipped, reason:no_eligible_hypotheses, eligible:[], considered:[]}', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    // no hypotheses seeded -> chain vacuously terminal, selection runs and finds nothing
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'skipped', reason: 'no_eligible_hypotheses' });
+    expect(payload.eligibleHypIds).toEqual([]);
+    expect(payload.consideredHypIds).toEqual([]);
+  });
+
+  it('nothing_composable (:275): enqueues cycle.scorecard {kind:skipped, reason:nothing_composable, known sets}', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await services.strategyProfiles.create(profile());
+    const h1 = proposal('h1', { proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    const h4 = proposal('h4', { ruleAction: ruleAction('long', 'tighten_stop', { pct: 2 }), proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 200, deltaMaxDrawdownPct: -1, backtestRunId: 'bt-h4' } });
+    for (const p of [h1, h4]) {
+      await services.hypotheses.create(p);
+      await seedBuild(services, p.id, dataOnlyOverlaySourceR5b());
+      await services.researchTasks.create({
+        id: `build-task-${p.id}`, taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+        status: 'completed', payload: { hypothesisId: p.id }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      });
+    }
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const events = (await services.events.listByTask('task-rev-build')).map((e) => e.type);
+    expect(events).toContain('revision.skipped');
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'skipped', reason: 'nothing_composable' });
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h4']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h4']);
+  });
+
+  it('bundle_invalid (skipped, :283): enqueues cycle.scorecard {kind:skipped, reason:bundle_invalid, known sets}', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await services.strategyProfiles.create(profile());
+    const h1 = proposal('h1', { proxyMetrics: { decision: 'PASS', deltaNetPnlUsd: 400, deltaMaxDrawdownPct: -2, backtestRunId: 'bt-h1' } });
+    await services.hypotheses.create(h1);
+    await seedBuild(services, h1.id, forbiddenOverlaySourceR5b());
+    await services.researchTasks.create({
+      id: `build-task-${h1.id}`, taskType: 'hypothesis.build', source: 'operator', correlationId: 'corr-1',
+      status: 'completed', payload: { hypothesisId: h1.id }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const events = await services.events.listByTask('task-rev-build');
+    const skip = events.find((e) => e.type === 'revision.skipped');
+    expect(skip?.payload).toMatchObject({ reason: 'bundle_invalid' });
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'skipped', reason: 'bundle_invalid' });
+    expect(payload.eligibleHypIds).toEqual(['h1']);
+    expect(payload.consideredHypIds).toEqual(['h1']);
+  });
+
+  it('concurrent_revision (skipped, :305): enqueues cycle.scorecard {kind:skipped, reason:concurrent_revision, known sets, no revisionId}', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+    services.revisions.create = async () => {
+      throw new Error('strategy revision already exists for strategyProfileId p1 version 2');
+    };
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'skipped', reason: 'concurrent_revision' });
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect(payload.revisionId).toBeUndefined();
+  });
+
+  it('eval_window_inconsistent (:341): enqueues cycle.scorecard {kind:rejected, reason:eval_window_inconsistent, revisionId + known sets}', async () => {
+    const { executor, calls } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypothesesWithWindows(services, [windowA, windowB]);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+    expect(calls.length).toBe(0);
+
+    const rev = (await services.revisions.listByProfile('p1')).at(-1)!;
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'rejected', reason: 'eval_window_inconsistent' });
+    expect(payload.revisionId).toBe(rev.id);
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+  });
+
+  it('comparison_baseline_unavailable (:374): enqueues cycle.scorecard {kind:rejected, reason:comparison_baseline_unavailable, revisionId + known sets}', async () => {
+    const executor = makeBaselineUnavailableExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const rev = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(rev.verdictReason).toBe('comparison_baseline_unavailable');
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'rejected', reason: 'comparison_baseline_unavailable' });
+    expect(payload.revisionId).toBe(rev.id);
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+  });
+
+  it('holdout_failed (:570): enqueues cycle.scorecard {kind:rejected, reason:holdout_failed, revisionId + known sets}', async () => {
+    const runTrades = new FakeRunTradesAdapter({ 'base-full': syntheticTrades(80) });
+    const { executor } = makeHoldoutExecutor({ holdoutPasses: false });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2)!;
+    expect(v2.verdictReason).toBe('holdout_failed');
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.terminalOutcome).toEqual({ kind: 'rejected', reason: 'holdout_failed' });
+    expect(payload.revisionId).toBe(v2.id);
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+  });
+
+  it('accepted (:590): enqueues cycle.scorecard {kind:accepted, revisionId + known sets}', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2)!;
+    expect(v2.status).toBe('accepted');
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    const terminalOutcome = payload.terminalOutcome as { kind: string; reason: string };
+    expect(terminalOutcome.kind).toBe('accepted');
+    expect(terminalOutcome.reason.length).toBeGreaterThan(0);
+    expect(payload.revisionId).toBe(v2.id);
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+  });
+
+  it('rejected combo (:646): enqueues cycle.scorecard {kind:rejected, reason:joined allRejectReasons, revisionId + known sets}', async () => {
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeRejectExecutor(), researcher: cap.port });
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v2 = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2)!;
+    expect(v2.status).toBe('rejected');
+
+    const rows = await scorecardRows(services, 'corr-1');
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    const terminalOutcome = payload.terminalOutcome as { kind: string; reason: string };
+    expect(terminalOutcome.kind).toBe('rejected');
+    expect(terminalOutcome.reason).toBe(v2.verdictReason);
+    expect(payload.revisionId).toBe(v2.id);
+    expect((payload.eligibleHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+    expect((payload.consideredHypIds as string[]).sort()).toEqual(['h1', 'h2']);
+  });
+});

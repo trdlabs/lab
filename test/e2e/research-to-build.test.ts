@@ -67,6 +67,11 @@ describe('research → build pipeline (e2e)', () => {
     router.register('hypothesis.build', hypothesisBuildHandler);
     router.register('backtest.completed', backtestCompletedHandler);
     router.register('revision.build', revisionBuildHandler);
+    // R5b Task 4: revisionBuildHandler now finalizeCycle-enqueues a cycle.scorecard task at every
+    // domain-terminal (this pipeline's revision.build lands on the no_baseline skip terminal, since
+    // no accepted v1 / baseline experiment is seeded). No consumer handler exists yet (a later R5b
+    // task); register a no-op so queue.drain() doesn't throw on the unrelated side-effect task.
+    router.register('cycle.scorecard', async () => {});
     startWorker({ queue, router, services });
 
     await researchRunCycleHandler(cycleTask(), services);
@@ -124,6 +129,11 @@ describe('research → build pipeline (e2e)', () => {
     router.register('hypothesis.build', hypothesisBuildHandler);
     router.register('backtest.completed', backtestCompletedHandler);
     router.register('revision.build', revisionBuildHandler);
+    // R5b Task 4: revisionBuildHandler now finalizeCycle-enqueues a cycle.scorecard task at every
+    // domain-terminal (this pipeline's revision.build lands on the no_baseline skip terminal, since
+    // no accepted v1 / baseline experiment is seeded). No consumer handler exists yet (a later R5b
+    // task); register a no-op so queue.drain() doesn't throw on the unrelated side-effect task.
+    router.register('cycle.scorecard', async () => {});
     startWorker({ queue, router, services });
 
     await researchRunCycleHandler(cycleTask(), services);
@@ -163,6 +173,11 @@ describe('research → build pipeline (e2e)', () => {
     router.register('hypothesis.build', hypothesisBuildHandler);
     router.register('backtest.completed', backtestCompletedHandler);
     router.register('revision.build', revisionBuildHandler);
+    // R5b Task 4: revisionBuildHandler now finalizeCycle-enqueues a cycle.scorecard task at every
+    // domain-terminal (this pipeline's revision.build lands on the no_baseline skip terminal, since
+    // no accepted v1 / baseline experiment is seeded). No consumer handler exists yet (a later R5b
+    // task); register a no-op so queue.drain() doesn't throw on the unrelated side-effect task.
+    router.register('cycle.scorecard', async () => {});
     startWorker({ queue, router, services });
 
     await researchRunCycleHandler(cycleTask(), services);
