@@ -6,7 +6,7 @@ import { event, errMsg, stableStringify } from './backtest-support.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { isCycleChainTerminal, CYCLE_CLOSE_MAX_WAIT_ATTEMPTS, CYCLE_CLOSE_WAIT_DELAY_MS } from '../cycle-close.ts';
-import type { DroppedHypothesis, HoldoutValidation, StrategyRevision } from '../../domain/strategy-revision.ts';
+import type { DroppedHypothesis, HoldoutValidation, SelectionEvaluation, StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { HypothesisProposal, HypothesisStatus, RuleAction } from '../../domain/hypothesis.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { sortEligible } from '../../research/hypothesis-score.ts';
@@ -445,15 +445,31 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
   // gate would never have judged.
   let baselineTrades: TradeRecord[] | null = null;
   let firedPreservation: PreservationMetadata | null = null;
+  let selectionEvaluation: SelectionEvaluation | undefined;
 
   for (let attempt = 0; ; attempt++) {
+    // Reset every iteration so a later candidate_run_unavailable attempt cannot leave a stale
+    // snapshot from a previously-evaluated (and since-dropped) bundle.
+    selectionEvaluation = undefined;
     const result = await services.revisionRunExecutor.execute({
       revisionId, label: 'candidate', strategyBundle: assembled,
       strategyProfileId, run: selectionConfig, metrics: [...RESEARCH_RUN_METRICS], correlationId: task.correlationId,
     });
 
     if (result.status === 'completed' && result.metrics) {
-      verdict = evaluateRevision({ accepted: selectionBaselineMetrics, candidate: result.metrics }, DEFAULT_REVISION_EVALUATOR_POLICY);
+      const aggregateVerdict = evaluateRevision({ accepted: selectionBaselineMetrics, candidate: result.metrics }, DEFAULT_REVISION_EVALUATOR_POLICY);
+      verdict = aggregateVerdict;
+      // Snapshot the AGGREGATE verdict (pre-preservation) — comparison actually happened here.
+      // The preservation gate below may still downgrade the FINAL `verdict`, but the persisted
+      // snapshot must record the aggregate ladder's own decision, not the R2-downgraded one.
+      selectionEvaluation = {
+        evaluatorVersion: DEFAULT_REVISION_EVALUATOR_POLICY.evaluatorVersion,
+        baselineMetrics: selectionBaselineMetrics,
+        candidateMetrics: result.metrics,
+        thresholds: DEFAULT_REVISION_EVALUATOR_POLICY,
+        decision: aggregateVerdict.decision,
+        reasons: aggregateVerdict.reasons,
+      };
       if (gateOn && verdict.decision === 'ACCEPT') {
         try {
           if (baselineTrades === null) baselineTrades = await services.runTrades.getRunTrades(selectionBaselinePlatformRunId!);
@@ -472,6 +488,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
       }
     } else {
       verdict = { decision: 'REJECT', reasons: ['candidate_run_unavailable'] };
+      // selectionEvaluation stays undefined (reset above) — no comparison happened this attempt.
     }
 
     if (verdict.decision === 'ACCEPT') {
@@ -538,10 +555,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
       holdoutValidation = {
         mode: 'trade_based', t: boundary.t, reason: 'holdout_failed', lowConfidence: boundary.lowConfidence,
         trainMetrics, holdoutMetrics: (hCandM as unknown as Record<string, unknown>) ?? undefined,
+        trainBaselineMetrics: selectionBaselineMetrics, holdoutBaselineMetrics: hBaseM,
+        holdoutDecision: holdoutVerdict.decision, holdoutReasons: holdoutVerdict.reasons,
+        policy: DEFAULT_REVISION_EVALUATOR_POLICY,
       };
       await services.revisions.updateStatus(revisionId, {
         status: 'rejected', verdictReason: 'holdout_failed', preservationGate: firedPreservation ?? undefined,
-        holdoutValidation, updatedAt: now(),
+        holdoutValidation, selectionEvaluation, updatedAt: now(),
       });
       await services.events.append(event(task.id, 'revision.holdout_validated', {
         revisionId, version, mode: 'trade_based', t: boundary.t, decision: holdoutVerdict.decision, reasons: holdoutVerdict.reasons,
@@ -554,6 +574,9 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     holdoutValidation = {
       mode: 'trade_based', t: boundary.t, reason: 'holdout_passed', lowConfidence: boundary.lowConfidence,
       trainMetrics, holdoutMetrics: hCandM as unknown as Record<string, unknown>,
+      trainBaselineMetrics: selectionBaselineMetrics, holdoutBaselineMetrics: hBaseM,
+      holdoutDecision: holdoutVerdict.decision, holdoutReasons: holdoutVerdict.reasons,
+      policy: DEFAULT_REVISION_EVALUATOR_POLICY,
     };
     acceptedRun = hCand;
     acceptedMetrics = hCandM;
@@ -567,7 +590,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
       status: 'accepted', metrics: acceptedMetrics as unknown as Record<string, unknown>,
       comboBacktestRunId: acceptedRun.runId, verdictReason: verdict.reasons.join(', '),
       preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
-      updatedAt: now(),
+      selectionEvaluation, updatedAt: now(),
     });
     for (const id of currentIds) {
       await services.hypotheses.updateStatus(id, 'merged');
@@ -611,7 +634,7 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
     await services.revisions.updateStatus(revisionId, {
       status: 'rejected', verdictReason: allRejectReasons.join(', '),
       preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,
-      updatedAt: now(),
+      selectionEvaluation, updatedAt: now(),
     });
     await services.events.append(event(task.id, 'revision.rejected', {
       revisionId, version, reasons: allRejectReasons,
