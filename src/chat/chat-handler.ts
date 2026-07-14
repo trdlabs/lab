@@ -92,8 +92,10 @@ export async function consumeConfirmation(
     }
     // Nothing to cancel: the proposal was already confirmed (task running), expired, or gone. Answer
     // honestly instead of claiming a cancellation, and never emit a false chat.proposal.cancelled.
+    // findById is unscoped, so re-check session ownership here — a confirmed proposal belonging to
+    // ANOTHER session must not leak its task status (the repo already fails cancelPending on mismatch).
     const proposal = await deps.proposals.findById(proposalId);
-    if (proposal?.status === 'confirmed') return confirmedReply(proposal);
+    if (proposal?.status === 'confirmed' && proposal.sessionId === sid) return confirmedReply(proposal);
     return assistantMessage(sid, 'Нечего отменять — заявка уже неактивна. Пришлите запрос заново.', { actions: [] });
   }
 

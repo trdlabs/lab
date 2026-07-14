@@ -358,6 +358,22 @@ describe('handleChatMessage — confirmation consumption (second turn)', () => {
     expect((await sessions.get('s1'))?.pendingInteraction).toBeUndefined(); // pending cleared, not wedged
   });
 
+  it('[P1-23] cancel does not leak a confirmed proposal that belongs to another session', async () => {
+    const { d, sessions, proposals } = deps();
+    const savedSession = await firstTurn(d, strategyMsg, sessions); // proposal owned by s1
+    const proposalId = savedSession.pendingInteraction!.proposalId;
+    await proposals.confirmPending(proposalId, 's1', new Date().toISOString());
+
+    // A different session whose (stale/forged) pending points at s1's proposal tries to cancel it.
+    const other = session({ sessionId: 's-other', pendingInteraction: savedSession.pendingInteraction });
+    const r = await handleChatMessage({ message: 'отмена', session: other, source: 'web' }, d);
+    expect(r.kind).toBe('assistant_message');
+    if (r.kind === 'assistant_message') {
+      expect(r.message).toContain('Нечего отменять'); // no cross-session task status / "уже подтверждена"
+      expect(r.message).not.toContain('Отменил');
+    }
+  });
+
   it('an EXPIRED proposal explains the timeout, enqueues nothing, and clears pending state', async () => {
     // Tiny TTL so the proposal is already past expiry by the follow-up turn.
     const { d, queue, sessions, proposals } = deps({ proposalTtlMs: -1 });
