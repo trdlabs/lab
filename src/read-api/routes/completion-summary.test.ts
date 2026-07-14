@@ -26,6 +26,7 @@ function deps(over: Partial<ReadApiDeps> = {}): ReadApiDeps {
     tokenUsage: { getCost: async () => 0 },
     phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
     experiments: new InMemoryExperimentReadAdapter(),
+    cycleScorecards: { findByCorrelationAndSchema: async () => null, findByCorrelation: async () => [], upsert: async () => {} },
     ...over,
   };
 }

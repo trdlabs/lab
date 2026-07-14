@@ -23,6 +23,7 @@ describe('read-app e2e (in-memory wiring)', () => {
       tokenUsage: { getCost: async () => 0 },
       phoenixTraces: { getAgentTraces: async (agentId: string) => ({ agentId, reasonCode: 'tracing-disabled' as const, traces: [] }) },
       experiments: new InMemoryExperimentReadAdapter(),
+      cycleScorecards: { findByCorrelationAndSchema: async () => null, findByCorrelation: async () => [], upsert: async () => {} },
     });
     const auth = { authorization: 'Bearer e2e' };
     for (const path of ['/v1/hypotheses', '/v1/backtests', '/v1/agent-events']) {
