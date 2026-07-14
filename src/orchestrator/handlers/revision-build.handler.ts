@@ -631,6 +631,13 @@ export const revisionBuildHandler: WorkflowHandler = async (task, services) => {
       );
     }
   } else {
+    // R5a consumer note (for R5b scorecard): on a multi-attempt greedy build these three fields
+    // aggregate over DIFFERENT attempts and must not be read as describing one attempt —
+    // verdictReason = ALL attempts' reasons joined; preservationGate = sticky-LAST fired veto
+    // (firedPreservation is not reset per iteration — pre-existing); selectionEvaluation = the
+    // FINAL attempt's aggregate only (reset each iteration). A row can thus show preservationGate.fired
+    // (an earlier attempt's aggregate-ACCEPT veto) alongside selectionEvaluation.decision==='REJECT'
+    // (the final attempt). Realigning firedPreservation is a behavior change deferred to R5b.
     await services.revisions.updateStatus(revisionId, {
       status: 'rejected', verdictReason: allRejectReasons.join(', '),
       preservationGate: firedPreservation ?? undefined, holdoutValidation: holdoutValidation ?? undefined,

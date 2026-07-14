@@ -14,6 +14,8 @@ export interface DroppedHypothesis {
 
 /** Persisted decision-inputs of the revision's selection-window evaluation (R5a). */
 export interface SelectionEvaluation {
+  /** Canonical top-level query handle; mirrors `thresholds.evaluatorVersion` — set from one constant,
+   *  never diverge (do not edit independently). */
   evaluatorVersion: string;
   baselineMetrics: BacktestMetricBlock;
   candidateMetrics: BacktestMetricBlock;
