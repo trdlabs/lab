@@ -54,6 +54,10 @@ export interface CycleScorecard {
   consideredUnavailableReason?: string;
   provenance: { mergeAttempted: boolean; candidateIncluded: number; revisionId?: string; sourceTaskId?: string };
   revisionAssessment: RevisionAssessment | null;
+  /** The revision accepted AT THIS revision-build close — NOT necessarily the current latest-accepted
+   *  revision: a subsequent `revision.consolidate` may materialize a consolidated revision that
+   *  supersedes it (consolidate deliberately does not emit its own scorecard). Read this as
+   *  "what this cycle produced", not "the profile's live champion". */
   champion: { revisionId: string; version: number } | null;
   selectionBias: { n: number | null; considered: number | null; selected: number };
   roster: RosterEntry[];
