@@ -1,5 +1,7 @@
 import type { ArtifactRef } from './types.ts';
 import type { PreservationMetadata } from '../validation/trade-preservation.ts';
+import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
+import type { RevisionDecision, RevisionEvaluatorPolicy } from '../validation/revision-evaluator.ts';
 
 export type RevisionStatus = 'candidate' | 'accepted' | 'rejected';
 export type DroppedReason = 'merge_conflict_dropped' | 'combo_fail_dropped' | 'unsupported_module_shape';
@@ -8,6 +10,16 @@ export interface DroppedHypothesis {
   hypothesisId: string;
   reason: DroppedReason;
   detail: string;
+}
+
+/** Persisted decision-inputs of the revision's selection-window evaluation (R5a). */
+export interface SelectionEvaluation {
+  evaluatorVersion: string;
+  baselineMetrics: BacktestMetricBlock;
+  candidateMetrics: BacktestMetricBlock;
+  thresholds: RevisionEvaluatorPolicy;
+  decision: RevisionDecision;
+  reasons: string[];
 }
 
 export type HoldoutValidationReason =
@@ -24,6 +36,12 @@ export interface HoldoutValidation {
   lowConfidence?: boolean;
   trainMetrics?: Record<string, unknown>;
   holdoutMetrics?: Record<string, unknown>;
+  // R5a: full baseline↔candidate comparison + verdict on both windows (explainable ROBUSTNESS)
+  trainBaselineMetrics?: BacktestMetricBlock;
+  holdoutBaselineMetrics?: BacktestMetricBlock;
+  holdoutDecision?: RevisionDecision;
+  holdoutReasons?: string[];
+  policy?: RevisionEvaluatorPolicy;
 }
 
 export interface StrategyRevision {
@@ -42,6 +60,7 @@ export interface StrategyRevision {
   verdictReason?: string;
   preservationGate?: PreservationMetadata;
   holdoutValidation?: HoldoutValidation;
+  selectionEvaluation?: SelectionEvaluation;
   kind?: 'composed' | 'consolidated';        // default 'composed' when absent
   consolidatedFromRevisionId?: string;       // consolidated: the R it materializes
   semanticParentRevisionId?: string;         // composed: baseRevisionId; consolidated: R.id
