@@ -39,8 +39,9 @@ orphan is restored with its *remaining* delay rather than a fresh full delay.
   number at implementation time (expected 0025 — verify `ls migrations/` after rebasing onto
   current main; parallel PRs such as R5a/#175 may claim a number).
 - Domain: add `availableAt?: string` (ISO) to `ResearchTask`.
-- `createAndEnqueueTask` computes `availableAt` from a single injected `now`:
-  `availableAt = new Date(now + (delayMs ?? 0)).toISOString()` and writes it on the row.
+- **Clock contract:** add `TaskIntakeDeps.now?: () => number` (default `Date.now`). One
+  `nowMs` value is read once per intake and used for **both** `createdAt/updatedAt` and
+  `availableAt` — no other call-sites change. `availableAt = new Date(nowMs + (delayMs ?? 0)).toISOString()`.
   The hot path still passes `delayMs` straight to `queue.enqueue`; `available_at` is the
   durable copy used only for restoration.
 
@@ -114,16 +115,23 @@ Required cases:
   absent/0.
 - **delayed orphan** — `availableAt` in the future (injected `now`) → enqueued with
   `delayMs === max(0, availableAt - now)`.
-- **active job → no-op, both identity modes:**
-  - task **with** `dedupeKey` — pre-seed the jobId, reconcile → not enqueued again;
-  - task **without** `dedupeKey` — identity via `taskId` — pre-seed, reconcile → not enqueued.
+- **active job → single job, both identity modes.** Note: the sweeper **still calls `enqueue`** —
+  idempotency lives in the queue, not the sweeper. Assert the fake's **resulting unique-job count
+  stays 1**, not that `enqueue` was skipped:
+  - task **with** `dedupeKey` — pre-seed the jobId, reconcile → still one job;
+  - task **without** `dedupeKey` — identity via `taskId` — pre-seed, reconcile → still one job.
 - **non-queued untouched** — seed `completed/rejected/running/failed` → `listQueued` excludes
   them → `enqueue` never called.
 - **unparseable `availableAt`** → throws (data error, not implicit immediate).
 - **fail-fast** — a queue whose `enqueue` throws → `reconcileQueuedTasks` rejects (startup aborts).
-- **`listQueued` order** — returns `queued` rows sorted by `createdAt, id`.
-- **gated Redis** (like the other `DATABASE_URL`-style gated tests): a real BullMQ `add()`
-  twice with the same jobId yields a single job — locks the production idempotency assumption.
+- **wiring order** — reconciliation completes **fully before** `queue.process` is invoked
+  (assert call ordering in the entrypoint wiring).
+- **persistence round-trip** (drizzle + in-memory): `availableAt` is written and read back;
+  SQL `NULL → undefined`; `listQueued` is exercised on a real DB (gated) and returns rows in the
+  `createdAt, id` order.
+- **gated Redis** (like the other `DATABASE_URL`-style gated tests, on a **unique per-run queue
+  name** with mandatory cleanup): a real BullMQ `add()` twice with the same jobId yields a single
+  job — locks the production idempotency assumption.
 
 ## Scope
 
@@ -145,6 +153,6 @@ Required cases:
 
 ## Rollout note
 
-Rebase onto current main after R5a/#175 lands and generate the migration as the next free
-number (verify `ls migrations/`; expected 0025). Additive column, no backfill required — legacy
-rows with `available_at IS NULL` reconcile as immediate.
+Migration number is **0025**, confirmed: `origin/main` already contains R5a and `0024`. Additive
+column, no backfill required — legacy rows with `available_at IS NULL` reconcile as immediate.
+`toDomain` maps SQL `NULL → undefined` for `availableAt`.
