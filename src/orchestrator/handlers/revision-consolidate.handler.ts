@@ -25,6 +25,35 @@ export const RevisionConsolidatePayloadSchema = z.object({
 const now = (): string => new Date().toISOString();
 
 /**
+ * The single idempotent baseline-enqueue path for this handler. Enqueues a ready-bundle
+ * strategy.baseline for `revision` under `dedupeKey`, unless a task already exists for that key
+ * (then it neither re-enqueues nor touches revision status — never rolls a completed baseline back
+ * to 'pending'). Returns whether it deduped.
+ */
+async function ensureBaselineForRevision(
+  task: ResearchTask,
+  services: AppServices,
+  revision: StrategyRevision,
+  dedupeKey: string,
+): Promise<boolean> {
+  if (!revision.bundleArtifactRef) {
+    throw new Error(`ensureBaselineForRevision: revision ${revision.id} has no bundleArtifactRef`);
+  }
+  const existing = await services.researchTasks.findByDedupeKey(dedupeKey);
+  if (existing) return true;
+  await services.revisions.updateStatus(revision.id, { baselineValidationStatus: 'pending', updatedAt: now() });
+  await createAndEnqueueTask(
+    {
+      taskType: 'strategy.baseline', source: task.source,
+      payload: { strategyProfileId: revision.strategyProfileId, bundleArtifactRef: revision.bundleArtifactRef, revisionId: revision.id },
+      correlationId: task.correlationId, dedupeKey,
+    },
+    { repo: services.researchTasks, queue: services.taskQueue },
+  );
+  return false;
+}
+
+/**
  * ACCEPT path (slice G3b Task 9) — strict-parity success: materialize an equivalent,
  * depth-reset `kind:'consolidated'` revision from R and enqueue a ready-bundle
  * `strategy.baseline` re-baseline. hypothesisIds/mergedRuleSet are inherited VERBATIM from R
@@ -34,7 +63,16 @@ async function acceptConsolidation(
   task: ResearchTask,
   services: AppServices,
   { R, assembled, cleanRun }: { R: StrategyRevision; assembled: AssembledStrategyBundle; cleanRun: RevisionRunResult },
+  reject: (reason: string, extra?: Record<string, unknown>) => Promise<void>,
 ): Promise<void> {
+  // A prior transient-reject attempt on this revision already fell back to a direct R baseline
+  // (accepted:${R.id}); R is already re-baselined. Do NOT also materialize a consolidated child —
+  // that would submit R and its consolidated successor to paper under different, non-dedupable keys.
+  if (await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)) {
+    await services.events.append(event(task.id, 'revision.consolidation_skipped',
+      { revisionId: R.id, reason: 'reject_fallback_already_baselined' }));
+    return;
+  }
   const cleanRef = await services.artifacts.put(
     JSON.stringify({ source: assembled.source, manifest: assembled.manifest, bundleHash: assembled.bundleHash }),
     { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'revision-consolidate-handler' },
@@ -55,40 +93,52 @@ async function acceptConsolidation(
   try {
     await services.revisions.create(consolidated);
   } catch (err) {
-    await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId: R.id, reason: 'concurrent_revision', detail: errMsg(err) }));
-    return;
+    // Single snapshot: derive child and occupant from the SAME read (avoids a TOCTOU where a child
+    // committing between two separate reads is misclassified as a version-conflict).
+    const revisions = await services.revisions.listByProfile(R.strategyProfileId);
+
+    const child = revisions.find((v) => v.kind === 'consolidated' && v.consolidatedFromRevisionId === R.id);
+    if (child) {
+      const deduped = await ensureBaselineForRevision(task, services, child, `strategy.baseline:consolidated:${child.id}`);
+      await services.events.append(event(task.id, 'revision.consolidation_skipped',
+        { revisionId: R.id, reason: 'concurrent_revision', newRevisionId: child.id, detail: errMsg(err), deduped }));
+      return;
+    }
+
+    const occupant = revisions.find((v) => v.version === R.version + 1);
+    if (occupant) {
+      await reject('concurrent_version_conflict', { occupantRevisionId: occupant.id });
+      return;
+    }
+
+    throw err; // version v+1 free ⇒ not a conflict ⇒ transient/unknown ⇒ worker retry
   }
 
   await services.events.append(event(task.id, 'revision.consolidated', {
     fromRevisionId: R.id, newRevisionId: newId, version: consolidated.version, bundleHash: assembled.bundleHash,
   }));
 
-  await createAndEnqueueTask(
-    {
-      taskType: 'strategy.baseline', source: task.source,
-      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: cleanRef, revisionId: newId },
-      correlationId: task.correlationId, dedupeKey: `strategy.baseline:consolidated:${newId}`,
-    },
-    { repo: services.researchTasks, queue: services.taskQueue },
-  );
+  await ensureBaselineForRevision(task, services, consolidated, `strategy.baseline:consolidated:${newId}`);
 }
 
 /**
  * slice G3b Task 8 — `revision.consolidate` handler: guards, run-context source-of-truth,
  * parity (equivalence) gate, and fail-safe reject paths. FAIL-SAFE: every failure leaves the
- * stacked revision R accepted/source-of-truth, emits an event, and does NOT re-baseline.
+ * stacked revision R accepted/source-of-truth, emits an event, and (R1 #1) re-baselines R
+ * directly via `ensureBaselineForRevision` so R is never stranded out of the paper loop.
  */
 export const revisionConsolidateHandler: WorkflowHandler = async (task, services) => {
   const parsed = validateWithSchema(RevisionConsolidatePayloadSchema, task.payload);
   if (parsed.status === 'invalid') throw new Error(`invalid revision.consolidate payload: ${JSON.stringify(parsed.issues)}`);
   const { revisionId, strategyProfileId } = parsed.data;
-  const reject = async (reason: string, extra: Record<string, unknown> = {}) => {
-    await services.events.append(event(task.id, 'revision.consolidation_rejected', { fromRevisionId: revisionId, reason, ...extra }));
-  };
 
-  // Idempotency (retryable fail-safe): no-op only if R is already consolidated.
-  if (await services.revisions.findConsolidatedOf(revisionId)) {
-    await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId, reason: 'already_consolidated' }));
+  // Idempotency (retryable fail-safe): no-op only if R is already consolidated. If the child's
+  // baseline was never enqueued (crash gap between the create and the enqueue), recover it here.
+  const existingChild = await services.revisions.findConsolidatedOf(revisionId);
+  if (existingChild) {
+    const deduped = await ensureBaselineForRevision(task, services, existingChild, `strategy.baseline:consolidated:${existingChild.id}`);
+    await services.events.append(event(task.id, 'revision.consolidation_skipped',
+      { revisionId, reason: 'already_consolidated', newRevisionId: existingChild.id, deduped }));
     return;
   }
   const R = await services.revisions.findById(revisionId);
@@ -96,6 +146,15 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
     await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId, reason: 'not_consolidatable' }));
     return;
   }
+  // Defined after the not_consolidatable guard so it closes over the validated, non-null R.
+  const reject = async (reason: string, extra: Record<string, unknown> = {}): Promise<void> => {
+    await services.events.append(event(task.id, 'revision.consolidation_rejected', { fromRevisionId: R.id, reason, ...extra }));
+    // R1 #1: a terminal consolidation failure must still return R to paper. Re-baseline R directly
+    // (ready-bundle), identical to revision-build's non-consolidation branch. Reusing the
+    // accepted:${R.id} dedupeKey is a safety-net against ever double-baselining R.
+    const deduped = await ensureBaselineForRevision(task, services, R, `strategy.baseline:accepted:${R.id}`);
+    await services.events.append(event(task.id, 'revision.reject_rebaselined', { revisionId: R.id, reason, deduped }));
+  };
   // Run-context = the ACTUAL combo run's platformRun (source of truth; no default fallback).
   if (!R.comboBacktestRunId || !R.metrics) { await reject('missing_run_context'); return; }
   const comboRun = await services.strategyBacktests.findById(R.comboBacktestRunId);
@@ -128,5 +187,5 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
   if (verdict.decision === 'REJECT') { await reject(verdict.reasons.join(','), { reasons: verdict.reasons, deltas: verdict.deltas }); return; }
 
   // ACCEPT path (Task 9): materialize the consolidated revision + re-baseline.
-  await acceptConsolidation(task, services, { R, assembled, cleanRun });
+  await acceptConsolidation(task, services, { R, assembled, cleanRun }, reject);
 };
