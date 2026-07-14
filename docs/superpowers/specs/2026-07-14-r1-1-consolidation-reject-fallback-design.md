@@ -146,13 +146,18 @@ Success path (after `create` + the `revision.consolidated` event) replaces the i
 await ensureBaselineForRevision(task, services, consolidated, `strategy.baseline:consolidated:${newId}`);
 ```
 
-Create-catch classification (replaces the blanket `concurrent_revision` skip):
+Create-catch classification (replaces the blanket `concurrent_revision` skip). It reads
+`listByProfile` **once** and derives both the child and the occupant from that single snapshot —
+never two separate reads (see the TOCTOU note below):
 
 ```ts
 try {
   await services.revisions.create(consolidated);
 } catch (err) {
-  const child = await services.revisions.findConsolidatedOf(R.id);
+  // Single snapshot: deriving child and occupant from the SAME read avoids a TOCTOU misclassification.
+  const revisions = await services.revisions.listByProfile(R.strategyProfileId);
+
+  const child = revisions.find((v) => v.kind === 'consolidated' && v.consolidatedFromRevisionId === R.id);
   if (child) {
     // A concurrent consolidation won version R.version+1. Ensure ITS baseline (crash-safe), not R's.
     const deduped = await ensureBaselineForRevision(task, services, child, `strategy.baseline:consolidated:${child.id}`);
@@ -160,26 +165,36 @@ try {
       { revisionId: R.id, reason: 'concurrent_revision', newRevisionId: child.id, detail: errMsg(err), deduped }));
     return;
   }
-  // No consolidated child of R. Is version R.version+1 nonetheless occupied (by a non-child revision)?
-  const occupant = (await services.revisions.listByProfile(R.strategyProfileId)).find((v) => v.version === R.version + 1) ?? null;
+
+  const occupant = revisions.find((v) => v.version === R.version + 1);
   if (occupant) {
     // Genuine version conflict with a non-consolidated revision → R has no consolidated successor →
     // fall back to R via the converged reject helper (emits rejected + reject_rebaselined).
     await reject('concurrent_version_conflict', { occupantRevisionId: occupant.id });
     return;
   }
-  // Version R.version+1 is free ⇒ create failed for a transient/unknown reason, not a version
-  // conflict. Do not pretend a concurrency winner exists — rethrow so the worker retries.
+
+  // Version R.version+1 is free in the snapshot ⇒ create failed for a transient/unknown reason, not a
+  // version conflict. Do not pretend a concurrency winner exists — rethrow so the worker retries.
   throw err;
 }
 ```
 
 Classification correctness (confirmed by reviewer): version is unique per `(strategyProfileId,
-version)`; `findConsolidatedOf(R.id)` first separates the child-race; then an occupant at `R.version+1`
-means a real conflict with a non-child; a free version after a `create` error means it was not a
-conflict, so the original error must propagate. This uses only existing repo reads — no DB error-code
-introspection (the in-memory adapter throws a plain code-less `Error`, so `.code === '23505'`
-classification would not be adapter-agnostic).
+version)`; the child predicate on the snapshot first separates the child-race; then an occupant at
+`R.version+1` in the same snapshot means a real conflict with a non-child; a version that is free
+*in the snapshot* after a `create` error means it was not a conflict, so the original error must
+propagate. This uses only existing repo reads — no DB error-code introspection (the in-memory adapter
+throws a plain code-less `Error`, so `.code === '23505'` classification would not be adapter-agnostic).
+
+**TOCTOU note (single-snapshot invariant):** the earlier draft read `findConsolidatedOf(R.id)` and
+then `listByProfile` separately. A child committing *between* those two reads would be missed by
+`findConsolidatedOf` yet appear in `listByProfile` as an occupant → misclassified as
+`concurrent_version_conflict` → R baselined instead of the child. Deriving both from one
+`listByProfile` snapshot removes the window. If the child commits *after* the snapshot, it is absent
+from the snapshot as both child **and** occupant → the `throw err` branch runs → the worker retry
+re-enters the handler, hits the top-of-handler `already_consolidated` guard, and recovers the child's
+baseline. The rethrow branch is therefore safe under a post-snapshot child commit.
 
 **`reject` must be defined before `acceptConsolidation` is invoked** so the create-catch can call it.
 Since `acceptConsolidation` is the handler's final statement and `reject` is defined right after the
@@ -269,10 +284,14 @@ enqueued, skip event `{reason:'already_consolidated', newRevisionId, deduped:fal
 baseline task for the child already exists → asserts `deduped:true`, no new job.
 
 **Split the existing "UNIQUE collision" test (lines ~477+) into three:**
-- `concurrent_revision`: pre-seed a `kind:'consolidated'`, `consolidatedFromRevisionId=R.id` revision
-  at `R.version+1` → `create` throws → child found → one baseline `consolidated:${child.id}`, skip
-  event `concurrent_revision` with `newRevisionId`; R **not** fallback-baselined;
-  `findConsolidatedOf(R.id)` returns the seeded child.
+- `concurrent_revision` (snapshot classification): pre-seed a `kind:'consolidated'`,
+  `consolidatedFromRevisionId=R.id` revision at `R.version+1` — so it is present in the
+  `listByProfile` snapshot the create-catch reads. `create` throws → the snapshot's child predicate
+  matches → one baseline `consolidated:${child.id}`, skip event `concurrent_revision` with
+  `newRevisionId`; R **not** fallback-baselined (no `accepted:${R.id}` task, no `reject_rebaselined`
+  event); `findConsolidatedOf(R.id)` returns the seeded child. This exercises that the child is
+  discovered from the single `listByProfile` snapshot, and that a child at `R.version+1` is
+  classified as the child-race, not as an occupant version-conflict.
 - `concurrent_version_conflict`: pre-seed a `kind:'composed'` competitor at `R.version+1` (the
   current fixture) → `create` throws → no child → occupant found → `revision.consolidation_rejected
   {reason:'concurrent_version_conflict', occupantRevisionId}` + `revision.reject_rebaselined
