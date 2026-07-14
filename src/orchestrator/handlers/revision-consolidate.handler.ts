@@ -65,6 +65,14 @@ async function acceptConsolidation(
   { R, assembled, cleanRun }: { R: StrategyRevision; assembled: AssembledStrategyBundle; cleanRun: RevisionRunResult },
   reject: (reason: string, extra?: Record<string, unknown>) => Promise<void>,
 ): Promise<void> {
+  // A prior transient-reject attempt on this revision already fell back to a direct R baseline
+  // (accepted:${R.id}); R is already re-baselined. Do NOT also materialize a consolidated child —
+  // that would submit R and its consolidated successor to paper under different, non-dedupable keys.
+  if (await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)) {
+    await services.events.append(event(task.id, 'revision.consolidation_skipped',
+      { revisionId: R.id, reason: 'reject_fallback_already_baselined' }));
+    return;
+  }
   const cleanRef = await services.artifacts.put(
     JSON.stringify({ source: assembled.source, manifest: assembled.manifest, bundleHash: assembled.bundleHash }),
     { kind: 'strategy_bundle', mime_type: 'application/json', producer: 'revision-consolidate-handler' },

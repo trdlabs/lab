@@ -478,9 +478,9 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(evTypes).toContain('revision.reject_rebaselined');
   });
 
-  it('rejected is retryable: a second invocation with an equivalent executor proceeds past the parity gate', async () => {
+  it('rejected is retryable: a second invocation with an equivalent executor proceeds past the parity gate, but the accept-path guard blocks a second baseline (R already fallback-rebaselined)', async () => {
     const services = makeServices();
-    await seedConsolidatableRevision(services);
+    const R = await seedConsolidatableRevision(services);
     const { consolidator, calls: consolidatorCalls } = spyConsolidator(new FakeStrategyConsolidator());
     services.consolidator = consolidator;
 
@@ -492,17 +492,23 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     expect(firstEvents[0]!.payload['reason'] ?? firstEvents[0]!.payload['reasons']).toBeTruthy();
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
     expect(consolidatorCalls).toHaveLength(1);
+    // The first reject already fell back to a direct R baseline (R1 #1).
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
 
     // Swap in an executor that reports parity-equivalent metrics: the retry proceeds PAST the
-    // parity gate and reaches the (Task 9) accept path, which materializes the consolidated
-    // revision instead of throwing.
+    // parity gate and reaches the (Task 9) accept path — but the accept-path guard now finds R's
+    // already-live accepted:${R.id} fallback baseline and skips materializing a consolidated
+    // child (this is the cross-invocation double-baseline guard under test; previously this would
+    // have wrongly materialized a second, non-dedupable baseline on top of R's fallback).
     const equivalent = fakeExecutor({ metrics: acceptedMetrics() });
     services.revisionRunExecutor = equivalent.executor;
 
     await revisionConsolidateHandler(task(), services);
     expect(consolidatorCalls).toHaveLength(2);
     expect(equivalent.calls).toHaveLength(1);
-    expect(await services.revisions.findConsolidatedOf('rev-1')).not.toBeNull();
+    expect(await services.revisions.findConsolidatedOf('rev-1')).toBeNull();
+    const events = await services.events.listByTask('task-consolidate-1');
+    expect(events[events.length - 1]!.payload).toMatchObject({ reason: 'reject_fallback_already_baselined' });
   });
 
   it('reject fallback is idempotent: a completed accepted-baseline is not rolled back, event deduped:true', async () => {
@@ -680,5 +686,29 @@ describe('revisionConsolidateHandler — accept path (slice G3b, Task 9)', () =>
 
     await expect(revisionConsolidateHandler(task(), services)).rejects.toThrow('boom-transient');
     expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).toBeNull();
+  });
+
+  it('accept-path guard: an existing accepted:${R.id} fallback baseline → skip, no consolidated child', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+    // Simulate a prior transient-reject attempt that already fell back to a direct R baseline.
+    await services.researchTasks.create({
+      id: 'rt-prior-fallback', taskType: 'strategy.baseline', source: task().source,
+      correlationId: 'c-prior', dedupeKey: `strategy.baseline:accepted:${R.id}`, status: 'queued',
+      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: R.bundleArtifactRef, revisionId: R.id },
+      availableAt: '2026-01-01T00:00:00Z', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+    services.consolidator = new FakeStrategyConsolidator();
+    services.revisionRunExecutor = fakeExecutor({ metrics: acceptedMetrics() }).executor;
+
+    await revisionConsolidateHandler(task(), services);
+
+    // No consolidated child materialized; skip event with the guard reason.
+    expect(await services.revisions.findConsolidatedOf(R.id)).toBeNull();
+    const skip = (await services.events.listByTask('task-consolidate-1')).find((e) => e.type === 'revision.consolidation_skipped');
+    expect(skip!.payload).toMatchObject({ reason: 'reject_fallback_already_baselined' });
+    // Only the pre-existing accepted baseline exists; no consolidated:* task enqueued.
+    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
+    expect(queued.filter((q) => q.taskType === 'strategy.baseline').length).toBe(0); // no NEW enqueue (prior task pre-created directly, not via queue)
   });
 });
