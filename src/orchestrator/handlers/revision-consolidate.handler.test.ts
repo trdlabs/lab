@@ -498,8 +498,8 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     // Swap in an executor that reports parity-equivalent metrics: the retry proceeds PAST the
     // parity gate and reaches the (Task 9) accept path — but the accept-path guard now finds R's
     // already-live accepted:${R.id} fallback baseline and skips materializing a consolidated
-    // child (this is the cross-invocation double-baseline guard under test; previously this would
-    // have wrongly materialized a second, non-dedupable baseline on top of R's fallback).
+    // child (this is the sequential retry/redelivery guard under test; previously this would have
+    // wrongly materialized a second, non-dedupable baseline on top of R's fallback).
     const equivalent = fakeExecutor({ metrics: acceptedMetrics() });
     services.revisionRunExecutor = equivalent.executor;
 

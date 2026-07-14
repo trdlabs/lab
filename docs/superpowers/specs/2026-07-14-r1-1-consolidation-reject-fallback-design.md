@@ -218,6 +218,14 @@ before the success enqueue:
 R's key `accepted:${R.id}` is identical to revision-build's mutually-exclusive normal-path key, so
 even a hypothetical double-fire collapses via dedup. A consolidated child and R never share a key.
 
+This table proves one target per invocation and the accepted-baseline pre-check prevents a later,
+sequential retry/redelivery from materializing a consolidated child after R was already sent to
+baseline. It is not an atomic fence between two truly concurrent mixed-outcome deliveries: a
+rejecting invocation can create R's baseline after an accepting invocation's pre-check but before
+that invocation creates and baselines the child. Production must therefore retain the current
+single-delivery/concurrency gate for consolidation until the planned worker owner/lease token is in
+place; true cross-delivery mutual exclusion belongs to that concurrency-unblock slice.
+
 ### Enqueue-gap durability (honest residual)
 
 `createAndEnqueueTask` persists the `research_task` row (`status='queued'`) **before** calling
