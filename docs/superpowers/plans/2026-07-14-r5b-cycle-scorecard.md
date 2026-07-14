@@ -82,17 +82,19 @@ describe('CycleScorecard type', () => {
     expect(sc.champion?.version).toBe(2);
   });
 
-  it('allows null revisionAssessment/champion + null counts for a skipped cycle', () => {
+  it('allows null revisionAssessment/champion + null counts for a before-selection skipped cycle', () => {
+    // null sets belong to before-selection terminals (no_baseline / abandoned), NOT no_eligible_hypotheses
+    // (which is a KNOWN 0 → empty sets). See §3 / Task 4 terminal table.
     const sc: CycleScorecard = {
       schemaVersion: 'cycle-scorecard-v1', correlationId: 'c1', strategyProfileId: 'p1',
-      terminalOutcome: { kind: 'skipped', reason: 'no_eligible_hypotheses' },
-      counts: { built: 1, evaluated: 0, eligible: null, considered: null, selected: 0, dropped: 0 },
+      terminalOutcome: { kind: 'skipped', reason: 'no_baseline' },
+      counts: { built: 0, evaluated: 0, eligible: null, considered: null, selected: 0, dropped: 0 },
       eligibleUnavailableReason: 'terminated_before_selection',
       consideredUnavailableReason: 'terminated_before_selection',
       provenance: { mergeAttempted: false, candidateIncluded: 0 },
       revisionAssessment: null, champion: null,
       selectionBias: { n: null, considered: null, selected: 0 },
-      roster: [], verdict: { decision: 'skipped', reason: 'no_eligible_hypotheses' },
+      roster: [], verdict: { decision: 'skipped', reason: 'no_baseline' },
     };
     expect(sc.revisionAssessment).toBeNull();
   });
@@ -227,7 +229,7 @@ import { describe, it, expect } from 'vitest';
 import { buildCycleScorecard, type CycleScorecardSnapshot } from './cycle-scorecard-builder.ts';
 import { DEFAULT_REVISION_EVALUATOR_POLICY } from '../validation/revision-evaluator.ts';
 
-import type { StrategyRevision } from '../domain/strategy-revision.ts';
+import type { StrategyRevision, HoldoutValidation } from '../domain/strategy-revision.ts';
 
 const M = (o: Record<string, number> = {}) => ({
   netPnlUsd: 1000, netPnlPct: 10, totalTrades: 50, winRate: 0.55, profitFactor: 2,
@@ -317,6 +319,23 @@ describe('buildCycleScorecard', () => {
       hypotheses: [{ hypId: 'h1', status: 'dropped_combo_fail', lastDecision: 'FAIL', evaluated: true }],
     }));
     expect(sc.counts.dropped).toBe(1); // h1 in both sources → counted once
+  });
+
+  it('accepted CONSOLIDATED revision (no selectionEvaluation) → champion set, aggregate null', () => {
+    // G3b path uses evaluateConsolidation, not evaluateRevision → kind:'consolidated' rows have no selectionEvaluation.
+    const revision = rev({ status: 'accepted', kind: 'consolidated', hypothesisIds: ['h1'], verdictReason: 'consolidated', selectionEvaluation: undefined });
+    const sc = buildCycleScorecard(baseSnapshot({ revision }));
+    expect(sc.champion).toEqual({ revisionId: 'r1', version: 2 });   // still a champion
+    expect(sc.revisionAssessment!.aggregate).toBeNull();             // but no aggregate to show
+  });
+
+  it('rejected: tradeSplit (preservationGate) + robustness (holdoutValidation) carried onto revisionAssessment', () => {
+    const holdout = { mode: 'trade_based', reason: 'holdout_failed', holdoutDecision: 'REJECT', holdoutReasons: ['drawdown_regression'] } as HoldoutValidation;
+    const preservation = { fired: true } as never; // adapt to the real PreservationMetadata shape (src/validation/trade-preservation.ts)
+    const revision = rev({ status: 'rejected', hypothesisIds: ['h1'], verdictReason: 'holdout_failed', preservationGate: preservation, holdoutValidation: holdout, selectionEvaluation: undefined });
+    const sc = buildCycleScorecard(baseSnapshot({ terminalOutcome: { kind: 'rejected', reason: 'holdout_failed' }, revision }));
+    expect(sc.revisionAssessment!.tradeSplit).toBe(preservation);    // R2 veto visible even on a rejected row
+    expect(sc.revisionAssessment!.robustness).toBe(holdout);         // R3a holdout verdict visible
   });
 });
 ```
@@ -446,7 +465,7 @@ git commit -m "feat(r5b): pure buildCycleScorecard (deterministic, aggregate/rob
 
 **Interfaces:**
 - Consumes: `CycleScorecard` (Task 1).
-- Produces: `interface CycleScorecardRow { id, correlationId, strategyProfileId, schemaVersion, payload: CycleScorecard, generatedAt, createdAt, updatedAt }`; `CycleScorecardRepository { upsert(row): Promise<void>; findByCorrelation(correlationId): Promise<CycleScorecardRow[]> }`. Upsert is idempotent on `UNIQUE(correlationId, schemaVersion)`.
+- Produces: `interface CycleScorecardRow { id, correlationId, strategyProfileId, schemaVersion, payload: CycleScorecard, generatedAt, createdAt, updatedAt }`; `CycleScorecardRepository { upsert(row): Promise<void>; findByCorrelationAndSchema(correlationId, schemaVersion): Promise<CycleScorecardRow | null>; findByCorrelation(correlationId): Promise<CycleScorecardRow[]> }`. Upsert is idempotent on `UNIQUE(correlationId, schemaVersion)`; the read-API uses `findByCorrelationAndSchema` (deterministic single row).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -560,7 +579,7 @@ git commit -m "feat(r5b): cycle_scorecard table + idempotent-upsert repo (drizzl
 
 Also assert `cycle.scorecard` is NOT in `CYCLE_CHAIN_TYPES` (`import { CYCLE_CHAIN_TYPES } from '../cycle-close.ts'; expect(CYCLE_CHAIN_TYPES).not.toContain('cycle.scorecard')`).
 
-> If seeding every one of the 11 branches is impractical in one table, cover at minimum: abandoned (null sets), no_baseline (null sets), no_eligible (empty sets), one nothing_composable/skipped (known sets), accepted (known sets), one rejected (known sets), and the deferred no-enqueue case — and add a per-branch assertion to each EXISTING revision-flow terminal test rather than leaving branches unpinned.
+> **No escape hatch — every one of the 11 terminals + the deferred case MUST have an assertion.** The invariant is "exactly one scorecard per domain-terminal, none on deferred"; leaving any branch unpinned re-opens the coverage gap. Where a branch is already exercised by an EXISTING revision-flow terminal test, add the `cycle.scorecard`-enqueue assertion (kind/reason/set-shape) INTO that existing test rather than duplicating the seeding; where no existing test hits a branch, add a dedicated one. The `revision.build.deferred` `:190` case asserts NO `cycle.scorecard` was enqueued.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -600,9 +619,12 @@ export interface FinalizeCycleDeps {
 }
 
 /** Single terminal-close hook (mirrors enqueueCycleClose): enqueues one cycle.scorecard task per
- *  domain-terminal outcome. FAIL-SOFT — an enqueue failure is observable but never thrown, so the
- *  revision's domain decision is never re-played. An orphaned queued row is reconciled by the P1-1
- *  boot sweeper. Do NOT call on deferred/self-requeue. */
+ *  domain-terminal outcome. FAIL-SOFT — any failure is observable but never thrown, so the revision's
+ *  domain decision is never re-played. Recovery caveat: createAndEnqueueTask does repo.create THEN
+ *  queue.enqueue — the P1-1 boot sweeper reconciles an orphaned row ONLY IF repo.create already
+ *  persisted the `queued` row (i.e. enqueue failed after create). A repo.create failure leaves no row,
+ *  so the scorecard is simply absent (acceptable: the cycle stays terminal, no domain impact). Do NOT
+ *  call on the deferred/self-requeue path. */
 export async function finalizeCycle(args: { outcome: FinalizeCycleOutcome; deps: FinalizeCycleDeps }): Promise<void> {
   const { outcome, deps } = args;
   const source = 'cron'; // internal system-triggered; adjust to the source convention used by enqueueCycleClose
@@ -684,7 +706,7 @@ git commit -m "feat(r5b): finalizeCycle terminal helper + revision-build enqueue
 
 `cycle-scorecard.handler.test.ts`: given a seeded cycle (hypothesis.build tasks under a correlation + evaluations + a revision), dispatching a `cycle.scorecard` task builds and upserts a scorecard whose `counts.built` = number of build tasks, `champion` reflects the accepted revision, and `roster[].lastDecision` = the last completed evaluation's decision **scoped to that correlation** (seed a second evaluation on a run of a DIFFERENT correlation and assert it is ignored). Dispatching the SAME task twice → still ONE row (upsert idempotency). A gather failure (e.g. a throwing `hypotheses.findById`) → the handler THROWS (routes to worker retry), does not swallow.
 
-`cycle-scorecard.test.ts` (read-API): after a scorecard is persisted, `GET /cycles/:correlationId/scorecard` returns it; unknown correlationId → 404.
+`cycle-scorecard.test.ts` (read-API): build the app through the REAL `createReadApp(deps)` (with auth) — NOT an isolated `registerCycleScorecardRoutes` — so the test pins the actual route registration + `V1_PATHS` wiring. After a scorecard is persisted (in-memory repo in deps): an authorized `GET /cycles/:correlationId/scorecard` returns it (200 + payload); unknown correlationId → 404; a write method (`POST` on that path) → 405 method-not-allowed (proves the path is in `V1_PATHS`); unauthenticated → the app's standard auth rejection. Mirror how `completion-summary.test.ts` builds the app + supplies auth.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -706,7 +728,8 @@ Create `src/orchestrator/handlers/cycle-scorecard.handler.ts` — a `WorkflowHan
 
 - [ ] **Step 4: Register + wire**
 
-- `src/composition.ts`: `const cycleScorecards = new DrizzleCycleScorecardRepository(db);` → add to the services object; `router.register('cycle.scorecard', cycleScorecardHandler)` next to the other registrations (`:482+`); add `cycleScorecards` to the `HandlerDeps`/services type.
+- `src/orchestrator/app-services.ts`: add `cycleScorecards: CycleScorecardRepository` to the `AppServices` interface (this is the services/`HandlerDeps` type the handler reads).
+- `src/composition.ts`: `const cycleScorecards = new DrizzleCycleScorecardRepository(db);` → add to the assembled services object; `router.register('cycle.scorecard', cycleScorecardHandler)` next to the other registrations (`:482+`).
 - **Read-API wiring — three explicit edits** (mirror `completion-summary`):
   - `src/read-api/deps.ts`: add `cycleScorecards: CycleScorecardRepository` to the read-API deps interface.
   - `src/read-api/read-app.ts`: `import { registerCycleScorecardRoutes } from './routes/cycle-scorecard.ts';`, call it in the app builder next to `registerCompletionSummaryRoutes(...)`, and add `'/cycles/:correlationId/scorecard'` to the `V1_PATHS` array (`:15`) so the method-not-allowed guard (`:50`) covers it.
@@ -740,9 +763,12 @@ Expected: 0 failures.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/orchestrator/handlers/cycle-scorecard.handler.ts src/orchestrator/handlers/cycle-scorecard.handler.test.ts src/read-api/routes/cycle-scorecard.ts src/read-api/routes/cycle-scorecard.test.ts src/composition.ts
+git add src/orchestrator/handlers/cycle-scorecard.handler.ts src/orchestrator/handlers/cycle-scorecard.handler.test.ts \
+        src/read-api/routes/cycle-scorecard.ts src/read-api/routes/cycle-scorecard.test.ts \
+        src/orchestrator/app-services.ts src/read-api/deps.ts src/read-api/read-app.ts src/composition.ts
 git commit -m "feat(r5b): cycle.scorecard handler (authoritative snapshot + upsert) + read-API route"
 ```
+(All four wiring files — `app-services.ts`, `deps.ts`, `read-app.ts`, `composition.ts` — MUST be in this commit; the `createReadApp` test fails without them.)
 
 ---
 
