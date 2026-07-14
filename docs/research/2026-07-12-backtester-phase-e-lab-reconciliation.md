@@ -31,8 +31,8 @@ Dependency-ordered, every slice additive (rides the existing requested-`metrics`
 | **E1a** | metric catalog: Sortino/Calmar/CAGR/SQN + return moments for DSR | ✅ shipped (`2e0bbdf`) |
 | **E1b** | machine-readable failure channel: quality vector + failure-mode (`no_entries`/`suspected_overfit`/`complexity_violation`/`hypothesis_mismatch`) + per-trade diagnostics artifact | ⏳ next |
 | **E2** | trial ledger + **Deflated Sharpe gate** (advisory-first); N-per-hypothesis-family; DSR + N into signed evidence | 📋 |
-| **E3** | walk-forward split as first-class request param (folds = deterministic sub-runs on the existing queue); CPCV+PBO later | 📋 |
-| **E4** | server-declared held-out OOS qualification window the lab/LLM loop cannot iterate against | 📋 |
+| **E3** | walk-forward split as first-class request param (folds = deterministic sub-runs on the existing queue); CPCV+PBO later | ✅ merged dark upstream (E3a + E3b, backtester PR #121, flag OFF; lab consumer not started — see R3b-2) |
+| **E4** | server-declared held-out OOS qualification window the lab/LLM loop cannot iterate against | ✅ merged dark upstream (E4a + E4b, backtester PR #128, flag OFF; platform admission PR #118 also merged dark — enforcement NOT enabled) |
 | **E5** | novelty gate: daily-PnL-delta correlation of candidate vs admitted pool; novelty score in `RunResultSummary` | 📋 |
 
 ---
@@ -76,7 +76,15 @@ Small, additive, unlocked as the matching backtester slice lands:
 - [ ] Wire `SimilarHypothesisSearchPort` into pre-submit/pre-codegen (currently advisory-only, not gating). Lab-only; can start ahead of E2 as advisory-in-loop.
 - [ ] Request the E1a metrics + SDK bump for the widened `RunResultSummary.metrics`. Ready now (E1a shipped).
 - [ ] Consume E1b failure channel in the researcher prompt (= R4 done properly). Blocks on: E1b.
-- [ ] Outcome Embargo on agent memory (E4). Blocks on: E4 + a window/budget policy decision.
+- [ ] **Outcome Embargo on agent memory (E4/E4b) — lab-owned, HARD PRODUCTION BLOCKER.** Owner:
+  lab (alexxxnikolskiy); no other repo can close this. The upstream dependency is no longer the
+  blocker: backtester E4a+E4b are merged dark (their PR #128, gate flag OFF) and the platform
+  v2-verifier/admission is merged dark (their PR #118, flag OFF) — E4b production enablement now
+  waits on **this item** plus real-v2 integration validation. Remaining lab work: window/budget
+  policy decision → implementation + tests → deploy. Canonical cross-repo status, enable order,
+  and rollback:
+  [E4b card in control-center](../../../control-center/docs/delivery/initiatives/e4b-heldout-promotion-enforcement.md)
+  — local docs keep only this ownership line, not the rollout plan.
 
 ---
 
