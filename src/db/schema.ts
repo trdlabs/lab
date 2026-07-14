@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision, vector, customType, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, index, uniqueIndex, integer, real, boolean, doublePrecision, vector, customType, bigint, uuid, unique } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
 import type { BacktestRunStatus } from '../domain/backtest-run.ts';
@@ -17,6 +17,7 @@ import type { ExperimentType, ExperimentStatus, MemberRole, ExperimentVerdict, D
 import type { PaperSubmissionStatus } from '../domain/paper-submission.ts';
 import type { RevisionStatus, DroppedHypothesis, HoldoutValidation, SelectionEvaluation } from '../domain/strategy-revision.ts';
 import type { PreservationMetadata } from '../validation/trade-preservation.ts';
+import type { CycleScorecard } from '../domain/cycle-scorecard.ts';
 
 // Postgres tsvector has no first-class Drizzle column type. This customType lets us
 // DECLARE the column so drizzle-kit tracks it; the GENERATED ALWAYS expression that
@@ -410,6 +411,17 @@ export const experimentRunMember = pgTable('experiment_run_member', {
 }, (t) => ({
   experimentIdx: index('experiment_run_member_experiment_idx').on(t.experimentId),
 }));
+
+export const cycleScorecard = pgTable('cycle_scorecard', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  correlationId: text('correlation_id').notNull(),
+  strategyProfileId: text('strategy_profile_id').notNull(),
+  schemaVersion: text('schema_version').notNull(),
+  payload: jsonb('payload').$type<CycleScorecard>().notNull(),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ uxCorrSchema: unique('ux_cycle_scorecard_corr_schema').on(t.correlationId, t.schemaVersion) }));
 
 export const experimentEvaluation = pgTable('experiment_evaluation', {
   id: text('id').primaryKey(),
