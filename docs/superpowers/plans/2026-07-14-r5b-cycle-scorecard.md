@@ -227,9 +227,17 @@ import { describe, it, expect } from 'vitest';
 import { buildCycleScorecard, type CycleScorecardSnapshot } from './cycle-scorecard-builder.ts';
 import { DEFAULT_REVISION_EVALUATOR_POLICY } from '../validation/revision-evaluator.ts';
 
+import type { StrategyRevision } from '../domain/strategy-revision.ts';
+
 const M = (o: Record<string, number> = {}) => ({
   netPnlUsd: 1000, netPnlPct: 10, totalTrades: 50, winRate: 0.55, profitFactor: 2,
   maxDrawdownPct: 10, expectancyUsd: 20, sharpe: 1, topTradeContributionPct: 20, ...o,
+});
+
+// Full StrategyRevision factory — NO `as never`; tsc checks the shape.
+const rev = (over: Partial<StrategyRevision>): StrategyRevision => ({
+  id: 'r1', strategyProfileId: 'p1', version: 2, hypothesisIds: [], dropped: [],
+  mergedRuleSet: { order: [], rules: [] }, status: 'rejected', createdAt: 'now', updatedAt: 'now', ...over,
 });
 
 function baseSnapshot(over: Partial<CycleScorecardSnapshot> = {}): CycleScorecardSnapshot {
@@ -248,14 +256,13 @@ function baseSnapshot(over: Partial<CycleScorecardSnapshot> = {}): CycleScorecar
 
 describe('buildCycleScorecard', () => {
   it('accepted champion: deltas computed, champion set, selected=1', () => {
-    const revision = {
-      id: 'r1', version: 2, status: 'accepted', strategyProfileId: 'p1', hypothesisIds: ['h1'],
-      dropped: [], verdictReason: 'pnl_improved', preservationGate: undefined, holdoutValidation: undefined,
+    const revision = rev({
+      status: 'accepted', hypothesisIds: ['h1'], verdictReason: 'pnl_improved',
       selectionEvaluation: {
         evaluatorVersion: 'revision-combo-v1', baselineMetrics: M({ netPnlUsd: 800 }), candidateMetrics: M({ netPnlUsd: 1000 }),
         thresholds: DEFAULT_REVISION_EVALUATOR_POLICY, decision: 'ACCEPT', reasons: ['pnl_improved'],
       },
-    } as never;
+    });
     const sc = buildCycleScorecard(baseSnapshot({ revision }));
     expect(sc.champion).toEqual({ revisionId: 'r1', version: 2 });
     expect(sc.counts.selected).toBe(1);
@@ -264,28 +271,27 @@ describe('buildCycleScorecard', () => {
   });
 
   it('rejected: champion null, revisionAssessment carries aggregate, selected=0', () => {
-    const revision = {
-      id: 'r1', version: 2, status: 'rejected', strategyProfileId: 'p1', hypothesisIds: ['h1'], dropped: [],
-      verdictReason: 'drawdown_regression',
+    const revision = rev({
+      status: 'rejected', hypothesisIds: ['h1'], verdictReason: 'drawdown_regression',
       selectionEvaluation: { evaluatorVersion: 'revision-combo-v1', baselineMetrics: M(), candidateMetrics: M({ maxDrawdownPct: 20 }),
         thresholds: DEFAULT_REVISION_EVALUATOR_POLICY, decision: 'REJECT', reasons: ['drawdown_regression'] },
-    } as never;
+    });
     const sc = buildCycleScorecard(baseSnapshot({ terminalOutcome: { kind: 'rejected', reason: 'drawdown_regression' }, revision }));
     expect(sc.champion).toBeNull();
     expect(sc.counts.selected).toBe(0);
     expect(sc.revisionAssessment!.aggregate!.decision).toBe('REJECT');
   });
 
-  it('rejected with no selectionEvaluation → aggregate null', () => {
-    const revision = { id: 'r1', version: 2, status: 'rejected', hypothesisIds: ['h1'], dropped: [], verdictReason: 'comparison_baseline_unavailable', selectionEvaluation: undefined } as never;
+  it('rejected with no selectionEvaluation → aggregate null (final attempt no comparison / consolidated)', () => {
+    const revision = rev({ status: 'rejected', hypothesisIds: ['h1'], verdictReason: 'comparison_baseline_unavailable', selectionEvaluation: undefined });
     const sc = buildCycleScorecard(baseSnapshot({ terminalOutcome: { kind: 'rejected', reason: 'comparison_baseline_unavailable' }, revision }));
     expect(sc.revisionAssessment!.aggregate).toBeNull();
     expect(sc.champion).toBeNull();
   });
 
-  it('skipped (no revision) → revisionAssessment null; eligible/considered null+reason', () => {
+  it('abandoned/no_baseline (sets null) → eligible/considered null + reason', () => {
     const sc = buildCycleScorecard(baseSnapshot({
-      terminalOutcome: { kind: 'skipped', reason: 'no_eligible_hypotheses' },
+      terminalOutcome: { kind: 'abandoned', reason: 'wait_cap_exhausted' },
       eligibleHypIds: null, consideredHypIds: null, revision: null,
     }));
     expect(sc.revisionAssessment).toBeNull();
@@ -294,8 +300,18 @@ describe('buildCycleScorecard', () => {
     expect(sc.selectionBias.n).toBeNull();
   });
 
+  it('no_eligible_hypotheses (empty sets, NOT null) → eligible=0, no unavailable reason', () => {
+    const sc = buildCycleScorecard(baseSnapshot({
+      terminalOutcome: { kind: 'skipped', reason: 'no_eligible_hypotheses' },
+      eligibleHypIds: [], consideredHypIds: [], revision: null,
+    }));
+    expect(sc.counts.eligible).toBe(0);            // selection ran, found nothing — a KNOWN 0
+    expect(sc.eligibleUnavailableReason).toBeUndefined();
+    expect(sc.selectionBias.n).toBe(0);
+  });
+
   it('dropped is a union by hypId (status dropped_* ∪ revision.dropped, no double count)', () => {
-    const revision = { id: 'r1', version: 2, status: 'rejected', hypothesisIds: [], dropped: [{ hypothesisId: 'h1', reason: 'combo_fail_dropped' }], verdictReason: 'x', selectionEvaluation: undefined } as never;
+    const revision = rev({ status: 'rejected', hypothesisIds: [], dropped: [{ hypothesisId: 'h1', reason: 'combo_fail_dropped' }], verdictReason: 'x', selectionEvaluation: undefined });
     const sc = buildCycleScorecard(baseSnapshot({
       terminalOutcome: { kind: 'rejected', reason: 'x' }, revision,
       hypotheses: [{ hypId: 'h1', status: 'dropped_combo_fail', lastDecision: 'FAIL', evaluated: true }],
@@ -461,6 +477,9 @@ export interface CycleScorecardRow {
 export interface CycleScorecardRepository {
   /** Idempotent upsert on UNIQUE(correlationId, schemaVersion). */
   upsert(row: CycleScorecardRow): Promise<void>;
+  /** Deterministic single-row lookup for the read-API — the (correlationId, schemaVersion) unique key. */
+  findByCorrelationAndSchema(correlationId: string, schemaVersion: string): Promise<CycleScorecardRow | null>;
+  /** All schema versions for a correlation (round-trip / diagnostics). */
   findByCorrelation(correlationId: string): Promise<CycleScorecardRow[]>;
 }
 ```
@@ -487,7 +506,7 @@ Expected: a new `migrations/0026_*.sql` (or next free index) + `migrations/meta/
 
 - [ ] **Step 5: Drizzle + in-memory repos**
 
-`drizzle-cycle-scorecard.repository.ts`: `upsert` = `insert(...).onConflictDoUpdate({ target: [cycleScorecard.correlationId, cycleScorecard.schemaVersion], set: { payload, strategyProfileId, generatedAt, updatedAt } })`; `findByCorrelation` = `select().where(eq(correlationId))`; a `cycleScorecardToDomain(row)` mapper. `in-memory-cycle-scorecard.repository.ts`: a Map keyed by `${correlationId}::${schemaVersion}` for idempotency; `findByCorrelation` filters by correlationId.
+`drizzle-cycle-scorecard.repository.ts`: `upsert` = `insert(...).onConflictDoUpdate({ target: [cycleScorecard.correlationId, cycleScorecard.schemaVersion], set: { payload, strategyProfileId, generatedAt, updatedAt } })`; `findByCorrelationAndSchema` = `select().where(and(eq(correlationId), eq(schemaVersion))).limit(1)` → row or null; `findByCorrelation` = `select().where(eq(correlationId))`; a `cycleScorecardToDomain(row)` mapper. `in-memory-cycle-scorecard.repository.ts`: a Map keyed by `${correlationId}::${schemaVersion}` for idempotency; `findByCorrelationAndSchema` = direct map lookup; `findByCorrelation` filters by correlationId. The in-memory idempotency test asserts a second `upsert` with the same key replaces (one entry), and `findByCorrelationAndSchema` returns the latest payload.
 
 - [ ] **Step 6: Run non-gated tests + typecheck**
 
@@ -518,9 +537,30 @@ git commit -m "feat(r5b): cycle_scorecard table + idempotent-upsert repo (drizzl
 
 - [ ] **Step 1: Write the failing tests**
 
-`finalize-cycle.test.ts`: (a) enqueues a `cycle.scorecard` task with `dedupeKey === 'cycle.scorecard:cycle-scorecard-v1:c1'` and the outcome payload; (b) an enqueue error → emits `cycle.scorecard_enqueue_failed` and does NOT throw (fail-soft). Model the fakes on existing orchestrator tests (`InMemoryQueueAdapter`, in-memory research-task repo, in-memory events).
+`finalize-cycle.test.ts` (fakes: `InMemoryQueueAdapter`, in-memory research-task repo, in-memory events):
+- (a) enqueues a `cycle.scorecard` task with `dedupeKey === 'cycle.scorecard:cycle-scorecard-v1:c1'` and the outcome as payload.
+- (b) enqueue THROWS → emits `cycle.scorecard_enqueue_failed` and resolves (does NOT throw).
+- (c) **enqueue THROWS *and* `events.append` THROWS → finalizeCycle still RESOLVES** (fully fail-soft, block 1). Use a queue whose `enqueue` rejects + an events fake whose `append` rejects; `await expect(finalizeCycle(...)).resolves.toBeUndefined()`.
 
-In `revision-flow.integration.test.ts` add: an accepted cycle enqueues exactly one `cycle.scorecard` task carrying `terminalOutcome.kind==='accepted'` + non-null `eligibleHypIds`/`consideredHypIds`; a `no_eligible_hypotheses` skipped cycle enqueues one with `kind:'skipped'` and NO eligible/considered sets (terminated before selection). Assert `cycle.scorecard` is NOT in `CYCLE_CHAIN_TYPES` (import the const and `expect(CYCLE_CHAIN_TYPES).not.toContain('cycle.scorecard')`).
+**Terminal coverage (block 3) — enumerate ALL 11 domain-terminals of `revision-build` + the deferred non-terminal.** `revision-build.handler.ts` has exactly these terminal `return`s (verified): abandoned `:176`; skipped `no_baseline` `:199` (before `:219`); skipped `no_eligible_hypotheses` `:221`, `nothing_composable` `:275`, two more `revision.skipped` `:283`/`:305` (after `:219`); rejected `eval_window_inconsistent` `:341`, `comparison_baseline_unavailable` `:374` (after `:219`); rejected `holdout_failed` `:570`; accepted `:590`; rejected combo `:646`. The `revision.build.deferred` self-requeue `:190` is NOT terminal. Add to `revision-flow.integration.test.ts` a **table-driven** test that, per terminal, seeds the cycle to hit that branch and asserts exactly ONE `cycle.scorecard` enqueue with the expected `terminalOutcome.kind`/`reason` AND the expected set-shape:
+
+| Terminal | kind | eligibleHypIds / consideredHypIds |
+|---|---|---|
+| abandoned (`:176`) | abandoned | **null / null** (before selection) |
+| no_baseline (`:199`) | skipped | **null / null** (before `:219`) |
+| no_eligible_hypotheses (`:221`) | skipped | **`[]` / `[]`** (selection ran, empty — NOT null, block 2) |
+| nothing_composable (`:275`) | skipped | known sets |
+| skipped `:283` / `:305` | skipped | known sets |
+| eval_window_inconsistent (`:341`) | rejected | known sets |
+| comparison_baseline_unavailable (`:374`) | rejected | known sets |
+| holdout_failed (`:570`) | rejected | known sets |
+| accepted (`:590`) | accepted | known sets |
+| combo rejected (`:646`) | rejected | known sets |
+| **deferred (`:190`)** | — | **NO `cycle.scorecard` enqueued at all** |
+
+Also assert `cycle.scorecard` is NOT in `CYCLE_CHAIN_TYPES` (`import { CYCLE_CHAIN_TYPES } from '../cycle-close.ts'; expect(CYCLE_CHAIN_TYPES).not.toContain('cycle.scorecard')`).
+
+> If seeding every one of the 11 branches is impractical in one table, cover at minimum: abandoned (null sets), no_baseline (null sets), no_eligible (empty sets), one nothing_composable/skipped (known sets), accepted (known sets), one rejected (known sets), and the deferred no-enqueue case — and add a per-branch assertion to each EXISTING revision-flow terminal test rather than leaving branches unpinned.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -578,10 +618,17 @@ export async function finalizeCycle(args: { outcome: FinalizeCycleOutcome; deps:
       { repo: deps.researchTasks, queue: deps.taskQueue, now: deps.now },
     );
   } catch (err) {
-    await deps.events.append({
-      taskId: outcome.sourceTaskId, type: 'cycle.scorecard_enqueue_failed',
-      payload: { correlationId: outcome.correlationId, error: err instanceof Error ? err.message : String(err) },
-    } as never);
+    // FULLY fail-soft: the observability event is ALSO best-effort. If both enqueue AND event-append
+    // throw, finalizeCycle must still resolve — otherwise the worker re-runs revision-build and
+    // re-plays the already-committed domain decision.
+    try {
+      await deps.events.append({
+        taskId: outcome.sourceTaskId, type: 'cycle.scorecard_enqueue_failed',
+        payload: { correlationId: outcome.correlationId, error: err instanceof Error ? err.message : String(err) },
+      } as never);
+    } catch {
+      // swallow — nothing left to do; the cycle stays terminal, scorecard simply absent until reconciled
+    }
   }
 }
 ```
@@ -601,9 +648,10 @@ In `revision-build.handler.ts`:
 2. At EVERY domain-terminal outcome, call `finalizeCycle` with the right `terminalOutcome` and (when past `:219`) the two sets. The terminals (locate by content):
    - accepted (`status: 'accepted'`) → `{ kind: 'accepted', reason: verdict.reasons.join(', ') }`, `revisionId`, both sets.
    - rejected: holdout_failed / eval_window_inconsistent / comparison_baseline_unavailable / combo (`allRejectReasons.join`) → `{ kind: 'rejected', reason: <that verdictReason> }`, `revisionId`, both sets (all are past `:219`).
-   - skipped: no_baseline / no_eligible_hypotheses / nothing_composable / (other `revision.skipped`) → `{ kind: 'skipped', reason }`. `no_baseline` is BEFORE `:219` → omit the sets; the rest are after `:219` → include them.
-   - abandoned (`revision.build.abandoned`, `:176`) → `{ kind: 'abandoned', reason: 'wait_cap_exhausted' }`, NO sets. Do NOT call on the intermediate `:wait${n}` self-requeue (deferred).
+   - skipped: `no_baseline` (`:199`, BEFORE `:219`) → OMIT the sets (null — selection never started). `no_eligible_hypotheses` (`:221`) → pass `eligibleHypIds: []`, `consideredHypIds: []` — selection RAN and found nothing; empty is KNOWN, NOT null (block 2). `nothing_composable` (`:275`) + the other `revision.skipped` (`:283`/`:305`) are after `:219` → include the captured sets.
+   - abandoned (`revision.build.abandoned`, `:176`) → `{ kind: 'abandoned', reason: 'wait_cap_exhausted' }`, NO sets (null — before selection). Do NOT call on the intermediate `revision.build.deferred` `:wait${n}` self-requeue (`:190`).
    `sourceTaskId = task.id`; `strategyProfileId`, `correlationId` from scope.
+   **Semantics of the sets:** `null`/omitted ⇒ scorecard `eligible`/`considered = null` + `terminated_before_selection` (only abandoned + no_baseline). `[]` ⇒ `eligible`/`considered = 0` (no_eligible_hypotheses). Non-empty ⇒ the count.
 
 > This is the subtle task. To avoid a missed terminal, add a `finalizeCalled` guard or centralize the terminal returns through one helper if the handler shape allows; the Step-1 tests (accepted + skipped + not-in-CYCLE_CHAIN_TYPES) plus a per-terminal assertion pin coverage. If any terminal's `strategyProfileId`/`correlationId` is not in scope at that point, STOP and report — do not guess.
 
@@ -650,25 +698,33 @@ Create `src/orchestrator/handlers/cycle-scorecard.handler.ts` — a `WorkflowHan
 2. Gathers the snapshot (§5.2, authoritative):
    - `cycleHypothesisIds` = unique `payload.hypothesisId` of `researchTasks.listByCorrelationAndTypes(correlationId, ['hypothesis.build'])`.
    - Per hypId: `hypotheses.findById` (status); `backtests.listByHypothesis(hypId)` → filter `run.correlationId === correlationId` → per run `evaluations.listByBacktestRun` → the LAST completed evaluation = deterministic max by `(createdAt, id)`; `lastDecision` = its decision, `evaluated` = whether ≥1 exists.
-   - `revision` = `revisions.findById(payload.revisionId)` when `revisionId` present, else null.
-   - `eligibleHypIds`/`consideredHypIds` from the payload (may be undefined → pass `null`).
+   - `revision` = `revisions.findById(payload.revisionId)` when `revisionId` present, else null. **If `revisionId` is present but the revision is NOT found, OR its `strategyProfileId !== payload.strategyProfileId` → THROW** (a stale/mismatched pointer must route to worker retry, not silently produce a partial snapshot with `revision=null`).
+   - `eligibleHypIds`/`consideredHypIds` from the payload (may be undefined → pass `null`; an empty `[]` stays `[]`, distinct from `null`).
 3. `buildCycleScorecard(snapshot)`; `cycleScorecards.upsert({ id: randomUUID(), correlationId, strategyProfileId, schemaVersion, payload, generatedAt: new Date().toISOString(), createdAt: …, updatedAt: … })`.
 4. `events.append(event(task.id, 'cycle.scorecard.built', { correlationId }))` — document at-least-once (a retry after a successful upsert but failed append repeats the event).
 5. A gather/upsert error propagates (throw) → worker BullMQ retry.
 
 - [ ] **Step 4: Register + wire**
 
-In `src/composition.ts`: `const cycleScorecards = new DrizzleCycleScorecardRepository(db);` add to services; `router.register('cycle.scorecard', cycleScorecardHandler)` next to the other registrations (`:482+`). Add `cycleScorecards` to the `HandlerDeps`/services type. Wire the read-API route into the app (follow `completion-summary.ts` route registration).
+- `src/composition.ts`: `const cycleScorecards = new DrizzleCycleScorecardRepository(db);` → add to the services object; `router.register('cycle.scorecard', cycleScorecardHandler)` next to the other registrations (`:482+`); add `cycleScorecards` to the `HandlerDeps`/services type.
+- **Read-API wiring — three explicit edits** (mirror `completion-summary`):
+  - `src/read-api/deps.ts`: add `cycleScorecards: CycleScorecardRepository` to the read-API deps interface.
+  - `src/read-api/read-app.ts`: `import { registerCycleScorecardRoutes } from './routes/cycle-scorecard.ts';`, call it in the app builder next to `registerCompletionSummaryRoutes(...)`, and add `'/cycles/:correlationId/scorecard'` to the `V1_PATHS` array (`:15`) so the method-not-allowed guard (`:50`) covers it.
+  - Ensure `composition.ts` (or wherever read-API deps are assembled) passes `cycleScorecards` into the read-API deps.
 
 - [ ] **Step 5: Write the read-API route**
 
-Create `src/read-api/routes/cycle-scorecard.ts` mirroring `completion-summary.ts`:
+Create `src/read-api/routes/cycle-scorecard.ts` mirroring `completion-summary.ts`. **Deterministic — query the exact `(correlationId, CYCLE_SCORECARD_SCHEMA_VERSION)` unique key** (block 4), not `findByCorrelation()[0]` (unordered):
 ```ts
-export function registerCycleScorecardRoute(app, deps) {
+import { CYCLE_SCORECARD_SCHEMA_VERSION } from '../../domain/cycle-scorecard.ts';
+
+export function registerCycleScorecardRoutes(app, deps) {
   app.get('/cycles/:correlationId/scorecard', async (c) => {
-    const rows = await deps.cycleScorecards.findByCorrelation(c.req.param('correlationId'));
-    if (rows.length === 0) return c.json({ error: 'not_found' }, 404);
-    return c.json(rows[0].payload);
+    const row = await deps.cycleScorecards.findByCorrelationAndSchema(
+      c.req.param('correlationId'), CYCLE_SCORECARD_SCHEMA_VERSION,
+    );
+    if (!row) return c.json({ error: 'not_found' }, 404);
+    return c.json(row.payload);
   });
 }
 ```
@@ -698,7 +754,15 @@ git commit -m "feat(r5b): cycle.scorecard handler (authoritative snapshot + upse
 
 **3. Type consistency:** `CycleScorecard`/`CycleScorecardSnapshot`/`FinalizeCycleOutcome` shapes are consistent Task 1↔2↔4↔5; `eligibleHypIds`/`consideredHypIds` semantics (pre-cap = N / post-cap = considered) consistent Task 4 (capture) ↔ Task 2 (counts) ↔ spec §3; `dedupeKey` format identical Task 4 (finalizeCycle) ↔ spec §6; `CYCLE_SCORECARD_SCHEMA_VERSION` single source (Task 1). ✅
 
+**Review-fix checklist (folded in):**
+- **finalizeCycle fully fail-soft (block 1):** the `cycle.scorecard_enqueue_failed` `events.append` is itself wrapped in a nested `try/catch` — enqueue-throws AND append-throws → finalizeCycle still resolves (never re-plays the revision decision). Task 4 Step 1 test (c) pins this.
+- **no_eligible ≠ null (block 2):** `null`/omitted sets ONLY for `abandoned` + `no_baseline` (before selection); `no_eligible_hypotheses` passes `[]` → `eligible=0` (a known zero). Task 2 has both cases; Task 4's terminal table encodes the set-shape per terminal.
+- **Terminal coverage (block 3):** Task 4 Step 1 enumerates all 11 domain-terminals + the deferred `:190` no-enqueue case as a table. **This is the primary between-task review focus.**
+- **Read-API deterministic (block 4):** route queries `findByCorrelationAndSchema(correlationId, CYCLE_SCORECARD_SCHEMA_VERSION)`, not `findByCorrelation()[0]`.
+- Handler throws on a present-but-missing / wrong-profile `revisionId` (Task 5 Step 3); read-API wiring names `deps.ts`/`read-app.ts`/`V1_PATHS` explicitly (Task 5 Step 4); builder tests use a full `StrategyRevision` factory, no `as never` (Task 2).
+
 **Flagged risks for implementer/reviewer:**
-- **Task 4 terminal coverage** is the main risk: `finalizeCycle` must fire at every domain-terminal `return` in `revision-build` (accepted/rejected×N/skipped×N/abandoned) and NOT on the `:wait` self-requeue — a missed terminal = a silently absent scorecard. The Step-1 tests pin accepted + skipped + not-in-CYCLE_CHAIN_TYPES; a reviewer should enumerate the handler's terminal returns against the finalizeCycle call-sites.
+- **Task 4 terminal coverage** is the main risk: `finalizeCycle` must fire at every one of the 11 domain-terminal `return`s and NOT on the `revision.build.deferred` `:190` self-requeue — a missed terminal = a silently absent scorecard. The reviewer should enumerate the handler's terminal returns against the finalizeCycle call-sites one by one.
 - **Migration number** is 0026+ (0025 already taken on main) — `pnpm db:generate` picks it; do not hardcode.
 - **Gated pg test** (Task 3) must be run for real by the controller (pgvector Postgres), not left skipped — the idempotency guarantee is the point.
+- Do NOT commit `.gortex/sidecar.sqlite-{shm,wal}` (now gitignored) or any daemon-volatile file.

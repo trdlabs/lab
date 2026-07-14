@@ -29,3 +29,7 @@ docs/eval-outputs/
 # Vim swap files
 *.swp
 .env.swp
+
+# gortex daemon volatile sidecar (WAL/SHM) — never commit
+.gortex/sidecar.sqlite-shm
+.gortex/sidecar.sqlite-wal
