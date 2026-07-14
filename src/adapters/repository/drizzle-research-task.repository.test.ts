@@ -65,4 +65,13 @@ d('DrizzleResearchTaskRepository (integration)', () => {
     await mk('done', 'completed', '2026-01-01T00:00:00.000Z');
     expect((await repo.listQueued()).map((t) => t.id)).toEqual(['early', 'a', 'b']);
   });
+
+  it('[P1-1] round-trips availableAt and maps SQL NULL to undefined', async () => {
+    const withAt = task({ status: 'queued', availableAt: '2026-07-14T00:00:05.000Z' });
+    const without = task({ status: 'queued' }); // availableAt undefined
+    await repo.create(withAt);
+    await repo.create(without);
+    expect((await repo.findById(withAt.id))?.availableAt).toBe('2026-07-14T00:00:05.000Z');
+    expect((await repo.findById(without.id))?.availableAt).toBeUndefined();
+  });
 });

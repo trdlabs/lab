@@ -1,0 +1,1 @@
+ALTER TABLE "research_task" ADD COLUMN "available_at" timestamp with time zone;

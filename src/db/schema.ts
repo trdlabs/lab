@@ -36,6 +36,7 @@ export const researchTask = pgTable('research_task', {
   dedupeKey: text('dedupe_key'),
   status: text('status').notNull(),
   payload: jsonb('payload').notNull().$type<Record<string, unknown>>(),
+  availableAt: timestamp('available_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
