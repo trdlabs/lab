@@ -55,4 +55,23 @@ d('DrizzleResearchTaskRepository (integration)', () => {
       await expect(repo.startRunUnlessTerminal('p13-missing')).rejects.toThrow(/not found/);
     });
   });
+
+  it('[P1-1] listQueued returns only queued rows ordered by (createdAt, id)', async () => {
+    await db.delete(researchTask);
+    const mk = (id: string, status: ResearchTask['status'], createdAt: string) => repo.create(task({ id, status, createdAt }));
+    await mk('b', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('a', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('early', 'queued', '2026-01-01T00:00:01.000Z');
+    await mk('done', 'completed', '2026-01-01T00:00:00.000Z');
+    expect((await repo.listQueued()).map((t) => t.id)).toEqual(['early', 'a', 'b']);
+  });
+
+  it('[P1-1] round-trips availableAt and maps SQL NULL to undefined', async () => {
+    const withAt = task({ status: 'queued', availableAt: '2026-07-14T00:00:05.000Z' });
+    const without = task({ status: 'queued' }); // availableAt undefined
+    await repo.create(withAt);
+    await repo.create(without);
+    expect((await repo.findById(withAt.id))?.availableAt).toBe('2026-07-14T00:00:05.000Z');
+    expect((await repo.findById(without.id))?.availableAt).toBeUndefined();
+  });
 });

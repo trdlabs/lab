@@ -71,4 +71,17 @@ describe('InMemoryResearchTaskRepository', () => {
       await expect(repo.startRunUnlessTerminal('missing')).rejects.toThrow(/not found/);
     });
   });
+
+  describe('listQueued (P1-1)', () => {
+    it('returns only queued rows, ordered by createdAt then id', async () => {
+      const repo = new InMemoryResearchTaskRepository();
+      await repo.create(task({ id: 'b', status: 'queued', createdAt: '2026-01-01T00:00:02Z' }));
+      await repo.create(task({ id: 'a', status: 'queued', createdAt: '2026-01-01T00:00:02Z' }));
+      await repo.create(task({ id: 'early', status: 'queued', createdAt: '2026-01-01T00:00:01Z' }));
+      await repo.create(task({ id: 'done', status: 'completed', createdAt: '2026-01-01T00:00:00Z' }));
+      await repo.create(task({ id: 'run', status: 'running', createdAt: '2026-01-01T00:00:00Z' }));
+      const ids = (await repo.listQueued()).map((t) => t.id);
+      expect(ids).toEqual(['early', 'a', 'b']); // createdAt asc, then id asc; non-queued excluded
+    });
+  });
 });

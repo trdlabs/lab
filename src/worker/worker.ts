@@ -4,6 +4,7 @@ import type { TaskQueuePort } from '../ports/task-queue.port.ts';
 import type { WorkflowRouter } from '../orchestrator/workflow-router.ts';
 import type { AppServices } from '../orchestrator/app-services.ts';
 import { advanceChatPlan } from '../orchestrator/chain-runner.ts';
+import { reconcileQueuedTasks } from '../orchestrator/reconcile-queued-tasks.ts';
 
 export interface WorkerDeps {
   queue: TaskQueuePort;
@@ -58,12 +59,20 @@ export function startWorker(deps: WorkerDeps): void {
   });
 }
 
+/** Boot sequence (P1-1): reconcile stranded queued rows, THEN start consuming — never race the
+ *  consumer against reconciliation. An enqueue error during the sweep aborts startup. */
+export async function bootWorker(deps: WorkerDeps, now?: () => number): Promise<void> {
+  const { attempted, reEnqueued } = await reconcileQueuedTasks({ repo: deps.services.researchTasks, queue: deps.queue, now });
+  console.log(`reconciled queued tasks: attempted=${attempted} re-enqueued=${reEnqueued}`);
+  startWorker(deps);
+}
+
 // Runtime entrypoint: `pnpm worker`
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { composeRuntime } = await import('../composition.ts');
   const { installProcessSafetyNet } = await import('../process-safety.ts');
   const { queue, router, services, pool } = composeRuntime();
-  startWorker({ queue, router, services });
+  await bootWorker({ queue, router, services });
   console.log('worker started, consuming research-tasks');
 
   const shutdown = async (code = 0) => {

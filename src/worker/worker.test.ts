@@ -82,6 +82,7 @@ describe('startWorker', () => {
       listByCorrelationAndTypes: (correlationId: string, taskTypes: ResearchTask['taskType'][]) =>
         base.researchTasks.listByCorrelationAndTypes(correlationId, taskTypes),
       startRunUnlessTerminal: (id: string) => base.researchTasks.startRunUnlessTerminal(id),
+      listQueued: async () => [],
     };
     const services = { ...base, researchTasks };
     const router = new WorkflowRouter();
@@ -89,5 +90,22 @@ describe('startWorker', () => {
     startWorker({ queue, router, services });
     await queue.enqueue(env());
     await expect(queue.drain()).rejects.toThrow('boom');
+  });
+
+  it('[P1-1] bootWorker reconciles queued orphans BEFORE the consumer starts', async () => {
+    const { bootWorker } = await import('./worker.ts');
+    const order: string[] = [];
+    const services = makeServices();
+    // one stranded queued row (no job was ever enqueued for it)
+    await services.researchTasks.create(task({ id: 'orphan-1', status: 'queued' }));
+    const recordingQueue = {
+      async enqueue() { order.push('enqueue'); },
+      process() { order.push('process'); },
+      async close() {},
+    };
+    const router = new WorkflowRouter();
+    router.register('strategy.onboard', async () => {});
+    await bootWorker({ queue: recordingQueue as unknown as Parameters<typeof bootWorker>[0]['queue'], router, services });
+    expect(order).toEqual(['enqueue', 'process']); // reconciliation fully done before consumer picks up
   });
 });

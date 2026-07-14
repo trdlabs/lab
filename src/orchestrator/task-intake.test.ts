@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createAndEnqueueTask } from './task-intake.ts';
+import { createAndEnqueueTask, toQueueEnvelope } from './task-intake.ts';
 import { InMemoryResearchTaskRepository } from '../adapters/repository/in-memory-research-task.repository.ts';
 import { InMemoryQueueAdapter } from '../adapters/queue/in-memory-queue.adapter.ts';
 import type { QueueEnvelope } from '../domain/types.ts';
@@ -74,5 +74,40 @@ describe('createAndEnqueueTask', () => {
       { repo: new InMemoryResearchTaskRepository(), queue },
     );
     expect(calls[0]?.opts).toBeUndefined();
+  });
+});
+
+describe('createAndEnqueueTask — availableAt (P1-1)', () => {
+  it('stamps availableAt = now + delayMs from a single injected clock', async () => {
+    const repo = new InMemoryResearchTaskRepository();
+    const queue = new InMemoryQueueAdapter();
+    const now = () => Date.parse('2026-07-14T00:00:00.000Z');
+    const { taskId } = await createAndEnqueueTask(
+      { taskType: 'strategy.onboard', source: 'web', payload: {}, delayMs: 5000 },
+      { repo, queue, now },
+    );
+    const row = await repo.findById(taskId);
+    expect(row?.availableAt).toBe('2026-07-14T00:00:05.000Z');
+    expect(row?.createdAt).toBe('2026-07-14T00:00:00.000Z');
+  });
+
+  it('stamps availableAt = now when no delay', async () => {
+    const repo = new InMemoryResearchTaskRepository();
+    const queue = new InMemoryQueueAdapter();
+    const now = () => Date.parse('2026-07-14T00:00:00.000Z');
+    const { taskId } = await createAndEnqueueTask(
+      { taskType: 'strategy.onboard', source: 'web', payload: {} },
+      { repo, queue, now },
+    );
+    expect((await repo.findById(taskId))?.availableAt).toBe('2026-07-14T00:00:00.000Z');
+  });
+
+  it('toQueueEnvelope preserves dedupeKey (jobId identity)', () => {
+    const env = toQueueEnvelope({
+      id: 't1', taskType: 'strategy.onboard', source: 'web', correlationId: 'c1',
+      dedupeKey: 'chat-proposal:p1', status: 'queued', payload: {},
+      createdAt: 'x', updatedAt: 'x',
+    });
+    expect(env).toEqual({ taskId: 't1', taskType: 'strategy.onboard', correlationId: 'c1', source: 'web', attempt: 1, dedupeKey: 'chat-proposal:p1' });
   });
 });

@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, notInArray } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { researchTask } from '../../db/schema.ts';
 import type { AgentTaskType, ResearchTask, TaskStatus } from '../../domain/types.ts';
@@ -16,6 +16,7 @@ function toDomain(row: Row): ResearchTask {
     correlationId: row.correlationId,
     dedupeKey: row.dedupeKey ?? undefined,
     status: row.status as TaskStatus,
+    availableAt: row.availableAt ? row.availableAt.toISOString() : undefined,
     payload: row.payload,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -34,6 +35,7 @@ export class DrizzleResearchTaskRepository implements ResearchTaskRepository {
       id: task.id, taskType: task.taskType, source: task.source,
       correlationId: task.correlationId, dedupeKey: task.dedupeKey ?? null,
       status: task.status, payload: task.payload,
+      availableAt: task.availableAt ? new Date(task.availableAt) : null,
       createdAt: new Date(task.createdAt), updatedAt: new Date(task.updatedAt),
     });
   }
@@ -80,6 +82,15 @@ export class DrizzleResearchTaskRepository implements ResearchTaskRepository {
     const rows = await this.db.select().from(researchTask).where(
       and(eq(researchTask.correlationId, correlationId), inArray(researchTask.taskType, taskTypes)),
     );
+    return rows.map(toDomain);
+  }
+
+  async listQueued(): Promise<ResearchTask[]> {
+    const rows = await this.db
+      .select()
+      .from(researchTask)
+      .where(eq(researchTask.status, 'queued'))
+      .orderBy(asc(researchTask.createdAt), asc(researchTask.id));
     return rows.map(toDomain);
   }
 }
