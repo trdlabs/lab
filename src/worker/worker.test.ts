@@ -82,6 +82,7 @@ describe('startWorker', () => {
       listByCorrelationAndTypes: (correlationId: string, taskTypes: ResearchTask['taskType'][]) =>
         base.researchTasks.listByCorrelationAndTypes(correlationId, taskTypes),
       startRunUnlessTerminal: (id: string) => base.researchTasks.startRunUnlessTerminal(id),
+      listQueued: async () => [],
     };
     const services = { ...base, researchTasks };
     const router = new WorkflowRouter();

@@ -38,4 +38,11 @@ export class InMemoryResearchTaskRepository implements ResearchTaskRepository {
     this.byId.set(id, { ...existing, status: 'running', updatedAt: new Date().toISOString() });
     return true;
   }
+
+  async listQueued(): Promise<ResearchTask[]> {
+    return [...this.byId.values()]
+      .filter((t) => t.status === 'queued')
+      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map((t) => ({ ...t }));
+  }
 }

@@ -16,4 +16,6 @@ export interface ResearchTaskRepository {
   startRunUnlessTerminal(id: string): Promise<boolean>;
   /** All tasks in a correlation chain whose taskType is one of the given types. */
   listByCorrelationAndTypes(correlationId: string, taskTypes: AgentTaskType[]): Promise<ResearchTask[]>;
+  /** All rows with status 'queued', ordered by (createdAt, id). The boot sweeper's read (P1-1). */
+  listQueued(): Promise<ResearchTask[]>;
 }

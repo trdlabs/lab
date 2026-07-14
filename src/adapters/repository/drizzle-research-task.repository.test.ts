@@ -55,4 +55,14 @@ d('DrizzleResearchTaskRepository (integration)', () => {
       await expect(repo.startRunUnlessTerminal('p13-missing')).rejects.toThrow(/not found/);
     });
   });
+
+  it('[P1-1] listQueued returns only queued rows ordered by (createdAt, id)', async () => {
+    await db.delete(researchTask);
+    const mk = (id: string, status: ResearchTask['status'], createdAt: string) => repo.create(task({ id, status, createdAt }));
+    await mk('b', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('a', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('early', 'queued', '2026-01-01T00:00:01.000Z');
+    await mk('done', 'completed', '2026-01-01T00:00:00.000Z');
+    expect((await repo.listQueued()).map((t) => t.id)).toEqual(['early', 'a', 'b']);
+  });
 });
