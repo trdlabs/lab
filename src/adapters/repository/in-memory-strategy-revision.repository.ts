@@ -35,7 +35,7 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
   }
 
   async updateStatus(id: string, patch: Partial<Pick<StrategyRevision,
-    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId' | 'preservationGate' | 'holdoutValidation'>>): Promise<void> {
+    'status' | 'comboBacktestRunId' | 'metrics' | 'verdictReason' | 'dropped' | 'hypothesisIds' | 'mergedRuleSet' | 'bundleArtifactRef' | 'bundleHash' | 'updatedAt' | 'baselineValidationStatus' | 'baselineExperimentId' | 'baselineTaskId' | 'preservationGate' | 'holdoutValidation' | 'selectionEvaluation'>>): Promise<void> {
     const existing = this.byId.get(id);
     if (!existing) throw new Error(`strategy revision not found for id: ${id}`);
     const next: StrategyRevision = { ...existing };
@@ -54,6 +54,7 @@ export class InMemoryStrategyRevisionRepository implements StrategyRevisionRepos
     if (patch.baselineTaskId !== undefined) next.baselineTaskId = patch.baselineTaskId;
     if (patch.preservationGate !== undefined) next.preservationGate = patch.preservationGate;
     if (patch.holdoutValidation !== undefined) next.holdoutValidation = patch.holdoutValidation;
+    if (patch.selectionEvaluation !== undefined) next.selectionEvaluation = patch.selectionEvaluation;
     this.byId.set(id, next);
   }
 

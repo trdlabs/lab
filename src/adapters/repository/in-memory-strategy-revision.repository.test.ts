@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { InMemoryStrategyRevisionRepository } from './in-memory-strategy-revision.repository.ts';
-import type { StrategyRevision } from '../../domain/strategy-revision.ts';
+import type { SelectionEvaluation, StrategyRevision } from '../../domain/strategy-revision.ts';
 import { DEFAULT_PRESERVATION_THRESHOLDS } from '../../validation/trade-preservation.ts';
+import type { BacktestMetricBlock } from '../../ports/platform-gateway.port.ts';
+import { DEFAULT_REVISION_EVALUATOR_POLICY } from '../../validation/revision-evaluator.ts';
+
+const metrics = (over: Partial<BacktestMetricBlock> = {}): BacktestMetricBlock => ({
+  netPnlUsd: 100, netPnlPct: 1, totalTrades: 25, winRate: 0.5, profitFactor: 1.5,
+  maxDrawdownPct: 5, expectancyUsd: 4, sharpe: 1.2, topTradeContributionPct: 20,
+  ...over,
+});
 
 const row = (over: Partial<StrategyRevision> = {}): StrategyRevision => ({
   id: 'rev-1', strategyProfileId: 'prof-1', version: 1,
@@ -169,6 +177,37 @@ describe('InMemoryStrategyRevisionRepository', () => {
     const hv = { mode: 'trade_based', t: '2026-06-25T00:00:00Z', reason: 'holdout_passed', lowConfidence: false, trainMetrics: { netPnlUsd: 10 }, holdoutMetrics: { netPnlUsd: 8 } } as const;
     await repo.updateStatus('R', { holdoutValidation: hv, updatedAt: now });
     expect((await repo.findById('R'))?.holdoutValidation).toEqual(hv);
+  });
+
+  it('round-trips selectionEvaluation and the extended holdoutValidation fields through create + updateStatus + findById (whitelist-drop guard)', async () => {
+    const repo = new InMemoryStrategyRevisionRepository();
+    const now = '2026-01-01T00:00:00Z';
+    await repo.create(row());
+    const se: SelectionEvaluation = {
+      evaluatorVersion: 'revision-combo-v1',
+      baselineMetrics: metrics(),
+      candidateMetrics: metrics({ netPnlUsd: 50 }),
+      thresholds: DEFAULT_REVISION_EVALUATOR_POLICY,
+      decision: 'REJECT',
+      reasons: ['drawdown_regression'],
+    };
+    const hv = {
+      mode: 'trade_based' as const,
+      t: '2026-06-25T00:00:00Z',
+      reason: 'holdout_passed' as const,
+      lowConfidence: false,
+      trainMetrics: { netPnlUsd: 10 },
+      holdoutMetrics: { netPnlUsd: 8 },
+      trainBaselineMetrics: metrics(),
+      holdoutBaselineMetrics: metrics({ netPnlUsd: 30 }),
+      holdoutDecision: 'ACCEPT' as const,
+      holdoutReasons: [],
+      policy: DEFAULT_REVISION_EVALUATOR_POLICY,
+    };
+    await repo.updateStatus('rev-1', { selectionEvaluation: se, holdoutValidation: hv, updatedAt: now });
+    const got = await repo.findById('rev-1');
+    expect(got?.selectionEvaluation).toEqual(se);
+    expect(got?.holdoutValidation).toEqual(hv);
   });
 });
 
