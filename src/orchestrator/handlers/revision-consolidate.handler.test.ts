@@ -146,6 +146,7 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     const child: StrategyRevision = {
       id: 'rev-2', strategyProfileId: 'p1', version: 3, hypothesisIds: [],
       mergedRuleSet: {}, status: 'accepted', kind: 'consolidated', consolidatedFromRevisionId: R.id,
+      bundleArtifactRef: R.bundleArtifactRef,
       compositionDepth: 1, createdAt: '2026-01-02T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z',
     };
     await services.revisions.create(child);
@@ -159,8 +160,47 @@ describe('revisionConsolidateHandler — guards, run-context, parity gate, fail-
     const events = await services.events.listByTask('task-consolidate-1');
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe('revision.consolidation_skipped');
-    expect(events[0]!.payload['reason']).toBe('already_consolidated');
+    expect(events[0]!.payload).toMatchObject({ reason: 'already_consolidated', newRevisionId: child.id });
     expect((await services.revisions.findById('rev-1'))!.status).toBe('accepted');
+  });
+
+  it('already_consolidated: recovers a crash-orphaned child baseline (consolidated:${child.id})', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+    const child: StrategyRevision = {
+      id: 'rev-child', strategyProfileId: R.strategyProfileId, version: R.version + 1,
+      baseRevisionId: R.id, kind: 'consolidated', consolidatedFromRevisionId: R.id, semanticParentRevisionId: R.id,
+      hypothesisIds: [...R.hypothesisIds], mergedRuleSet: R.mergedRuleSet, bundleArtifactRef: R.bundleArtifactRef,
+      compositionDepth: 1, status: 'accepted', baselineValidationStatus: 'pending',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await services.revisions.create(child); // child exists, but its baseline was never enqueued (crash gap)
+
+    await revisionConsolidateHandler(task(), services);
+
+    const baseline = await services.researchTasks.findByDedupeKey(`strategy.baseline:consolidated:${child.id}`);
+    expect(baseline).not.toBeNull();
+    expect(baseline!.payload['revisionId']).toBe(child.id);
+    const skip = (await services.events.listByTask('task-consolidate-1')).find((e) => e.type === 'revision.consolidation_skipped');
+    expect(skip!.payload).toMatchObject({ reason: 'already_consolidated', newRevisionId: child.id, deduped: false });
+    // R itself is NOT fallback-baselined
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).toBeNull();
+  });
+
+  it('ensureBaselineForRevision guard: an existing child with no bundleArtifactRef → handler rejects, no baseline', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+    const child: StrategyRevision = {
+      id: 'rev-child-nobundle', strategyProfileId: R.strategyProfileId, version: R.version + 1,
+      baseRevisionId: R.id, kind: 'consolidated', consolidatedFromRevisionId: R.id, semanticParentRevisionId: R.id,
+      hypothesisIds: [], mergedRuleSet: {}, /* bundleArtifactRef intentionally absent */
+      compositionDepth: 1, status: 'accepted', baselineValidationStatus: 'pending',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await services.revisions.create(child);
+
+    await expect(revisionConsolidateHandler(task(), services)).rejects.toThrow(/no bundleArtifactRef/);
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:consolidated:${child.id}`)).toBeNull();
   });
 
   it('not accepted: skips with not_consolidatable', async () => {
@@ -576,39 +616,69 @@ describe('revisionConsolidateHandler — accept path (slice G3b, Task 9)', () =>
     expect((services.taskQueue as InMemoryQueueAdapter).queued.length).toBe(beforeQueued);
   });
 
-  it('UNIQUE(strategyProfileId, version) collision: concurrent consolidation claims the version first — skipped, no baseline enqueued, R not persisted as consolidated', async () => {
+  it('concurrent_revision (snapshot): a consolidated child of R at v+1 → ensure child baseline, R not fallback', async () => {
     const services = makeServices();
     const R = await seedConsolidatableRevision(services);
+    const competitor: StrategyRevision = {
+      id: 'rev-child-concurrent', strategyProfileId: R.strategyProfileId, version: R.version + 1,
+      baseRevisionId: R.id, kind: 'consolidated', consolidatedFromRevisionId: R.id, semanticParentRevisionId: R.id,
+      hypothesisIds: [], mergedRuleSet: {}, bundleArtifactRef: R.bundleArtifactRef,
+      compositionDepth: 1, status: 'accepted', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    };
+    await services.revisions.create(competitor);
+    services.consolidator = new FakeStrategyConsolidator();
+    services.revisionRunExecutor = fakeExecutor({ metrics: acceptedMetrics() }).executor;
 
-    // Pre-seed a competing revision at version R.version + 1 with the same strategyProfileId,
-    // so when the handler tries to create the consolidated revision at that version,
-    // the repository will throw a UNIQUE collision error.
+    // The child was pre-created, so the top-of-handler already_consolidated guard would short-circuit
+    // BEFORE create-catch. Model the race: the top guard's FIRST findConsolidatedOf read misses a
+    // concurrently-committing child (returns null), so the handler proceeds to acceptConsolidation,
+    // create(consolidated at v+1) collides, and the create-catch discovers the child via its
+    // listByProfile snapshot — the single-snapshot classification path under test.
+    const realFind = services.revisions.findConsolidatedOf.bind(services.revisions);
+    let first = true;
+    services.revisions.findConsolidatedOf = async (id) => {
+      if (first) { first = false; return null; }
+      return realFind(id);
+    };
+
+    await revisionConsolidateHandler(task(), services);
+
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:consolidated:${competitor.id}`)).not.toBeNull();
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).toBeNull();
+    const ev = (await services.events.listByTask('task-consolidate-1')).find((e) => e.type === 'revision.consolidation_skipped');
+    expect(ev!.payload).toMatchObject({ reason: 'concurrent_revision', newRevisionId: competitor.id });
+  });
+
+  it('concurrent_version_conflict: a non-child revision occupies v+1 → fall back to R (accepted:${R.id})', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
     const competitor: StrategyRevision = {
       id: 'rev-competitor', strategyProfileId: R.strategyProfileId, version: R.version + 1,
       hypothesisIds: [], mergedRuleSet: {}, status: 'accepted', kind: 'composed',
       compositionDepth: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     };
     await services.revisions.create(competitor);
-
     services.consolidator = new FakeStrategyConsolidator();
-    const { executor } = fakeExecutor({ metrics: acceptedMetrics() });
-    services.revisionRunExecutor = executor;
+    services.revisionRunExecutor = fakeExecutor({ metrics: acceptedMetrics() }).executor;
 
     await revisionConsolidateHandler(task(), services);
 
-    // Assert: (a) consolidation_skipped event with reason 'concurrent_revision'
-    const events = await services.events.listByTask('task-consolidate-1');
-    expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe('revision.consolidation_skipped');
-    expect(events[0]!.payload['reason']).toBe('concurrent_revision');
-    expect(events[0]!.payload['detail']).toBeDefined();
-
-    // Assert: (b) ZERO strategy.baseline tasks enqueued
-    const queued = (services.taskQueue as InMemoryQueueAdapter).queued;
-    const baselineTasks = queued.filter((q) => q.taskType === 'strategy.baseline');
-    expect(baselineTasks).toHaveLength(0);
-
-    // Assert: (c) findConsolidatedOf(R.id) still returns null (consolidated not persisted)
+    const rejected = (await services.events.listByTask('task-consolidate-1')).find((e) => e.type === 'revision.consolidation_rejected');
+    expect(rejected!.payload).toMatchObject({ reason: 'concurrent_version_conflict', occupantRevisionId: competitor.id });
+    expect((await services.events.listByTask('task-consolidate-1')).some((e) => e.type === 'revision.reject_rebaselined')).toBe(true);
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).not.toBeNull();
     expect(await services.revisions.findConsolidatedOf(R.id)).toBeNull();
+  });
+
+  it('unknown create error: version v+1 free → rethrow (worker retry)', async () => {
+    const services = makeServices();
+    const R = await seedConsolidatableRevision(services);
+    services.consolidator = new FakeStrategyConsolidator();
+    services.revisionRunExecutor = fakeExecutor({ metrics: acceptedMetrics() }).executor;
+    const realCreate = services.revisions.create.bind(services.revisions);
+    services.revisions.create = async (r) => { if (r.kind === 'consolidated') throw new Error('boom-transient'); return realCreate(r); };
+
+    await expect(revisionConsolidateHandler(task(), services)).rejects.toThrow('boom-transient');
+    expect(await services.researchTasks.findByDedupeKey(`strategy.baseline:accepted:${R.id}`)).toBeNull();
   });
 });

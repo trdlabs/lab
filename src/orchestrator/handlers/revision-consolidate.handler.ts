@@ -63,6 +63,7 @@ async function acceptConsolidation(
   task: ResearchTask,
   services: AppServices,
   { R, assembled, cleanRun }: { R: StrategyRevision; assembled: AssembledStrategyBundle; cleanRun: RevisionRunResult },
+  reject: (reason: string, extra?: Record<string, unknown>) => Promise<void>,
 ): Promise<void> {
   const cleanRef = await services.artifacts.put(
     JSON.stringify({ source: assembled.source, manifest: assembled.manifest, bundleHash: assembled.bundleHash }),
@@ -84,22 +85,32 @@ async function acceptConsolidation(
   try {
     await services.revisions.create(consolidated);
   } catch (err) {
-    await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId: R.id, reason: 'concurrent_revision', detail: errMsg(err) }));
-    return;
+    // Single snapshot: derive child and occupant from the SAME read (avoids a TOCTOU where a child
+    // committing between two separate reads is misclassified as a version-conflict).
+    const revisions = await services.revisions.listByProfile(R.strategyProfileId);
+
+    const child = revisions.find((v) => v.kind === 'consolidated' && v.consolidatedFromRevisionId === R.id);
+    if (child) {
+      const deduped = await ensureBaselineForRevision(task, services, child, `strategy.baseline:consolidated:${child.id}`);
+      await services.events.append(event(task.id, 'revision.consolidation_skipped',
+        { revisionId: R.id, reason: 'concurrent_revision', newRevisionId: child.id, detail: errMsg(err), deduped }));
+      return;
+    }
+
+    const occupant = revisions.find((v) => v.version === R.version + 1);
+    if (occupant) {
+      await reject('concurrent_version_conflict', { occupantRevisionId: occupant.id });
+      return;
+    }
+
+    throw err; // version v+1 free ⇒ not a conflict ⇒ transient/unknown ⇒ worker retry
   }
 
   await services.events.append(event(task.id, 'revision.consolidated', {
     fromRevisionId: R.id, newRevisionId: newId, version: consolidated.version, bundleHash: assembled.bundleHash,
   }));
 
-  await createAndEnqueueTask(
-    {
-      taskType: 'strategy.baseline', source: task.source,
-      payload: { strategyProfileId: R.strategyProfileId, bundleArtifactRef: cleanRef, revisionId: newId },
-      correlationId: task.correlationId, dedupeKey: `strategy.baseline:consolidated:${newId}`,
-    },
-    { repo: services.researchTasks, queue: services.taskQueue },
-  );
+  await ensureBaselineForRevision(task, services, consolidated, `strategy.baseline:consolidated:${newId}`);
 }
 
 /**
@@ -113,9 +124,13 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
   if (parsed.status === 'invalid') throw new Error(`invalid revision.consolidate payload: ${JSON.stringify(parsed.issues)}`);
   const { revisionId, strategyProfileId } = parsed.data;
 
-  // Idempotency (retryable fail-safe): no-op only if R is already consolidated.
-  if (await services.revisions.findConsolidatedOf(revisionId)) {
-    await services.events.append(event(task.id, 'revision.consolidation_skipped', { revisionId, reason: 'already_consolidated' }));
+  // Idempotency (retryable fail-safe): no-op only if R is already consolidated. If the child's
+  // baseline was never enqueued (crash gap between the create and the enqueue), recover it here.
+  const existingChild = await services.revisions.findConsolidatedOf(revisionId);
+  if (existingChild) {
+    const deduped = await ensureBaselineForRevision(task, services, existingChild, `strategy.baseline:consolidated:${existingChild.id}`);
+    await services.events.append(event(task.id, 'revision.consolidation_skipped',
+      { revisionId, reason: 'already_consolidated', newRevisionId: existingChild.id, deduped }));
     return;
   }
   const R = await services.revisions.findById(revisionId);
@@ -164,5 +179,5 @@ export const revisionConsolidateHandler: WorkflowHandler = async (task, services
   if (verdict.decision === 'REJECT') { await reject(verdict.reasons.join(','), { reasons: verdict.reasons, deltas: verdict.deltas }); return; }
 
   // ACCEPT path (Task 9): materialize the consolidated revision + re-baseline.
-  await acceptConsolidation(task, services, { R, assembled, cleanRun });
+  await acceptConsolidation(task, services, { R, assembled, cleanRun }, reject);
 };
