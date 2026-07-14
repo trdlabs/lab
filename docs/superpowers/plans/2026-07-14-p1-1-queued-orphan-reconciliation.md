@@ -247,16 +247,50 @@ In `src/adapters/repository/in-memory-research-task.repository.ts`, add a method
 Run: `npx vitest run src/adapters/repository/in-memory-research-task.repository.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Typecheck (surfaces every other `ResearchTaskRepository` implementer/stub that now needs `listQueued`)**
+- [ ] **Step 6: Implement drizzle `listQueued` (real query now — NOT a stub)**
 
-Run: `npx tsc -p tsconfig.json`
-Expected: exit 0. If any inline test stub of `ResearchTaskRepository` errors, add `listQueued: async () => []` to it (mirror the existing `tryStartRun`-style stubs, e.g. in `src/worker/worker.test.ts`). The drizzle adapter is filled in Task 5 — until then add a temporary `async listQueued(): Promise<ResearchTask[]> { return []; }` to `DrizzleResearchTaskRepository` so the file compiles, with a `// P1-1 Task 5: real query` comment.
+`listQueued` does not depend on `available_at`, so implement it fully here (a `() => []` stub would be a green but functionally-broken commit). In `src/adapters/repository/drizzle-research-task.repository.ts`, add `asc` to the existing `drizzle-orm` import, and add the method:
 
-- [ ] **Step 7: Commit**
+```typescript
+  async listQueued(): Promise<ResearchTask[]> {
+    const rows = await this.db
+      .select()
+      .from(researchTask)
+      .where(eq(researchTask.status, 'queued'))
+      .orderBy(asc(researchTask.createdAt), asc(researchTask.id));
+    return rows.map(toDomain);
+  }
+```
+
+- [ ] **Step 7: Add a gated drizzle order test**
+
+Append inside the gated `d(...)` block of `src/adapters/repository/drizzle-research-task.repository.test.ts`:
+
+```typescript
+  it('[P1-1] listQueued returns only queued rows ordered by (createdAt, id)', async () => {
+    await db.delete(researchTask);
+    const mk = (id: string, status: ResearchTask['status'], createdAt: string) => repo.create(task({ id, status, createdAt }));
+    await mk('b', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('a', 'queued', '2026-01-01T00:00:02.000Z');
+    await mk('early', 'queued', '2026-01-01T00:00:01.000Z');
+    await mk('done', 'completed', '2026-01-01T00:00:00.000Z');
+    expect((await repo.listQueued()).map((t) => t.id)).toEqual(['early', 'a', 'b']);
+  });
+```
+
+(This runs against the pre-0025 schema — it does not touch `available_at`.)
+
+- [ ] **Step 8: Typecheck + run (both adapters)**
+
+Run: `npx tsc -p tsconfig.json` (exit 0) and `npx vitest run src/adapters/repository/in-memory-research-task.repository.test.ts` (PASS). With a DB: `DATABASE_URL=... npx vitest run src/adapters/repository/drizzle-research-task.repository.test.ts` (PASS).
+
+If an inline stub of `ResearchTaskRepository` (e.g. in `src/worker/worker.test.ts`) errors on the new method, add `listQueued: async () => []` to it — acceptable where the stub does NOT participate in a reconciliation test. While there, if you see a stale `tryStartRun`-style stub key, it should read `startRunUnlessTerminal`.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/ports/research-task.repository.ts src/adapters/repository/in-memory-research-task.repository.ts src/adapters/repository/in-memory-research-task.repository.test.ts src/adapters/repository/drizzle-research-task.repository.ts
-git commit -m "feat(repo): listQueued() port + in-memory adapter (P1-1)"
+git add src/ports/research-task.repository.ts src/adapters/repository/in-memory-research-task.repository.ts src/adapters/repository/in-memory-research-task.repository.test.ts src/adapters/repository/drizzle-research-task.repository.ts src/adapters/repository/drizzle-research-task.repository.test.ts
+git commit -m "feat(repo): listQueued() port + in-memory + drizzle adapters (P1-1)"
 ```
 
 ---
@@ -504,7 +538,7 @@ git commit -m "feat(worker): bootWorker reconciles queued orphans before consumi
 
 ---
 
-### Task 5: Migration + drizzle persistence of `available_at` + drizzle `listQueued`
+### Task 5: Migration + drizzle persistence of `available_at`
 
 **Files:**
 - Modify: `src/db/schema.ts`
@@ -513,38 +547,23 @@ git commit -m "feat(worker): bootWorker reconciles queued orphans before consumi
 - Test: `src/adapters/repository/drizzle-research-task.repository.test.ts`
 
 **Interfaces:**
-- Consumes: `ResearchTask.availableAt`, `listQueued()` contract.
-- Produces: drizzle `create` persists `available_at`; `toDomain` maps `NULL → undefined`; `listQueued()` real query.
+- Consumes: `ResearchTask.availableAt`; the `listQueued()` query already exists (Task 2).
+- Produces: drizzle `create` persists `available_at`; `toDomain` maps `NULL → undefined`.
 
 - [ ] **Step 1: Write the failing (gated) test**
 
 Append inside the gated `d(...)` block of `src/adapters/repository/drizzle-research-task.repository.test.ts`:
 
 ```typescript
-  describe('availableAt + listQueued (P1-1)', () => {
-    it('round-trips availableAt and maps SQL NULL to undefined', async () => {
-      const withAt = task({ status: 'queued', availableAt: '2026-07-14T00:00:05.000Z' });
-      const without = task({ status: 'queued' }); // availableAt undefined
-      await repo.create(withAt);
-      await repo.create(without);
-      expect((await repo.findById(withAt.id))?.availableAt).toBe('2026-07-14T00:00:05.000Z');
-      expect((await repo.findById(without.id))?.availableAt).toBeUndefined();
-    });
-
-    it('listQueued returns only queued rows ordered by (createdAt, id)', async () => {
-      await db.delete(researchTask);
-      const mk = (id: string, status: ResearchTask['status'], createdAt: string) =>
-        repo.create(task({ id, status, createdAt }));
-      await mk('b', 'queued', '2026-01-01T00:00:02.000Z');
-      await mk('a', 'queued', '2026-01-01T00:00:02.000Z');
-      await mk('early', 'queued', '2026-01-01T00:00:01.000Z');
-      await mk('done', 'completed', '2026-01-01T00:00:00.000Z');
-      expect((await repo.listQueued()).map((t) => t.id)).toEqual(['early', 'a', 'b']);
-    });
+  it('[P1-1] round-trips availableAt and maps SQL NULL to undefined', async () => {
+    const withAt = task({ status: 'queued', availableAt: '2026-07-14T00:00:05.000Z' });
+    const without = task({ status: 'queued' }); // availableAt undefined
+    await repo.create(withAt);
+    await repo.create(without);
+    expect((await repo.findById(withAt.id))?.availableAt).toBe('2026-07-14T00:00:05.000Z');
+    expect((await repo.findById(without.id))?.availableAt).toBeUndefined();
   });
 ```
-
-Note: the file's `task()` factory sets `createdAt` from `new Date().toISOString()` by default; the `listQueued` order test passes explicit `createdAt`. Confirm `create` writes `createdAt` from the domain value (it does: `createdAt: new Date(task.createdAt)`).
 
 - [ ] **Step 2: Run to verify it fails (only meaningful with `DATABASE_URL`)**
 
@@ -561,9 +580,9 @@ In `src/db/schema.ts`, in the `researchTask` table definition, add alongside the
 
 (Use the same `timestamp`/`withTimezone` import and pattern already used by `createdAt`/`updatedAt` in that file. Nullable — do NOT add `.notNull()`.)
 
-- [ ] **Step 4: Generate the migration**
+- [ ] **Step 4: Generate + apply the migration (repo scripts, not raw npx)**
 
-Run: `npx drizzle-kit generate` (drizzle.config.js points at `./src/db/schema.ts`, out `./migrations`). Confirm it emits `migrations/0025_*.sql` containing `ALTER TABLE "research_task" ADD COLUMN "available_at" timestamp with time zone;` plus the meta snapshot. Re-verify the number is 0025 (`ls migrations/`); if a parallel PR bumped it, accept the generated number.
+Run: `pnpm db:generate` (NOT `npx drizzle-kit generate` — use the repo-pinned CLI). It emits `migrations/0025_*.sql` containing `ALTER TABLE "research_task" ADD COLUMN "available_at" timestamp with time zone;` plus the meta snapshot. Re-verify the number is 0025 (`ls migrations/`); if a parallel PR bumped it, accept the generated number. Apply/verify against your DB with `DATABASE_URL=... pnpm db:migrate`.
 
 - [ ] **Step 5: Implement drizzle persist + read + `listQueued`**
 
@@ -581,18 +600,7 @@ In `create`, add to the `.values({...})` object:
       availableAt: task.availableAt ? new Date(task.availableAt) : null,
 ```
 
-Replace the temporary `listQueued` stub (from Task 2 Step 6) with the real query (uses `asc`, `eq` from `drizzle-orm` — add `asc` to the existing import):
-
-```typescript
-  async listQueued(): Promise<ResearchTask[]> {
-    const rows = await this.db
-      .select()
-      .from(researchTask)
-      .where(eq(researchTask.status, 'queued'))
-      .orderBy(asc(researchTask.createdAt), asc(researchTask.id));
-    return rows.map(toDomain);
-  }
-```
+(`listQueued` is already implemented in Task 2 and needs no change here.)
 
 - [ ] **Step 6: Run the gated test to verify it passes**
 
@@ -626,8 +634,20 @@ import { Queue } from 'bullmq';
 import { BullMqQueueAdapter, toBullmqJobId } from './bullmq-queue.adapter.ts';
 import type { QueueEnvelope } from '../../domain/types.ts';
 
-const redis = process.env.REDIS_URL;
-const d = redis ? describe : describe.skip;
+const redisUrl = process.env.REDIS_URL;
+const d = redisUrl ? describe : describe.skip;
+
+// Test-local Redis connection parser — do NOT reach into the adapter's private redisOpts.
+function redisConnection(url: string): { host: string; port: number; password?: string; db?: number } {
+  const u = new URL(url);
+  const conn: { host: string; port: number; password?: string; db?: number } = {
+    host: u.hostname, port: u.port ? parseInt(u.port, 10) : 6379,
+  };
+  if (u.password) conn.password = decodeURIComponent(u.password);
+  const db = u.pathname.replace(/^\//, '');
+  if (db && Number.isInteger(parseInt(db, 10))) conn.db = parseInt(db, 10);
+  return conn;
+}
 
 // Unique per-run queue name so parallel/CI runs never collide; mandatory cleanup.
 const QUEUE = `p1-1-idem-${process.pid}-${Date.now()}`;
@@ -644,19 +664,30 @@ d('BullMqQueueAdapter jobId idempotency (P1-1)', () => {
     inspect = undefined;
   });
 
-  it('enqueuing the same envelope twice yields a single job (same jobId)', async () => {
-    adapter = new BullMqQueueAdapter(redis!, QUEUE);
+  async function activeCount(): Promise<number> {
+    inspect = new Queue(QUEUE, { connection: redisConnection(redisUrl!) });
+    return inspect.getJobCountByTypes('waiting', 'delayed', 'active');
+  }
+
+  it('same envelope WITH a dedupeKey twice → a single job (jobId = sanitized dedupeKey)', async () => {
+    adapter = new BullMqQueueAdapter(redisUrl!, QUEUE);
     const env: QueueEnvelope = { taskId: 't-idem', taskType: 'strategy.onboard', correlationId: 'c', source: 'web', attempt: 1, dedupeKey: 'chat-proposal:p1' };
     await adapter.enqueue(env);
     await adapter.enqueue(env); // reconciliation re-enqueue of an already-active job
-    inspect = new Queue(QUEUE, { connection: (adapter as unknown as { redisOpts: object }).redisOpts });
-    expect(await inspect.getJobCountByTypes('waiting', 'delayed', 'active')).toBe(1);
-    expect(await inspect.getJob(toBullmqJobId('chat-proposal:p1'))).toBeTruthy();
+    expect(await activeCount()).toBe(1);
+    expect(await inspect!.getJob(toBullmqJobId('chat-proposal:p1'))).toBeTruthy();
+  });
+
+  it('same KEYLESS envelope twice → a single job (jobId falls back to taskId)', async () => {
+    adapter = new BullMqQueueAdapter(redisUrl!, QUEUE);
+    const env: QueueEnvelope = { taskId: 't-keyless', taskType: 'strategy.onboard', correlationId: 'c', source: 'web', attempt: 1, dedupeKey: undefined };
+    await adapter.enqueue(env);
+    await adapter.enqueue(env);
+    expect(await activeCount()).toBe(1);
+    expect(await inspect!.getJob(toBullmqJobId('t-keyless'))).toBeTruthy();
   });
 });
 ```
-
-Note: if reaching `redisOpts` via a cast is undesirable, construct `inspect` with the same `REDIS_URL` parsed inline instead — either is acceptable; keep the cast only if it type-checks.
 
 - [ ] **Step 2: Run to verify it fails/skips appropriately**
 
