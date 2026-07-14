@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { Pool } from 'pg';
 import { cycleScorecardToDomain, DrizzleCycleScorecardRepository, type CycleScorecardDbRow } from './drizzle-cycle-scorecard.repository.ts';
@@ -73,7 +74,7 @@ const url = process.env.DATABASE_URL;
   it('upserting twice with identical (correlationId, schemaVersion) leaves ONE row with the second payload', async () => {
     const correlationId = 'corr-int-' + Date.now();
     const rowFixture = (over: Partial<CycleScorecardRow> = {}): CycleScorecardRow => ({
-      id: 'sc-int-' + Date.now(),
+      id: randomUUID(),
       correlationId,
       strategyProfileId: 'profile-int-1',
       schemaVersion: CYCLE_SCORECARD_SCHEMA_VERSION,
@@ -89,7 +90,7 @@ const url = process.env.DATABASE_URL;
 
     const secondPayload = scorecard({ correlationId, verdict: { decision: 'accept', reason: 'second' } });
     await repo.upsert(rowFixture({
-      id: 'sc-int-2-' + Date.now(), // a different id must not create a second row — the unique key is (correlationId, schemaVersion)
+      id: randomUUID(), // a different id must not create a second row — the unique key is (correlationId, schemaVersion)
       payload: secondPayload,
       updatedAt: '2026-07-14T01:00:00.000Z',
     }));
