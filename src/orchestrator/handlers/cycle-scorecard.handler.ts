@@ -61,10 +61,14 @@ export const cycleScorecardHandler: WorkflowHandler = async (task, services) => 
   const { correlationId, strategyProfileId } = payload;
 
   // cycleHypothesisIds = unique payload.hypothesisId of every hypothesis.build task in this chain.
+  // Sort by id: the repository query has no stable ORDER BY, so its row order is non-deterministic
+  // across retries. The scorecard's `roster` carries this order into JSONB, so without a sort the
+  // same snapshot could produce different roster orderings on retry — violating the determinism
+  // invariant. Sorting the dedup'd ids fixes the roster order regardless of DB physical order.
   const cycleTasks = await services.researchTasks.listByCorrelationAndTypes(correlationId, ['hypothesis.build']);
   const cycleHypothesisIds = [...new Set(
     cycleTasks.map((t) => t.payload.hypothesisId).filter((id): id is string => typeof id === 'string'),
-  )];
+  )].sort();
 
   const hypotheses: CycleScorecardSnapshot['hypotheses'] = [];
   for (const hypId of cycleHypothesisIds) {

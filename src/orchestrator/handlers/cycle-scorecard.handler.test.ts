@@ -176,6 +176,31 @@ describe('cycleScorecardHandler', () => {
     expect(await services.cycleScorecards.findByCorrelation('c1')).toHaveLength(0);
   });
 
+  it('roster order is deterministic regardless of the build-task insertion order (sorted by hypId)', async () => {
+    // The repository query has no stable ORDER BY; simulate two DB physical orders by inserting the
+    // same three hypothesis.build tasks in opposite orders into two independent service graphs.
+    async function rosterFor(order: string[]): Promise<string[]> {
+      const services = makeServices();
+      for (const h of order) {
+        await services.researchTasks.create(buildTask(`bt-${h}`, h, 'c1'));
+        await services.hypotheses.create(hypothesis(h));
+      }
+      const task = scorecardTask({
+        correlationId: 'c1', strategyProfileId: 'p1', sourceTaskId: 'src-1',
+        terminalOutcome: { kind: 'skipped', reason: 'no_baseline' },
+      });
+      await cycleScorecardHandler(task, services);
+      const row = await services.cycleScorecards.findByCorrelationAndSchema('c1', CYCLE_SCORECARD_SCHEMA_VERSION);
+      return row!.payload.roster.map((r) => r.hypId);
+    }
+
+    const forward = await rosterFor(['h1', 'h2', 'h3']);
+    const scrambled = await rosterFor(['h3', 'h1', 'h2']);
+
+    expect(forward).toEqual(['h1', 'h2', 'h3']); // sorted, not insertion order
+    expect(scrambled).toEqual(forward);          // identical artifact regardless of DB row order
+  });
+
   it('a revisionId whose strategyProfileId MISMATCHES the payload THROWS', async () => {
     const services = makeServices();
     await services.revisions.create(revision({ id: 'r-wrong-profile', strategyProfileId: 'p-other' }));
