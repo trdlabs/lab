@@ -17,7 +17,7 @@
 
 ## 1. Проблема / цель
 
-Итог цикла (что предложено/оценено, из какого пула отобран champion, насколько робастен, почему исход такой) рассеян по ledger. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, **идемпотентно персистится после успешного запуска `cycle.scorecard`-task** (enqueue-gap §5.5 честно допускает отсутствие артефакта при сбое постановки — reconciliation вне R5), выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
+Итог цикла (что предложено/оценено, из какого пула отобран champion, насколько робастен, почему исход такой) рассеян по ledger. R5 собирает его в **один детерминированный, versioned, без-LLM артефакт** на закрытие цикла — авторитетно из ledger, **идемпотентно персистится после успешного запуска `cycle.scorecard`-task** (enqueue-gap §5.5: осиротевшая queued-строка реконсилируется P1-1 boot sweeper — уже в main #176), выпускаемый **даже без champion** (иначе rejected/drop-пространство невидимо).
 
 ## 2. Что уже персистится
 
@@ -143,8 +143,8 @@ CycleScorecard {
 ### 5.5 Ошибки / enqueue-gap / дедлеттер (правка 2)
 **Generic dead-letter hook отсутствует.** worker.ts на throw ставит task `'failed'` + re-throw; BullMQ `attempts:3` + `removeOnFail:5000` — лишь удержание failed-job, **не** финальное событие и **не** hook (worker не знает `attemptsMade/maxAttempts`). Поэтому:
 - Handler на сбое gather/upsert **бросает** → task `'failed'` + BullMQ retry (attempts:3) → при исчерпании job остаётся в failed-set (наблюдаемость = failed job + task.status, **НЕ** событие). Спека **не обещает** `cycle.scorecard.failed`.
-- **Enqueue-gap:** `createAndEnqueueTask` создаёт DB-row, **затем** enqueue. Если enqueue падает после row-create, повтор видит dedupe-row и не энкьюит снова. Поэтому terminal revision-build **нельзя безоговорочно ретраить** — это может переиграть доменное решение ревизии. Значит **`finalizeCycle`-enqueue — FAIL-SOFT**: сбой → `cycle.scorecard_enqueue_failed` event + признанный **reconciliation gap** (scorecard может не построиться, цикл всё равно завершён). Полное закрытие gap = зависимость от **P1-1 (task-intake create+enqueue reconciliation) / outbox** — вне R5.
-- Инвариант: сбой scorecard **ретраится независимо и не переигрывает ревизию**; финальный failed-job оставляет цикл завершённым.
+- **Enqueue-gap (P1-1 ЗАКРЫТ в main, #176).** `finalizeCycle` создаёт cycle.scorecard-row через **`createAndEnqueueTask`** (DB-row status `'queued'`, затем enqueue). Если enqueue падает после row-create, осиротевшую `queued`-строку подберёт **P1-1 boot sweeper** (`reconcileQueuedTasks`, `src/orchestrator/reconcile-queued-tasks.ts` — generic: переэнкьюит КАЖДУЮ `queued`-строку всех task types на рестарте воркера, дедуп по jobId). Так scorecard-row реконсилируется eventual-ly, не теряется навсегда. `finalizeCycle`-enqueue всё равно **FAIL-SOFT из revision-build** (сбой → `cycle.scorecard_enqueue_failed` event, НЕ бросает — чтобы не переиграть доменное решение ревизии на ретрае). Между сбоем enqueue и рестартом воркера scorecard просто отсутствует (P1-1 закрывает окно на boot). Требование к дизайну: finalizeCycle обязан идти через `createAndEnqueueTask` (не голый `queue.enqueue`), иначе P1-1 её не увидит (`listQueued`).
+- Инвариант: сбой scorecard **ретраится независимо и не переигрывает ревизию**; финальный failed-job оставляет цикл завершённым; осиротевшая enqueue-row реконсилируется P1-1 на рестарте.
 
 ### 5.6 Хранение R5b + идемпотентность
 Таблица `cycle_scorecard`: `id`, `correlationId`, `strategyProfileId`, `schemaVersion`, **`payload jsonb`**, `generatedAt` (metadata-колонка, НЕ в payload — payload идентичен при повторной сборке), `createdAt`, `updatedAt`; **`UNIQUE(correlationId, schemaVersion)`** → идемпотентный upsert (физически at-least-once, логически exactly-once). Port `CycleScorecardRepository { upsert, findByCorrelation }` + drizzle + in-memory (round-trip). read-API route: `GET` по `correlationId`.
@@ -163,12 +163,16 @@ CycleScorecard {
 - Persistence round-trip + read-API.
 
 ## 8. Инварианты / gotchas
+- **R5a consumer-контракты (из финального R5a-review, сверено 2026-07-14 с фактическими типами в main).** Scorecard-builder ОБЯЗАН терпеть:
+  - `revisionAssessment.aggregate = null`, когда `revision.selectionEvaluation` отсутствует — это не только `comparison_baseline_unavailable`, но и **любая rejected-строка, чей ФИНАЛЬНЫЙ greedy-attempt не дал comparison** (напр. attempt-1 evaluated REJECT, attempt-2 `candidate_run_unavailable`; snapshot сбрасывается per-итерацию → на терминале undefined). Не путать с «оценки не было вовсе».
+  - `kind:'consolidated'` строки **не несут** `selectionEvaluation` (G3b-путь использует `evaluateConsolidation`, не `evaluateRevision`) → `aggregate = null` для них ожидаемо; `robustness`/`tradeSplit` тоже могут отсутствовать.
+  - **Multi-attempt семантика полей различна** (задокументировано in-code на rejected-persist site): на multi-attempt greedy-build `verdictReason` = все attempts, `preservationGate` = sticky-LAST fired veto (`firedPreservation` не сбрасывается per-итерацию), `selectionEvaluation` = ФИНАЛЬНЫЙ attempt. Scorecard **не должен** читать `tradeSplit` (preservationGate) и `aggregate` (selectionEvaluation) как описывающие один attempt — они могут быть из разных. Выравнивание `firedPreservation` = поведенческое изменение, отложено (если понадобится строгая пара — отдельный слайс, не R5b по умолчанию).
 - `eligible`/`considered`/N — из immutable наборов revision-build, не из status и не из evaluations.
 - `selected` — только accepted; `dropped` — union по hypothesisId.
 - `selectionEvaluation`/holdout — **сохранённые входы** оценки (versioned policy), не реконструкция из констант; пишутся и для rejected.
 - `deltas` builder считает из сохранённых metrics (не хранятся).
 - dedupeKey несёт schemaVersion; `cycle.scorecard` вне `CYCLE_CHAIN_TYPES`; abandoned=терминал; deferred≠терминал; `generatedAt` вне payload.
-- `finalizeCycle`-enqueue fail-soft (enqueue-gap + row-then-enqueue → нельзя безоговорочно ретраить ревизию); reconciliation gap признан (P1-1/outbox — вне R5).
+- `finalizeCycle`-enqueue fail-soft (enqueue-gap + row-then-enqueue → нельзя безоговорочно ретраить ревизию); осиротевшая enqueue-row реконсилируется P1-1 boot sweeper (в main #176); finalizeCycle через createAndEnqueueTask.
 - Нет generic dead-letter hook → спека не обещает финальное failed-событие; наблюдаемость = failed task/job.
 - `cycle.scorecard.built` — **at-least-once** (upsert прошёл, append события упал → retry повторит событие): потребители обязаны быть толерантны/идемпотентны (документировано; дедуп события — вне v1).
 
@@ -176,4 +180,4 @@ CycleScorecard {
 - **markdown-рендер** — отдельный слайс; v1 = pure jsonb → рендер = чистая функция поверх payload.
 - **Funnel-top** (proposed/deduped/rejected-на-валидации) — требует upstream `correlationId` на `hypothesis_proposal`; follow-up. R7 (N=eligible) покрыт без него.
 - **DSR** advisory — consume из backtester E2, не строим. **R11** bootstrap-CI, **R14** regime — later.
-- Полное закрытие enqueue reconciliation gap — **P1-1/outbox**, вне R5.
+- Enqueue reconciliation закрыт P1-1 boot sweeper (в main #176) — finalizeCycle создаёт row через createAndEnqueueTask, осиротевшие queued-строки переэнкьюиваются на рестарте воркера.
