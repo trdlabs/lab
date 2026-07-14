@@ -916,3 +916,174 @@ describe('revision-flow integration (R3b-1 Task 5): eval-window extraction + con
     expect(v2?.status).toBe('accepted');
   });
 });
+
+// ---------------------------------------------------------------------------
+// R5a Task 4: revision-build persists selectionEvaluation + extended holdoutValidation
+// ---------------------------------------------------------------------------
+//
+// selectionEvaluation snapshots the AGGREGATE evaluateRevision verdict (pre-preservation-gate),
+// captured only when a comparison actually ran (greedy-loop candidate completed with metrics). It
+// resets every greedy iteration so a later candidate_run_unavailable attempt cannot leave a stale
+// snapshot from a previously-evaluated (and since-dropped) bundle.
+
+/** comparison_baseline never completes -- the handler bails out at Step 8 BEFORE the greedy loop
+ * even starts, so selectionEvaluation must never be assigned. */
+function makeBaselineUnavailableExecutor(): StrategyRevisionRunExecutor {
+  return {
+    execute: async (req: RevisionRunRequest): Promise<RevisionRunResult> => {
+      if (req.label === 'comparison_baseline') {
+        return { status: 'rejected', runId: 'cmp-run', platformRunId: 'base-pr', totalTrades: 0 };
+      }
+      return { status: 'completed', runId: 'cand-run', platformRunId: 'cand-pr', metrics: acceptMetrics(), totalTrades: acceptMetrics().totalTrades };
+    },
+  };
+}
+
+/** comparison_baseline completes; the FIRST candidate attempt completes with a drawdown-regressed
+ * combo (a REAL comparison, aggregate REJECT 'drawdown_regression': deltaNetPnlUsd +100 clears the
+ * no_improvement floor, deltaMaxDrawdownPct +3 breaches the 2.0 ceiling) -> the greedy loop drops
+ * the worst hypothesis and retries; the SECOND candidate attempt (single remaining hypothesis)
+ * returns a non-completed run ('candidate_run_unavailable') -> proves attempt 1's snapshot does
+ * not leak into the final (attempt 2) reject. */
+function makeStaleResetExecutor(): { executor: StrategyRevisionRunExecutor; calls: RevisionRunRequest[] } {
+  const calls: RevisionRunRequest[] = [];
+  const baseline: BacktestMetricBlock = { netPnlUsd: 500, netPnlPct: 5, totalTrades: 30, winRate: 0.6, profitFactor: 1.5, maxDrawdownPct: 8, expectancyUsd: 16.6, sharpe: 1.2, topTradeContributionPct: 10 };
+  const drawdownRegressedCandidate: BacktestMetricBlock = { netPnlUsd: 600, netPnlPct: 6, totalTrades: 30, winRate: 0.6, profitFactor: 1.6, maxDrawdownPct: 11, expectancyUsd: 20, sharpe: 1.3, topTradeContributionPct: 12 };
+  let candidateAttempts = 0;
+  const executor: StrategyRevisionRunExecutor = {
+    execute: async (req: RevisionRunRequest): Promise<RevisionRunResult> => {
+      calls.push(req);
+      if (req.label === 'comparison_baseline') {
+        return { status: 'completed', runId: 'cmp-run', platformRunId: 'base-pr', metrics: baseline, totalTrades: baseline.totalTrades };
+      }
+      candidateAttempts++;
+      if (candidateAttempts === 1) {
+        return { status: 'completed', runId: 'cand-run-1', platformRunId: 'cand-pr-1', metrics: drawdownRegressedCandidate, totalTrades: drawdownRegressedCandidate.totalTrades };
+      }
+      return { status: 'rejected', runId: 'cand-run-2', platformRunId: 'cand-pr-2', totalTrades: 0 };
+    },
+  };
+  return { executor, calls };
+}
+
+describe('revision-flow integration (R5a Task 4): selectionEvaluation + holdout verdict persistence', () => {
+  it('accepted revision persists selectionEvaluation with decision ACCEPT', async () => {
+    const { executor } = makeFakeExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    // NOTE: seedAcceptedV1's bootstrap v1 is ALSO status 'accepted' (no selectionEvaluation, no
+    // comparison ever ran for it) -- disambiguate by version, not status, or this assertion would
+    // spuriously pass/fail depending on Map iteration order.
+    const v = (await services.revisions.listByProfile('p1')).find((r) => r.version === 2);
+    expect(v).toBeDefined();
+    expect(v!.status).toBe('accepted');
+    expect(v!.selectionEvaluation).toBeDefined();
+    expect(v!.selectionEvaluation!.decision).toBe('ACCEPT');
+    expect(v!.selectionEvaluation!.thresholds.maxDrawdownRegressionPct).toBe(2.0);
+  });
+
+  it('rejected revision with a real comparison persists selectionEvaluation with decision REJECT', async () => {
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeRejectExecutor(), researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(v.status).toBe('rejected');
+    expect(v.selectionEvaluation).toBeDefined(); // comparison happened
+    expect(v.selectionEvaluation!.decision).toBe('REJECT');
+  });
+
+  it('holdout-failed rejection persists holdout verdict on holdoutValidation', async () => {
+    const runTrades = new FakeRunTradesAdapter({ 'base-full': syntheticTrades(80) });
+    const { executor } = makeHoldoutExecutor({ holdoutPasses: false });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(v.status).toBe('rejected');
+    expect(v.selectionEvaluation!.decision).toBe('ACCEPT'); // train accepted
+    expect(v.holdoutValidation!.holdoutDecision).toBe('REJECT');
+    expect(v.holdoutValidation!.holdoutBaselineMetrics).toBeDefined();
+  });
+
+  it('comparison_baseline_unavailable leaves selectionEvaluation undefined', async () => {
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeBaselineUnavailableExecutor(), researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(v.status).toBe('rejected');
+    expect(v.verdictReason).toBe('comparison_baseline_unavailable');
+    expect(v.selectionEvaluation).toBeUndefined(); // no comparison -> no snapshot
+  });
+
+  it('aggregate ACCEPT + preservation veto -> snapshot ACCEPT, revision rejected, preservation fired', async () => {
+    const runTrades = new FakeRunTradesAdapter({
+      'base-pr': [
+        { entryTs: 1, exitTs: 2, side: 'long', realizedPnl: -30 },
+        { entryTs: 2, exitTs: 3, side: 'long', realizedPnl: -30 },
+        { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 },
+        { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 },
+        { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 },
+      ],
+      'cand-pr': [
+        { entryTs: 3, exitTs: 4, side: 'long', realizedPnl: 5 },
+        { entryTs: 4, exitTs: 5, side: 'long', realizedPnl: 5 },
+        { entryTs: 5, exitTs: 6, side: 'long', realizedPnl: 5 },
+      ],
+    });
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: makeVetoExecutor(), researcher: cap.port, runTrades });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(v.status).toBe('rejected');
+    expect(v.preservationGate?.fired).toBe(true);
+    expect(v.selectionEvaluation).toBeDefined();
+    expect(v.selectionEvaluation!.decision).toBe('ACCEPT'); // AGGREGATE verdict, NOT the preservation downgrade
+  });
+
+  it('stale reset: first attempt evaluated REJECT, next attempt unavailable -> final snapshot absent', async () => {
+    const { executor } = makeStaleResetExecutor();
+    const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+    const services = makeServices({ revisionRunExecutor: executor, researcher: cap.port });
+
+    const baseBundle = await assembleStrategyBundle({ source: BASE_SOURCE, manifestMeta: BASE_MANIFEST_META });
+    await seedAcceptedV1(services, baseBundle);
+    await seedTwoHypotheses(services);
+
+    await revisionBuildHandler(buildTask({ strategyProfileId: 'p1', correlationId: 'corr-1' }), services);
+
+    const v = (await services.revisions.listByProfile('p1')).at(-1)!;
+    expect(v.status).toBe('rejected');
+    expect(v.selectionEvaluation).toBeUndefined(); // reset each iteration -> no stale snapshot from attempt 1
+  });
+});

@@ -169,6 +169,13 @@
       "when": 1783931631931,
       "tag": "0023_supreme_molten_man",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784009181348,
+      "tag": "0024_ordinary_leopardon",
+      "breakpoints": true
     }
   ]
 }
