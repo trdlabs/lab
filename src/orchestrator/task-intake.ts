@@ -16,12 +16,27 @@ export interface TaskIntakeInput {
 export interface TaskIntakeDeps {
   repo: ResearchTaskRepository;
   queue: TaskQueuePort;
+  /** Injectable clock (ms). One value stamps createdAt/updatedAt AND availableAt. Default Date.now. */
+  now?: () => number;
 }
 
 export interface TaskIntakeResult {
   taskId: string;
   status: TaskStatus;
   deduped: boolean;
+}
+
+/** Build the queue transport envelope for a task row. Carries dedupeKey so the BullMQ jobId
+ *  (dedupeKey ?? taskId) is stable — the basis of enqueue idempotency (P1-1). */
+export function toQueueEnvelope(task: ResearchTask): QueueEnvelope {
+  return {
+    taskId: task.id,
+    taskType: task.taskType,
+    correlationId: task.correlationId,
+    source: task.source,
+    attempt: 1,
+    dedupeKey: task.dedupeKey,
+  };
 }
 
 /**
@@ -37,7 +52,8 @@ export async function createAndEnqueueTask(
     if (existing) return { taskId: existing.id, status: existing.status, deduped: true };
   }
 
-  const now = new Date().toISOString();
+  const nowMs = (deps.now ?? Date.now)();
+  const nowIso = new Date(nowMs).toISOString();
   const task: ResearchTask = {
     id: randomUUID(),
     taskType: input.taskType,
@@ -46,20 +62,13 @@ export async function createAndEnqueueTask(
     dedupeKey: input.dedupeKey,
     status: 'queued',
     payload: input.payload,
-    createdAt: now,
-    updatedAt: now,
+    availableAt: new Date(nowMs + (input.delayMs ?? 0)).toISOString(),
+    createdAt: nowIso,
+    updatedAt: nowIso,
   };
   await deps.repo.create(task);
 
-  const envelope: QueueEnvelope = {
-    taskId: task.id,
-    taskType: task.taskType,
-    correlationId: task.correlationId,
-    source: task.source,
-    attempt: 1,
-    dedupeKey: task.dedupeKey,
-  };
-  await deps.queue.enqueue(envelope, input.delayMs !== undefined ? { delayMs: input.delayMs } : undefined);
+  await deps.queue.enqueue(toQueueEnvelope(task), input.delayMs !== undefined ? { delayMs: input.delayMs } : undefined);
 
   return { taskId: task.id, status: task.status, deduped: false };
 }

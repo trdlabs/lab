@@ -21,6 +21,9 @@ export interface ResearchTask {
   correlationId: string;
   dedupeKey?: string;
   status: TaskStatus;
+  /** Absolute time the task becomes runnable (ISO). Durable copy of the enqueue delay used to
+   *  restore a stranded queued row with its remaining delay (P1-1). */
+  availableAt?: string;
   payload: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
