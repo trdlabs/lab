@@ -88,7 +88,7 @@ describe('buildCompletionSummary — research.run_cycle', () => {
     expect(s.counts).toEqual({ proposed: 5, validated: 4, rejected: 1, deduped: 0, criticReviews: 4, backtestsEnqueued: 4 });
     expect(s.topHypotheses.map((h) => h.id)).toEqual(['hB', 'hC', 'hA']); // by confidence desc, top 3
     expect(s.profile?.coreIdea).toBe('fade pumps');
-    expect(s.links).toEqual({ taskId: 'rc1', profileId: 'p1' });
+    expect(s.links).toEqual({ taskId: 'rc1', profileId: 'p1', scorecardUrl: '/v1/cycles/c1/scorecard?format=markdown' });
   });
 
   it('zero counts + empty top when no completion event and no hypotheses', async () => {
@@ -98,6 +98,13 @@ describe('buildCompletionSummary — research.run_cycle', () => {
     expect(s.counts).toEqual({ proposed: 0, validated: 0, rejected: 0, deduped: 0, criticReviews: 0, backtestsEnqueued: 0 });
     expect(s.topHypotheses).toEqual([]);
     expect(s.profile).toBeNull();
+  });
+
+  it('attaches a stable /v1 scorecardUrl built from the task correlationId (no scorecard read required)', async () => {
+    const deps = fakeDeps({ researchTasks: { findById: async () => runCycleTask({ correlationId: 'corr-9', payload: {} }) } });
+    const summary = await buildCompletionSummary(deps, 'rc1');
+    if (summary?.kind !== 'research.run_cycle') throw new Error('expected run_cycle summary');
+    expect(summary.links.scorecardUrl).toBe('/v1/cycles/corr-9/scorecard?format=markdown');
   });
 });
 

@@ -10,6 +10,7 @@ import type { HypothesisReadPort } from '../ports/hypothesis-read.port.ts';
 import type { BacktestReadPort } from '../ports/backtest-read.port.ts';
 import type { AgentEventReadPort } from '../ports/agent-event-read.port.ts';
 import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
+import { cycleScorecardMarkdownUrl } from './paths.ts';
 
 // Display-hint only — mirrors backtest-completed.handler.ts:22 (MAX_CYCLE_DEPTH = 2). Kept local so the
 // read layer does not import an orchestrator handler (avoids upward layer coupling + load-time deps).
@@ -23,7 +24,7 @@ export interface KeyMetrics {
   netPnlUsd: number | null; netPnlPct: number | null; winRate: number | null;
   profitFactor: number | null; maxDrawdownPct: number | null; sharpe: number | null; totalTrades: number | null;
 }
-export interface SummaryLinks { taskId: string; profileId?: string; hypothesisId?: string; backtestRunId?: string }
+export interface SummaryLinks { taskId: string; profileId?: string; hypothesisId?: string; backtestRunId?: string; scorecardUrl?: string }
 
 export interface BacktestCompletedCompletionSummary {
   kind: 'backtest.completed'; taskId: string; status: string; profile: ProfileRef | null;
@@ -147,7 +148,7 @@ async function buildRunCycle(deps: CompletionSummaryDeps, task: ResearchTask): P
   return {
     kind: 'research.run_cycle', taskId: task.id, status: task.status,
     profile: profile ? toProfileRef(profile) : null, counts, topHypotheses,
-    links: { taskId: task.id, profileId },
+    links: { taskId: task.id, profileId, scorecardUrl: cycleScorecardMarkdownUrl(task.correlationId) },
     warnings,
   };
 }
