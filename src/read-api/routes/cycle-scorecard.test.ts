@@ -9,6 +9,7 @@ import { InMemoryAgentEventStream } from '../../adapters/read/in-memory-agent-ev
 import { InMemoryExperimentReadAdapter } from '../../adapters/read/in-memory-experiment-read.adapter.ts';
 import { CYCLE_SCORECARD_SCHEMA_VERSION, type CycleScorecard } from '../../domain/cycle-scorecard.ts';
 import type { CycleScorecardRow } from '../../ports/cycle-scorecard.repository.ts';
+import { cycleScorecardMarkdownUrl } from '../paths.ts';
 
 const TOKEN = 'test-token';
 const auth = { headers: { authorization: `Bearer ${TOKEN}` } };
@@ -95,5 +96,44 @@ describe('GET /v1/cycles/:correlationId/scorecard', () => {
     const app = createReadApp(deps());
     const res = await app.request('/v1/cycles/c1/scorecard', { method: 'POST', ...auth });
     expect(res.status).toBe(405);
+  });
+
+  function rowFor(sc = scorecard()): CycleScorecardRow {
+    return {
+      id: 'row-1', correlationId: sc.correlationId, strategyProfileId: sc.strategyProfileId,
+      schemaVersion: CYCLE_SCORECARD_SCHEMA_VERSION, payload: sc,
+      generatedAt: '2026-07-14T00:00:00.000Z', createdAt: '2026-07-14T00:00:00.000Z', updatedAt: '2026-07-14T00:00:00.000Z',
+    };
+  }
+
+  it('?format=markdown returns text/markdown on 200', async () => {
+    const app = createReadApp(deps({ cycleScorecards: makeCycleScorecards([rowFor()]) }));
+    const res = await app.request('/v1/cycles/c1/scorecard?format=markdown', auth);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect((await res.text()).startsWith('## ')).toBe(true);
+  });
+
+  it('?format=markdown on a missing row keeps the JSON 404 envelope', async () => {
+    const app = createReadApp(deps({ cycleScorecards: makeCycleScorecards() }));
+    const res = await app.request('/v1/cycles/unknown/scorecard?format=markdown', auth);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe('not_found');
+  });
+
+  it('default (no format) still returns JSON payload', async () => {
+    const app = createReadApp(deps({ cycleScorecards: makeCycleScorecards([rowFor()]) }));
+    const res = await app.request('/v1/cycles/c1/scorecard', auth);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('the URL builder path resolves to the same 200 markdown route the app serves (centralization is real)', async () => {
+    const app = createReadApp(deps({ cycleScorecards: makeCycleScorecards([rowFor()]) }));
+    const res = await app.request(cycleScorecardMarkdownUrl('c1'), auth);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
   });
 });
