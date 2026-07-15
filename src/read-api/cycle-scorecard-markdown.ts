@@ -11,7 +11,7 @@ import type { PreservationMetadata } from '../validation/trade-preservation.ts';
 // longer than the longest backtick-run inside, and pad with spaces (CommonMark
 // strips one leading+trailing space pair inside a code span).
 export function inlineCode(value: string): string {
-  const s = String(value);
+  const s = String(value).replace(/\r?\n/g, ' ');
   if (!s.includes('`')) return `\`${s}\``;
   const runs = s.match(/`+/g) ?? [];
   const longest = runs.reduce((m, r) => Math.max(m, r.length), 0);
@@ -55,8 +55,9 @@ const TERMINAL_TITLES: Record<TerminalKind, string> = {
 };
 
 function renderHeader(sc: CycleScorecard): string[] {
+  const title = TERMINAL_TITLES[sc.terminalOutcome.kind] ?? 'Цикл завершён';
   return [
-    `## ${TERMINAL_TITLES[sc.terminalOutcome.kind]}`,
+    `## ${title}`,
     `**Причина:** ${inlineCode(sc.terminalOutcome.reason)} · **Профиль:** ${inlineCode(sc.strategyProfileId)}`,
   ];
 }

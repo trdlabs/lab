@@ -8,6 +8,9 @@ describe('inlineCode', () => {
   it('widens the fence and pads when the value contains a backtick', () => {
     expect(inlineCode('a`b')).toBe('`` a`b ``');
   });
+  it('collapses newlines so a prose value cannot break out of the code span', () => {
+    expect(inlineCode('a\n\n## evil')).toBe('`a  ## evil`');
+  });
 });
 
 describe('tableCell', () => {
@@ -139,6 +142,26 @@ describe('renderCycleScorecardMarkdown — states', () => {
     expect(md).toContain('## ⚠️ Цикл завершён — прерван до отбора');
     expect(md).toContain('- Допущено к отбору: _недоступно_');
     expect(md).toContain('_Гипотезы отсутствуют._');
+  });
+
+  it('unknown terminal kind falls back to a generic heading instead of rendering "undefined"', () => {
+    const md = renderCycleScorecardMarkdown(base({
+      terminalOutcome: {
+        kind: 'drifted_unknown_kind' as CycleScorecard['terminalOutcome']['kind'],
+        reason: 'schema_drift',
+      },
+    }));
+    expect(md).toContain('## Цикл завершён');
+    expect(md).not.toContain('## undefined');
+  });
+
+  it('eligible UNAVAILABLE + considered AVAILABLE render independently (reverse of the case above)', () => {
+    const md = renderCycleScorecardMarkdown(base({
+      counts: { built: 3, evaluated: 3, eligible: null, considered: 2, selected: 0, dropped: 0 },
+      eligibleUnavailableReason: 'eligibility_check_skipped',
+    }));
+    expect(md).toContain('- Допущено к отбору: _недоступно_ (`eligibility_check_skipped`)');
+    expect(md).toContain('- Рассмотрено: **2**');
   });
 
   it('eligible and considered render independently, each with its own unavailable reason', () => {
