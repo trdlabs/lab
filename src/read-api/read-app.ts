@@ -12,8 +12,9 @@ import { registerCompletionSummaryRoutes } from './routes/completion-summary.ts'
 import { registerAgentTraceRoutes } from './routes/agent-traces.ts';
 import { registerExperimentRoutes } from './routes/experiments.ts';
 import { registerCycleScorecardRoutes } from './routes/cycle-scorecard.ts';
+import { CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './paths.ts';
 
-const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary', '/experiments', '/experiments/:id', '/experiments/:id/runs', '/cycles/:correlationId/scorecard'];
+const V1_PATHS = ['/hypotheses', '/hypotheses/:id', '/backtests', '/backtests/:id', '/agent-events', '/agents', '/agents/:agentId', '/stream', '/authz', '/tasks/:taskId/completion-summary', '/experiments', '/experiments/:id', '/experiments/:id/runs', CYCLE_SCORECARD_ROUTE];
 
 export function createReadApp(deps: ReadApiDeps): Hono {
   const app = new Hono();
@@ -51,6 +52,6 @@ export function createReadApp(deps: ReadApiDeps): Hono {
   const methodNotAllowed = (c: Context) => c.json({ error: { code: 'method_not_allowed', message: 'method not allowed' } }, 405);
   for (const p of V1_PATHS) v1.on(['POST', 'PUT', 'PATCH', 'DELETE'], p, methodNotAllowed);
 
-  app.route('/v1', v1);
+  app.route(READ_API_V1_PREFIX, v1);
   return app;
 }

@@ -1,0 +1,44 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderCycleScorecardMarkdown — states > accepted (champion) — golden snapshot 1`] = `
+"## ✅ Цикл завершён — ревизия принята
+**Причина:** \`pnl_improved\` · **Профиль:** \`p1\`
+
+### Отбор гипотез
+- Построено: **3** · Оценено: **3**
+- Допущено к отбору: **3**
+- Рассмотрено: **3**
+- Выбрано (champion): **1 из 3** · Отброшено: **2**
+
+### 🏆 Champion
+Ревизия \`r1\` (v2)
+
+#### Оценка отбора
+| Метрика | Baseline | Кандидат | Δ |
+|---|--:|--:|--:|
+| Net PnL, $ | 100.00 | 112.50 | +12.50 |
+| Max drawdown, % | 8.00 | 7.20 | −0.80 |
+| Сделок | 40 | 42 | +2 |
+
+**Решение:** \`ACCEPT\` · evaluator \`rev-eval-v1\`
+**Пороги:** minTrades 20 · minΔPnL $5 · maxΔdrawdown 2% · topTrade 40%
+**Причины:** \`net_pnl_improved\`; \`drawdown_within_tolerance\`
+
+#### Сохранность сделок
+Вето: **не сработало**
+Совпало 38 · исчезло 1 · новых 4 · победителей baseline 12
+
+#### Робастность (holdout)
+Режим \`trade_based\` · граница \`2026-06-15T00:00:00Z\` · вердикт \`ACCEPT\` (\`holdout_passed\`)
+
+### Ростер гипотез
+| Гипотеза | Решение | Статус | Отбор |
+|---|---|---|---|
+| \`h1\` | \`PASS\` | \`merged\` | ✓ |
+| \`h2\` | \`PASS\` | \`merged\` | ✓ |
+| \`h3\` | \`FAIL\` | \`rejected\` | — |
+
+---
+_correlation \`c-1\` · schema \`cycle-scorecard-v1\`_
+"
+`;
