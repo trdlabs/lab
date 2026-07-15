@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Durable contract:** `docs/superpowers/specs/2026-07-15-r5c-lab-cycle-scorecard-markdown-spec.md` (R5d/Office references the spec, not this plan).
+
 **Goal:** Render a closed-cycle `CycleScorecard` as human-readable Russian Markdown, serve it through the existing read-API cycle-scorecard route (`?format=markdown`) under the real `/v1` mount, and publish a stable, correctly-prefixed `scorecardUrl` link on the run-cycle completion summary.
 
-**Architecture:** A pure presentation function `renderCycleScorecardMarkdown(sc: CycleScorecard): string` (imports only domain/port TYPES — safe under the read-API import-boundary guard). A single shared path-contract module (`cycle-scorecard-path.ts`) exports the Hono route template and derives the `/v1`-prefixed, `encodeURIComponent`-safe URL from that same template, so the route the app mounts and the link Office will fetch cannot drift. The `GET /cycles/:correlationId/scorecard` route gains a `?format=markdown` branch (text/markdown on 200 only; JSON 404 envelope untouched). The run-cycle completion summary gains an unconditional `links.scorecardUrl` — no read of the scorecard row from the summary path (the summary is emitted before the row exists, so an existence check would almost always be null and never self-heal).
+**Architecture:** A pure presentation function `renderCycleScorecardMarkdown(sc: CycleScorecard): string` (imports only domain/port TYPES — safe under the read-API import-boundary guard). A single shared path-contract module (`paths.ts`) exports the Hono route template and derives the `/v1`-prefixed, `encodeURIComponent`-safe URL from that same template, so the route the app mounts and the link Office will fetch cannot drift. The `GET /cycles/:correlationId/scorecard` route gains a `?format=markdown` branch (text/markdown on 200 only; JSON 404 envelope untouched). The run-cycle completion summary gains an unconditional `links.scorecardUrl` — no read of the scorecard row from the summary path (the summary is emitted before the row exists, so an existence check would almost always be null and never self-heal).
 
 **Tech Stack:** TypeScript on `node --experimental-strip-types`, Hono (read-API), Vitest (unit + inline/file snapshots). No new dependencies, no DB migration, no new env var, no LLM.
 
@@ -13,6 +15,8 @@
 **This plan is Lab-side only (R5c-lab).** It delivers: the renderer, the `/v1` markdown endpoint, and the `scorecardUrl` link inside Lab's `research.run_cycle` completion summary. That is a complete, testable, shippable unit — one Lab PR.
 
 **Out of scope → R5d (Office consumer, separate PR after a short retry-lifecycle design):** Office mirrors `LabSummaryLinks` by hand and drops unknown fields, reads only JSON, and `completionSummaryRender` does not handle `scorecardUrl`. Delivering the markdown *into the conversation* therefore requires Office work — DTO mirror gains `scorecardUrl`, an authenticated `text/markdown` fetch, the launch moment + bounded retry on 404 (the scorecard row lands after the summary), and rendering into the chat. That is R5d and depends on a retry-lifecycle design, not on this slice. Sequence: **Lab PR first, Office PR after.**
+
+**R5d security invariant (carry into the Office design):** Office MUST treat `scorecardUrl` as a relative canonical `/v1/cycles/...` path only, and construct the fetch target by prepending its configured Lab base URL. It MUST NOT follow an arbitrary absolute URL taken from the DTO (an attacker-influenced absolute URL would let Office's authenticated read token be sent to an unintended host). Lab already emits a relative path (`cycleScorecardMarkdownUrl` returns `/v1/...`); the invariant makes the consumer side reject anything that isn't that shape.
 
 ## Global Constraints
 
@@ -578,21 +582,21 @@ git commit -m "feat(r5c-lab): pure CycleScorecard -> Russian Markdown renderer w
 ### Task 2: Shared `/v1` path contract + `?format=markdown` route branch
 
 **Files:**
-- Create: `src/read-api/cycle-scorecard-path.ts`
+- Create: `src/read-api/paths.ts`
 - Modify: `src/read-api/routes/cycle-scorecard.ts`; `src/read-api/read-app.ts` (`V1_PATHS` list + `app.route('/v1', v1)`)
-- Test: `src/read-api/cycle-scorecard-path.test.ts`; `src/read-api/routes/cycle-scorecard.test.ts`
+- Test: `src/read-api/paths.test.ts`; `src/read-api/routes/cycle-scorecard.test.ts`
 
 **Interfaces:**
 - Consumes: `renderCycleScorecardMarkdown` (Task 1); `ReadApiDeps`; `CYCLE_SCORECARD_SCHEMA_VERSION`.
-- Produces: `CYCLE_SCORECARD_ROUTE: string`, `READ_API_V1_PREFIX: string`, `cycleScorecardMarkdownUrl(correlationId: string): string` (from `./cycle-scorecard-path.ts`). Route registered via `app.get(CYCLE_SCORECARD_ROUTE, ...)`; `?format=markdown` returns `200 text/markdown; charset=utf-8`.
+- Produces: `CYCLE_SCORECARD_ROUTE: string`, `READ_API_V1_PREFIX: string`, `cycleScorecardMarkdownUrl(correlationId: string): string` (from `./paths.ts`). Route registered via `app.get(CYCLE_SCORECARD_ROUTE, ...)`; `?format=markdown` returns `200 text/markdown; charset=utf-8`.
 
 - [ ] **Step 1: Write failing tests for the path contract**
 
-Create `src/read-api/cycle-scorecard-path.test.ts`:
+Create `src/read-api/paths.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { cycleScorecardMarkdownUrl, CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './cycle-scorecard-path.ts';
+import { cycleScorecardMarkdownUrl, CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './paths.ts';
 
 describe('cycleScorecardMarkdownUrl', () => {
   it('builds the /v1-prefixed markdown path from the shared route template', () => {
@@ -610,19 +614,21 @@ describe('cycleScorecardMarkdownUrl', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm test src/read-api/cycle-scorecard-path.test.ts`
-Expected: FAIL — module `./cycle-scorecard-path.ts` does not exist.
+Run: `pnpm test src/read-api/paths.test.ts`
+Expected: FAIL — module `./paths.ts` does not exist.
 
 - [ ] **Step 3: Implement the path contract**
 
-Create `src/read-api/cycle-scorecard-path.ts`:
+Create `src/read-api/paths.ts` (shared read-API path contract — NOT owned by the scorecard feature; the whole read surface mounts through `READ_API_V1_PREFIX`):
 
 ```typescript
-// Single source of truth for the read-API cycle-scorecard path. The route is
-// registered relative to the /v1 sub-app (app.route('/v1', v1) in read-app.ts);
-// the URL builder re-materializes the SAME template with the /v1 prefix so an
-// external consumer (Office, R5d) fetches exactly what the app serves. Route
-// template and URL are derived from one string — no drift.
+// Shared read-API path contract. READ_API_V1_PREFIX is the mount prefix for the
+// entire /v1 read surface (app.route(READ_API_V1_PREFIX, v1) in read-app.ts) —
+// it deliberately lives here, not in any feature module, so the app does not
+// depend back on a single feature. CYCLE_SCORECARD_ROUTE is registered relative
+// to that sub-app; cycleScorecardMarkdownUrl re-materializes the SAME template
+// with the /v1 prefix so an external consumer (Office, R5d) fetches exactly what
+// the app serves — route template and URL derived from one string, no drift.
 export const READ_API_V1_PREFIX = '/v1';
 export const CYCLE_SCORECARD_ROUTE = '/cycles/:correlationId/scorecard';
 
@@ -634,7 +640,7 @@ export function cycleScorecardMarkdownUrl(correlationId: string): string {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm test src/read-api/cycle-scorecard-path.test.ts`
+Run: `pnpm test src/read-api/paths.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Write failing tests for the markdown route branch**
@@ -642,7 +648,7 @@ Expected: PASS.
 Add to `src/read-api/routes/cycle-scorecard.test.ts` — reuse its existing `deps`, `makeCycleScorecards`, `scorecard`, `auth`, and `CycleScorecardRow` shape. Add the import at the top:
 
 ```typescript
-import { cycleScorecardMarkdownUrl } from '../cycle-scorecard-path.ts';
+import { cycleScorecardMarkdownUrl } from '../paths.ts';
 ```
 
 Then add inside the `describe('GET /v1/cycles/:correlationId/scorecard', ...)` block:
@@ -702,7 +708,7 @@ import type { Hono } from 'hono';
 import type { ReadApiDeps } from '../deps.ts';
 import { CYCLE_SCORECARD_SCHEMA_VERSION } from '../../domain/cycle-scorecard.ts';
 import { renderCycleScorecardMarkdown } from '../cycle-scorecard-markdown.ts';
-import { CYCLE_SCORECARD_ROUTE } from '../cycle-scorecard-path.ts';
+import { CYCLE_SCORECARD_ROUTE } from '../paths.ts';
 
 export function registerCycleScorecardRoutes(app: Hono, deps: ReadApiDeps): void {
   app.get(CYCLE_SCORECARD_ROUTE, async (c) => {
@@ -729,7 +735,7 @@ Edit `src/read-api/read-app.ts`:
 1. Add the import alongside the other route imports:
 
 ```typescript
-import { CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './cycle-scorecard-path.ts';
+import { CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './paths.ts';
 ```
 
 2. In the `V1_PATHS` array, replace the literal `'/cycles/:correlationId/scorecard'` with `CYCLE_SCORECARD_ROUTE` (value-identical; keeps the 405 loop in sync with the route).
@@ -742,7 +748,7 @@ import { CYCLE_SCORECARD_ROUTE, READ_API_V1_PREFIX } from './cycle-scorecard-pat
 
 - [ ] **Step 9: Run the route + path tests to verify they pass**
 
-Run: `pnpm test src/read-api/routes/cycle-scorecard.test.ts src/read-api/cycle-scorecard-path.test.ts`
+Run: `pnpm test src/read-api/routes/cycle-scorecard.test.ts src/read-api/paths.test.ts`
 Expected: PASS — markdown 200, JSON 404 preserved, JSON default preserved, 401/405 unchanged, builder URL resolves to the served route.
 
 - [ ] **Step 10: Typecheck**
@@ -753,7 +759,7 @@ Expected: exit 0.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add src/read-api/cycle-scorecard-path.ts src/read-api/cycle-scorecard-path.test.ts src/read-api/routes/cycle-scorecard.ts src/read-api/routes/cycle-scorecard.test.ts src/read-api/read-app.ts
+git add src/read-api/paths.ts src/read-api/paths.test.ts src/read-api/routes/cycle-scorecard.ts src/read-api/routes/cycle-scorecard.test.ts src/read-api/read-app.ts
 git commit -m "feat(r5c-lab): serve scorecard markdown at a shared /v1 path contract"
 ```
 
@@ -796,7 +802,7 @@ Edit `src/read-api/completion-summary.ts`:
 1. Add the import near the top:
 
 ```typescript
-import { cycleScorecardMarkdownUrl } from './cycle-scorecard-path.ts';
+import { cycleScorecardMarkdownUrl } from './paths.ts';
 ```
 
 2. Extend `SummaryLinks` (line 26):
