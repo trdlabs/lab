@@ -1121,5 +1121,30 @@ describe('two-pass research', () => {
         site: 'researchRunCycle.retryFeedback', removedKeys: ['reasons[1]'],
       });
     });
+
+    it('IMP-2: a free-text decision (hand-injected/legacy payload) never reaches the researcher input', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+
+      await researchRunCycleHandler(task({
+        strategyProfileId: 'p1', cycleDepth: 1,
+        feedback: {
+          hypothesisId: 'h1',
+          decision: `FAIL — holdout sharpe=${SENTINEL} window ${SENTINEL_DATE}`,
+          reasons: ['no_improvement_over_baseline'],
+        },
+      }), services);
+
+      const captured = JSON.stringify(cap.captured());
+      expect(captured).not.toContain(SENTINEL);
+      expect(captured).not.toContain(SENTINEL_DATE);
+      const events = await services.events.listByTask('t1');
+      const scrub = events.filter((e) => e.type === 'outcome_embargo.scrubbed');
+      expect(scrub).toHaveLength(1);
+      expect(scrub[0]!.payload).toEqual({
+        site: 'researchRunCycle.retryFeedback', removedKeys: ['decision'],
+      });
+    });
   });
 });

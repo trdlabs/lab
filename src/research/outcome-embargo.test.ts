@@ -10,6 +10,8 @@ describe('isEmbargoedMetricKey', () => {
     'outOfSampleSharpe', 'out_of_sample_sharpe', 'metricsOutOfSample',
     'evaluationWindow', 'evaluation_window', 'evaluationWindowFrom',
     'OOSSharpe', 'totalOOSScore', 'metricsOOSVerdict',
+    // IMP-1: adjacent spellings — held_out / hold_out sequences + digit-boundary segmentation
+    'held_out_sharpe', 'heldOutSharpe', 'hold_out_pnl', 'oos2', 'oos2Sharpe', 'holdout2',
   ])('embargoes %s', (key) => {
     expect(isEmbargoedMetricKey(key)).toBe(true);
   });
@@ -21,6 +23,10 @@ describe('isEmbargoedMetricKey', () => {
     'outOf', 'ofSample', // incomplete out_of_sample sequence
     'evaluation', 'windowSize', 'window', // incomplete evaluation_window sequence
     'selectionEvaluation', // legit revision field — 'evaluation' without 'window'
+    // IMP-1 negative controls: digit-boundary split + held/hold sequences must not overmatch
+    'hardStopPct',   // segments ['hard','stop','pct'] — no hold/held+out sequence
+    'holder',        // single segment 'holder' — not the 'hold'+'out' sequence
+    'sharpe2',        // digit-boundary split must not spuriously embargo
   ])('allows %s', (key) => {
     expect(isEmbargoedMetricKey(key)).toBe(false);
   });
@@ -114,6 +120,33 @@ describe('sanitizeRetryFeedback', () => {
       'fragile_pnl', 'strong_robust_edge', 'positive_edge',
       'end_of_data_position', 'abstention_gaming', 'winner_degradation']) {
       expect(SAFE_RETRY_REASONS.has(r)).toBe(true);
+    }
+  });
+
+  it('IMP-2: drops a free-text decision fail-closed and reports it in removedKeys', () => {
+    const out = sanitizeRetryFeedback({
+      hypothesisId: 'h1', decision: 'FAIL — holdout sharpe=1.23',
+      reasons: ['no_improvement_over_baseline'],
+    });
+    expect(out.feedback.decision).toBe('');
+    expect(out.removedKeys).toContain('decision');
+    expect(JSON.stringify(out.removedKeys)).not.toContain('sharpe');
+  });
+
+  it('IMP-2: passes an allowlisted decision (schema enum) through verbatim', () => {
+    const out = sanitizeRetryFeedback({
+      hypothesisId: 'h1', decision: 'FAIL',
+      reasons: ['no_improvement_over_baseline'],
+    });
+    expect(out.feedback.decision).toBe('FAIL');
+    expect(out.removedKeys).toEqual([]);
+  });
+
+  it('IMP-2: covers the full decision allowlist verbatim', () => {
+    for (const d of ['PASS', 'FAIL', 'MODIFY', 'INCONCLUSIVE', 'PAPER_CANDIDATE']) {
+      const out = sanitizeRetryFeedback({ hypothesisId: 'h1', decision: d, reasons: [] });
+      expect(out.feedback.decision).toBe(d);
+      expect(out.removedKeys).toEqual([]);
     }
   });
 });

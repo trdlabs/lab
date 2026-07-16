@@ -80,9 +80,9 @@ Small, additive, unlocked as the matching backtester slice lands:
   lab (alexxxnikolskiy); no other repo can close this. The upstream dependency is no longer the
   blocker: backtester E4a+E4b are merged dark (their PR #128, gate flag OFF) and the platform
   v2-verifier/admission is merged dark (their PR #118, flag OFF) — E4b production enablement now
-  waits on **this item** plus real-v2 integration validation. Remaining lab work: window/budget
-  policy decision → implementation + tests → deploy. Canonical cross-repo status, enable order,
-  and rollback:
+  waits on **this item** plus real-v2 integration validation. Remaining lab work: deploy +
+  E4b-card evidence (tests shipped with the implementation). Canonical cross-repo status, enable
+  order, and rollback:
   [E4b card in control-center](../../../control-center/docs/delivery/initiatives/e4b-heldout-promotion-enforcement.md)
   — local docs keep only this ownership line, not the rollout plan.
 

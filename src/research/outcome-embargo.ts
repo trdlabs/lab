@@ -13,11 +13,15 @@ const EMBARGOED_TOKENS = new Set(['holdout', 'heldout', 'oos', 'promotion', 'qua
 const EMBARGOED_SEQUENCES: readonly (readonly string[])[] = [
   ['out', 'of', 'sample'],
   ['evaluation', 'window'],
+  ['held', 'out'],
+  ['hold', 'out'],
 ];
 
-/** Lowercase segments split on snake_case / kebab-case / dot / camelCase boundaries. */
+/** Lowercase segments split on snake_case / kebab-case / dot / camelCase / letter-digit boundaries. */
 function segmentsOf(key: string): string[] {
   return key
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_\-.]/g, ' ')
@@ -90,6 +94,9 @@ const PRESERVATION_REASONS = ['end_of_data_position', 'abstention_gaming', 'winn
 /** Fail-closed allowlist for retry-feedback reasons (I-E5). */
 export const SAFE_RETRY_REASONS: ReadonlySet<string> = new Set([...EVALUATOR_REASONS, ...PRESERVATION_REASONS]);
 
+/** Proxy-lane evaluation decisions (BacktestCompletedPayloadSchema enum). */
+const SAFE_RETRY_DECISIONS = new Set(['PASS', 'FAIL', 'MODIFY', 'INCONCLUSIVE', 'PAPER_CANDIDATE']);
+
 export interface RetryFeedback {
   readonly hypothesisId: string;
   readonly decision: string;
@@ -115,8 +122,13 @@ export function sanitizeRetryFeedback(feedback: RetryFeedback): SanitizedRetryFe
     if (SAFE_RETRY_REASONS.has(r)) reasons.push(r);
     else removedKeys.push(`reasons[${i}]`);
   });
+  let decision = feedback.decision;
+  if (!SAFE_RETRY_DECISIONS.has(decision)) {
+    decision = '';
+    removedKeys.push('decision');
+  }
   return {
-    feedback: { hypothesisId: feedback.hypothesisId, decision: feedback.decision, reasons },
+    feedback: { hypothesisId: feedback.hypothesisId, decision, reasons },
     removedKeys,
   };
 }
