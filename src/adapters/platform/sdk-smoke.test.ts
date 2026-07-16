@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { CONTRACT_VERSION, SDK_VERSION, SDK_CAPABILITIES } from '@trdlabs/sdk';
 
-// Smoke test: proves the standalone @trdlabs/sdk resolves by name (from the published 0.5.0
-// release tarball, no sibling repo) and exposes its documented root surface. The /agent gateway
+// Smoke test: proves the standalone @trdlabs/sdk resolves by name from the public npm registry,
+// without a sibling-repo dependency, and exposes its documented root surface. The /agent gateway
 // surface was cut in 0.5.0 (mcp integration retired), so this asserts only the surviving root.
 describe('@trdlabs/sdk standalone package', () => {
   it('exposes the root contract + version surface', () => {
