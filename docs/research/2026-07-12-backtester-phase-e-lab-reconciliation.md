@@ -76,7 +76,7 @@ Small, additive, unlocked as the matching backtester slice lands:
 - [ ] Wire `SimilarHypothesisSearchPort` into pre-submit/pre-codegen (currently advisory-only, not gating). Lab-only; can start ahead of E2 as advisory-in-loop.
 - [ ] Request the E1a metrics + SDK bump for the widened `RunResultSummary.metrics`. Ready now (E1a shipped).
 - [ ] Consume E1b failure channel in the researcher prompt (= R4 done properly). Blocks on: E1b.
-- [ ] **Outcome Embargo on agent memory (E4/E4b) — lab-owned, HARD PRODUCTION BLOCKER.** Owner:
+- [x] **Outcome Embargo on agent memory (E4/E4b) — lab-owned, HARD PRODUCTION BLOCKER — IMPLEMENTED in lab** (spec `docs/superpowers/specs/2026-07-17-outcome-embargo-design.md`; deploy + E4b-card evidence pending). Owner:
   lab (alexxxnikolskiy); no other repo can close this. The upstream dependency is no longer the
   blocker: backtester E4a+E4b are merged dark (their PR #128, gate flag OFF) and the platform
   v2-verifier/admission is merged dark (their PR #118, flag OFF) — E4b production enablement now
