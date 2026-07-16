@@ -6,7 +6,6 @@ import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
 function buildPrompt(input: InterpretInput): string {
   return [
     `Top-N ranked results: ${JSON.stringify(input.topN)}`,
-    `Period end (T, no data beyond this — no-leakage boundary): ${input.periodTo}`,
     `Rounds so far: ${input.roundsSoFar}`,
     `Max rounds: ${input.maxRounds}`,
   ].join('\n');

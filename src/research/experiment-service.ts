@@ -543,7 +543,7 @@ export class ExperimentService {
       const restrictToEntryParams = gate1Decision.decision === 'allow_exploratory_sweep';
       const sweep = await this.d.sweepDesigner.design({
         profile: input.profile, baselineTrainSummary: baselineMetrics, tunableParams,
-        restrictToEntryParams, periodTo: T, maxPoints: budget.maxPointsPerRound,
+        restrictToEntryParams, maxPoints: budget.maxPointsPerRound,
       }, input.agentOpts);
 
       const gridValidation = validateSweepGrid(sweep.grid, {
@@ -584,7 +584,7 @@ export class ExperimentService {
       if (ranked.length === 0) return finalize('INCONCLUSIVE', 'sweep_failed');
 
       const interpretation = await this.d.resultInterpreter.interpret({
-        topN: ranked, periodTo: T, roundsSoFar: r, maxRounds: budget.maxRounds,
+        topN: ranked, roundsSoFar: r, maxRounds: budget.maxRounds,
       }, input.agentOpts);
 
       if (interpretation.decision === 'select') {

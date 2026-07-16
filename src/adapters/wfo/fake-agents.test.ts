@@ -74,7 +74,6 @@ describe('FakeSweepDesigner', () => {
         { name: 'exit.tpPct', value: 1, unit: '%', description: 'take profit', tunable: true },
       ],
       restrictToEntryParams: false,
-      periodTo: '2026-06-15',
       maxPoints: 8,
     });
     expect(Object.keys(out.grid).length).toBeGreaterThan(0);
@@ -92,7 +91,6 @@ describe('FakeSweepDesigner', () => {
         { name: 'dump.minDropPct', value: 2, unit: '%', description: 'entry filter', tunable: true },
       ],
       restrictToEntryParams: true,
-      periodTo: '2026-06-15',
       maxPoints: 8,
     });
     expect(Object.keys(out.grid)).toEqual(['dump.minDropPct']);
@@ -117,12 +115,12 @@ describe('FakeResultInterpreter', () => {
         lowConfidence: false,
       },
     ];
-    const out = await new FakeResultInterpreter().interpret({ topN, periodTo: '2026-06-15', roundsSoFar: 1, maxRounds: 2 });
+    const out = await new FakeResultInterpreter().interpret({ topN, roundsSoFar: 1, maxRounds: 2 });
     expect(out).toMatchObject({ decision: 'select', chosenParamsHash: 'h' });
   });
 
   it('stops when there are no top-N candidates', async () => {
-    const out = await new FakeResultInterpreter().interpret({ topN: [], periodTo: '2026-06-15', roundsSoFar: 1, maxRounds: 2 });
+    const out = await new FakeResultInterpreter().interpret({ topN: [], roundsSoFar: 1, maxRounds: 2 });
     expect(out.decision).toBe('stop');
   });
 });

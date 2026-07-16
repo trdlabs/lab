@@ -9,7 +9,6 @@ function buildPrompt(input: SweepInput): string {
     `Baseline train metrics: ${JSON.stringify(input.baselineTrainSummary)}`,
     `Tunable params: ${JSON.stringify(input.tunableParams)}`,
     `Restrict to entry-affecting params only: ${input.restrictToEntryParams}`,
-    `Period end (T, no data beyond this): ${input.periodTo}`,
     `Max grid points: ${input.maxPoints}`,
   ].join('\n');
 }
