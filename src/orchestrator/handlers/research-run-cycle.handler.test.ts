@@ -732,10 +732,10 @@ describe('R4: retry feedback + bounded decision-log excerpts', () => {
     const services = makeServices({ researcher: cap.port }); // default botResults -> no suspicious losers
     await seedProfile(services);
     await researchRunCycleHandler(
-      task({ strategyProfileId: 'p1', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['dd too high'] } }),
+      task({ strategyProfileId: 'p1', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['drawdown_regression'] } }),
       services,
     );
-    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['dd too high'] });
+    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['drawdown_regression'] });
   });
 
   it('fetches getDecisionLog once per distinct loser run and attaches bounded excerpts', async () => {
@@ -964,13 +964,13 @@ describe('two-pass research', () => {
     });
     await seedProfile(services);
     await researchRunCycleHandler(
-      task({ strategyProfileId: 'p1', symbol: 'BTCUSDT', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['dd too high'] } }),
+      task({ strategyProfileId: 'p1', symbol: 'BTCUSDT', feedback: { hypothesisId: 'h1', decision: 'FAIL', reasons: ['drawdown_regression'] } }),
       services,
     );
     // capturingResearcher keeps only the LAST propose() call; loss_reduction runs first, then
     // profit_improvement (winners present) -> asserting focus pins this down as the profit_improvement input.
     expect(cap.captured()?.focus).toBe('profit_improvement');
-    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['dd too high'] });
+    expect(cap.captured()?.retryFeedback).toEqual({ decision: 'FAIL', reasons: ['drawdown_regression'] });
   });
 
   describe('activeOverlayRules (slice G3: sourced from the latest ACCEPTED revision)', () => {
