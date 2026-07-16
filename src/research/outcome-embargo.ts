@@ -78,3 +78,45 @@ export function scrubMetricsBag<T>(bag: T): ScrubResult<T> {
   const scrubbed = scrubValue(bag, '', removedKeys) as T;
   return { scrubbed, removedKeys };
 }
+
+/** Proxy-lane evaluator codes — src/validation/evaluator.ts (deterministic ladder). */
+const EVALUATOR_REASONS = [
+  'insufficient_sample', 'no_improvement_over_baseline', 'drawdown_regression',
+  'fragile_pnl', 'strong_robust_edge', 'positive_edge',
+] as const;
+/** Preservation-veto codes — src/validation/trade-preservation.ts (R2 gate). */
+const PRESERVATION_REASONS = ['end_of_data_position', 'abstention_gaming', 'winner_degradation'] as const;
+
+/** Fail-closed allowlist for retry-feedback reasons (I-E5). */
+export const SAFE_RETRY_REASONS: ReadonlySet<string> = new Set([...EVALUATOR_REASONS, ...PRESERVATION_REASONS]);
+
+export interface RetryFeedback {
+  readonly hypothesisId: string;
+  readonly decision: string;
+  readonly reasons: readonly string[];
+}
+
+export interface SanitizedRetryFeedback {
+  feedback: { hypothesisId: string; decision: string; reasons: string[] };
+  /** Index paths of dropped reasons (e.g. 'reasons[2]') — never the dropped text. */
+  removedKeys: string[];
+}
+
+/**
+ * Allowlist filter over retry-feedback reasons. Unknown values are DROPPED —
+ * free-text reasons may embed embargoed metric/window text. Touches ONLY the
+ * feedback object; control-plane payload fields (evalPlatformRun, …) are out
+ * of scope by design (I-E2).
+ */
+export function sanitizeRetryFeedback(feedback: RetryFeedback): SanitizedRetryFeedback {
+  const reasons: string[] = [];
+  const removedKeys: string[] = [];
+  feedback.reasons.forEach((r, i) => {
+    if (SAFE_RETRY_REASONS.has(r)) reasons.push(r);
+    else removedKeys.push(`reasons[${i}]`);
+  });
+  return {
+    feedback: { hypothesisId: feedback.hypothesisId, decision: feedback.decision, reasons },
+    removedKeys,
+  };
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isEmbargoedMetricKey, scrubMetricsBag } from './outcome-embargo.ts';
+import { isEmbargoedMetricKey, scrubMetricsBag, SAFE_RETRY_REASONS, sanitizeRetryFeedback } from './outcome-embargo.ts';
 
 describe('isEmbargoedMetricKey', () => {
   it.each([
@@ -81,5 +81,39 @@ describe('scrubMetricsBag', () => {
     expect(scrubbed.ts).toBe(ts);
     expect(scrubbed.m).toBe(m);
     expect(removedKeys).toEqual([]);
+  });
+});
+
+describe('sanitizeRetryFeedback', () => {
+  it('keeps allowlisted evaluator and preservation-veto reasons verbatim', () => {
+    const out = sanitizeRetryFeedback({
+      hypothesisId: 'h1', decision: 'FAIL',
+      reasons: ['no_improvement_over_baseline', 'abstention_gaming'],
+    });
+    expect(out.feedback).toEqual({
+      hypothesisId: 'h1', decision: 'FAIL',
+      reasons: ['no_improvement_over_baseline', 'abstention_gaming'],
+    });
+    expect(out.removedKeys).toEqual([]);
+  });
+
+  it('drops unknown reasons fail-closed and reports index paths, never values', () => {
+    const out = sanitizeRetryFeedback({
+      hypothesisId: 'h1', decision: 'MODIFY',
+      reasons: ['drawdown_regression', 'holdout_failed: sharpe=1.23', 'heldout window 2023-04-01'],
+    });
+    expect(out.feedback.reasons).toEqual(['drawdown_regression']);
+    expect(out.removedKeys).toEqual(['reasons[1]', 'reasons[2]']);
+    // paths must not embed the dropped strings
+    expect(JSON.stringify(out.removedKeys)).not.toContain('sharpe');
+    expect(JSON.stringify(out.removedKeys)).not.toContain('2023-04-01');
+  });
+
+  it('covers the full allowlist', () => {
+    for (const r of ['insufficient_sample', 'no_improvement_over_baseline', 'drawdown_regression',
+      'fragile_pnl', 'strong_robust_edge', 'positive_edge',
+      'end_of_data_position', 'abstention_gaming', 'winner_degradation']) {
+      expect(SAFE_RETRY_REASONS.has(r)).toBe(true);
+    }
   });
 });
