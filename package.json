@@ -36,7 +36,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openrouter/ai-sdk-provider": "^2.9.1",
     "@trading-backtester/sdk": "https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz",
-    "@trdlabs/sdk": "0.9.5",
+    "@trdlabs/sdk": "0.10.0",
     "bullmq": "^5.21.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
