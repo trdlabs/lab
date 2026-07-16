@@ -1056,4 +1056,70 @@ describe('two-pass research', () => {
       expect(cap.captured()?.activeOverlayRules).toEqual([]);
     });
   });
+
+  describe('outcome embargo (layer 1) — researcher input purity', () => {
+    const SENTINEL = '987654.321';
+    const SENTINEL_DATE = '2031-12-31T23:59:59.000Z';
+
+    it('an accepted revision with holdoutValidation never leaks it into the researcher input', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+      const rev: StrategyRevision = {
+        id: 'rev-emb', strategyProfileId: 'p1', version: 1, hypothesisIds: ['h1'],
+        mergedRuleSet: {
+          order: ['h1'],
+          rules: [{ appliesTo: 'long', rules: [{ when: 'oi rises', action: 'skip_entry', params: {} }] }],
+          theses: ['safe thesis'],
+        },
+        status: 'accepted',
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await services.revisions.create({
+        ...rev,
+        // Runtime holdout payload as the R3a gate persists it on accepted revisions:
+        holdoutValidation: {
+          holdoutMetrics: { sharpe: Number(SENTINEL) },
+          trainMetrics: { sharpe: 1 },
+          holdoutDecision: 'FAIL', holdoutReasons: ['holdout_failed'],
+          t: SENTINEL_DATE, mode: 'trade_based',
+        },
+      } as unknown as StrategyRevision);
+
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
+
+      const captured = JSON.stringify(cap.captured());
+      expect(captured).not.toContain(SENTINEL);
+      expect(captured).not.toContain(SENTINEL_DATE);
+      expect(captured).not.toContain('holdoutValidation');
+      // positive control: the accepted revision's rules DID reach the researcher
+      expect(captured).toContain('oi rises');
+    });
+
+    it('a legacy persisted payload with dirty feedback reaches the researcher sanitized + is evidenced', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+
+      await researchRunCycleHandler(task({
+        strategyProfileId: 'p1', cycleDepth: 1,
+        feedback: {
+          hypothesisId: 'h1', decision: 'FAIL',
+          reasons: ['no_improvement_over_baseline', `holdout_failed: sharpe=${SENTINEL}`],
+        },
+      }), services);
+
+      const captured = JSON.stringify(cap.captured());
+      expect(captured).not.toContain(SENTINEL);
+      // positive control: the allowlisted reason survived
+      expect(captured).toContain('no_improvement_over_baseline');
+      // every scrub hit is evidenced — index paths only, never the dropped text
+      const events = await services.events.listByTask('t1');
+      const scrub = events.filter((e) => e.type === 'outcome_embargo.scrubbed');
+      expect(scrub).toHaveLength(1);
+      expect(scrub[0]!.payload).toEqual({
+        site: 'researchRunCycle.retryFeedback', removedKeys: ['reasons[1]'],
+      });
+    });
+  });
 });
