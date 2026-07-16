@@ -105,6 +105,15 @@ describe('agent-event mapper (deny-by-default)', () => {
   it('derives error level from type', () => {
     expect(toAgentEventDto({ id: 'e', taskId: 't', type: 'strategy_analyst.failed', payload: {}, createdAt: '2026-01-01T00:00:00.000Z' }).level).toBe('error');
   });
+
+  it('outcome embargo: outcome_embargo.scrubbed payload is NOT exposed through the read API', () => {
+    const dto = toAgentEventDto({
+      id: 'e1', taskId: 't1', type: 'outcome_embargo.scrubbed',
+      payload: { site: 'wfo.gate1.baselineMetrics', removedKeys: ['holdoutSharpe'] },
+      createdAt: '2026-01-01T00:00:00Z',
+    } as never);
+    expect(dto.payloadSummary).toBeUndefined(); // deny-by-default PAYLOAD_ALLOWLIST
+  });
 });
 
 describe('experiment run member mapper', () => {
