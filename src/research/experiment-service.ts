@@ -33,6 +33,7 @@ import type { ArtifactRef } from '../domain/types.ts';
 import type { AgentCallOpts } from '../ports/agent-call-opts.ts';
 import type { TokenUsageRepository } from '../ports/token-usage.repository.ts';
 import { withinTokenBudget } from '../orchestrator/token-budget.ts';
+import { scrubMetricsBag } from './outcome-embargo.ts';
 
 export interface WfoBudget {
   maxRounds: number;
@@ -510,11 +511,25 @@ export class ExperimentService {
       return finalize('INCONCLUSIVE', 'budget_exhausted');
     }
 
+    // Outcome Embargo (S1): generation-lane egress scrub. Defense-in-depth — today these
+    // blocks come from closed typed projections; the scrub guards against SDK/mapper widening.
+    // Spec: docs/superpowers/specs/2026-07-17-outcome-embargo-design.md §6.2.
+    const emitScrubbed = async (site: string, removedKeys: string[]): Promise<void> => {
+      if (removedKeys.length === 0) return;
+      await this.d.events.append({
+        id: this.d.newId('evt'), taskId: input.taskId, type: 'outcome_embargo.scrubbed',
+        payload: { site, removedKeys },
+        createdAt: this.d.now(),
+      });
+    };
+
     // --- GATE1 ---
     const { entryAffecting } = classifyEntryAffectingParams(input.profile.profile.parameters);
     const hasEntrySignalEvidence = baselineMetrics.totalTrades > 0 || input.entrySignalEvidence === true;
+    const gate1Baseline = scrubMetricsBag(baselineMetrics);
+    await emitScrubbed('wfo.gate1.baselineMetrics', gate1Baseline.removedKeys);
     const gate1Decision = await this.d.gate1.decide({
-      profile: input.profile, baselineMetrics, entryAffecting, hasEntrySignalEvidence,
+      profile: input.profile, baselineMetrics: gate1Baseline.scrubbed, entryAffecting, hasEntrySignalEvidence,
     }, input.agentOpts);
     if (gate1Decision.decision === 'stop_not_worth' || gate1Decision.decision === 'stop_insufficient_evidence') {
       return finalize('INCONCLUSIVE', gate1Decision.decision);
@@ -541,8 +556,10 @@ export class ExperimentService {
       }
       const tunableParams = input.profile.profile.parameters.filter((p) => p.tunable);
       const restrictToEntryParams = gate1Decision.decision === 'allow_exploratory_sweep';
+      const sweepBaseline = scrubMetricsBag(baselineMetrics);
+      await emitScrubbed('wfo.sweepDesigner.baselineTrainSummary', sweepBaseline.removedKeys);
       const sweep = await this.d.sweepDesigner.design({
-        profile: input.profile, baselineTrainSummary: baselineMetrics, tunableParams,
+        profile: input.profile, baselineTrainSummary: sweepBaseline.scrubbed, tunableParams,
         restrictToEntryParams, maxPoints: budget.maxPointsPerRound,
       }, input.agentOpts);
 
@@ -583,8 +600,10 @@ export class ExperimentService {
 
       if (ranked.length === 0) return finalize('INCONCLUSIVE', 'sweep_failed');
 
+      const interpretTopN = scrubMetricsBag(ranked);
+      await emitScrubbed('wfo.resultInterpreter.topN', interpretTopN.removedKeys);
       const interpretation = await this.d.resultInterpreter.interpret({
-        topN: ranked, roundsSoFar: r, maxRounds: budget.maxRounds,
+        topN: interpretTopN.scrubbed, roundsSoFar: r, maxRounds: budget.maxRounds,
       }, input.agentOpts);
 
       if (interpretation.decision === 'select') {
