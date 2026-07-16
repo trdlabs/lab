@@ -12,7 +12,7 @@ const INSTRUCTIONS = [
   '"extend" — results are promising but inconclusive and more rounds remain (roundsSoFar < maxRounds); optionally set an',
   '"extendHint" string describing what the next round should try.',
   '"stop" — no candidates are worth extending further, or the top-N list is empty, or the round budget is exhausted.',
-  'You only see backtest data up to periodTo (the period.to = T boundary) — never reason about or assume data beyond that',
+  'You only see backtest data from the training window — never reason about or assume data beyond it',
   'point, to avoid lookahead / leakage into the holdout period.',
 ].join(' ');
 

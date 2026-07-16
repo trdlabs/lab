@@ -2,11 +2,15 @@ import type { Agent } from '@mastra/core/agent';
 import type { Gate1DecisionPort, Gate1Input, AgentCallOpts } from '../../ports/wfo-agents.port.ts';
 import { Gate1OutputSchema, type Gate1Output } from '../../domain/wfo.ts';
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
+import { scrubMetricsBag } from '../../research/outcome-embargo.ts';
 
 function buildPrompt(input: Gate1Input): string {
+  // Outcome Embargo: last-point-before-LLM scrub (silent belt; the experiment-service
+  // seam emits the outcome_embargo.scrubbed evidence event).
+  const { scrubbed: baselineMetrics } = scrubMetricsBag(input.baselineMetrics);
   return [
     `Strategy core idea: ${input.profile.coreIdea}`,
-    `Baseline train metrics: ${JSON.stringify(input.baselineMetrics)}`,
+    `Baseline train metrics: ${JSON.stringify(baselineMetrics)}`,
     `Entry-affecting tunable params: ${JSON.stringify(input.entryAffecting)}`,
     `Has entry-signal evidence: ${input.hasEntrySignalEvidence}`,
   ].join('\n');
