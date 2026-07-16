@@ -9,6 +9,7 @@ describe('isEmbargoedMetricKey', () => {
     'qualification', 'qualificationEpochKey', 'qualification_epoch',
     'outOfSampleSharpe', 'out_of_sample_sharpe', 'metricsOutOfSample',
     'evaluationWindow', 'evaluation_window', 'evaluationWindowFrom',
+    'OOSSharpe', 'totalOOSScore', 'metricsOOSVerdict',
   ])('embargoes %s', (key) => {
     expect(isEmbargoedMetricKey(key)).toBe(true);
   });
@@ -71,5 +72,14 @@ describe('scrubMetricsBag', () => {
     expect(scrubMetricsBag('s').scrubbed).toBe('s');
     expect(scrubMetricsBag(null).scrubbed).toBe(null);
     expect(scrubMetricsBag(42).removedKeys).toEqual([]);
+  });
+
+  it('passes non-plain objects (Date, Map) through untouched instead of corrupting them to {}', () => {
+    const ts = new Date('2026-01-01T00:00:00Z');
+    const m = new Map([['k', 1]]);
+    const { scrubbed, removedKeys } = scrubMetricsBag({ sharpe: 1, ts, m });
+    expect(scrubbed.ts).toBe(ts);
+    expect(scrubbed.m).toBe(m);
+    expect(removedKeys).toEqual([]);
   });
 });

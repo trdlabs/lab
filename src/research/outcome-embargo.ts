@@ -18,6 +18,7 @@ const EMBARGOED_SEQUENCES: readonly (readonly string[])[] = [
 /** Lowercase segments split on snake_case / kebab-case / dot / camelCase boundaries. */
 function segmentsOf(key: string): string[] {
   return key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_\-.]/g, ' ')
     .toLowerCase()
@@ -43,7 +44,9 @@ export interface ScrubResult<T> {
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const proto: unknown = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
 }
 
 function scrubValue(value: unknown, path: string, removed: string[]): unknown {
