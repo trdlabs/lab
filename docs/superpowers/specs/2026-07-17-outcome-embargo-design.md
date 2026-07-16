@@ -67,9 +67,10 @@ Ratified scope: **outcomes AND window boundaries**.
    (`SweepInput.periodTo` / `InterpretInput.periodTo`). Knowing the window lets
    generation target it; boundaries stay available to deterministic orchestration.
 4. **Pattern rule for untyped metric bags:** any key of a `Record<string, number>`
-   metric bag whose name token-matches `holdout | oos | promotion | qualification`
+   metric bag whose name token-matches `holdout | heldout | oos | promotion |
+   qualification`, or whose segments contain the sequence `out_of_sample`
    (token-wise on snake_case/camelCase segments, NOT substring — `choose` must not
-   match `oos`).
+   match `oos`; `heldoutSharpe` and `outOfSampleSharpe` MUST match).
 
 **Explicitly allowed (must be preserved, positive controls in tests):** train-lane
 metrics (WFO Gate1/sweep/interpreter inputs after scrub), paper/live bot-results
@@ -88,8 +89,11 @@ retry feedback reason codes, market context math, similar-hypothesis
   generation projection. `sanitizeRetryFeedback` touches only the LLM-feedback field,
   never `evalPlatformRun` or other control-plane fields.
 - **I-E3 (no off-switch):** the embargo has no config flag; it cannot be disabled.
-- **I-E4 (observability intact):** scorecard, completion summary, read-API, agent
-  events, and office chat output are byte-identical to today.
+- **I-E4 (observability intact):** existing payloads and outputs — scorecard,
+  completion summary, read-API responses, existing agent events, office chat
+  output — are byte-identical to today. One **additive** internal agent event
+  (`outcome_embargo.scrubbed`) is allowed; it is not exposed through the read-API
+  SSE payload allowlist.
 - **I-E5 (fail-closed feedback):** retry-feedback reasons are an allowlist; unknown
   values are dropped, not passed through.
 
@@ -97,7 +101,7 @@ retry feedback reason codes, market context math, similar-hypothesis
 
 | # | Channel | Today | Disposition |
 |---|---|---|---|
-| 1 | Untyped metrics bag ingress — `RunResultSummary.metrics: Record<string, number>` (`src/ports/research-run-lifecycle.ts:142`) flowing into WFO prompts via `JSON.stringify(baselineMetrics/baselineTrainSummary/topN)` | open by shape (future `holdout_*`/`promotion` keys pass through) | **S1** recursive scrub |
+| 1 | `RunResultSummary.metrics: Record<string, number>` (`src/ports/research-run-lifecycle.ts:142`) → WFO prompts via `JSON.stringify(baselineMetrics/baselineTrainSummary/topN)`. Today `mapStrategyMetrics()` projects a **closed 9-field `BacktestMetricBlock`**, so raw bags do NOT reach prompts — this is future-hardening against SDK/mapper widening, not an open channel | closed by mapper projection | **S1** recursive scrub at WFO egress (defense-in-depth) |
 | 2 | WFO `periodTo` (= T) in `SweepInput`/`InterpretInput` (`src/ports/wfo-agents.port.ts:16/25`) rendered into sweep-designer and result-interpreter prompts | **T leaks into LLM today** | **S1** remove field |
 | 3 | Retry feedback `payload.feedback.reasons` — free strings persisted in `research_task.payload` JSONB, replayed verbatim on retry/requeue (`enqueueResearchRetry`, `backtest-completed.handler.ts:53`) | proxy-lane enum codes only, by convention | **S2** allowlist at construction |
 | 4 | `strategy_revision.holdoutValidation` — richest holdout object in a table also read by researcher context assembly (`findLatestAccepted` → `mergedRuleSet`) | safe by field selection only | **S4** guard test + sentinel |
@@ -115,14 +119,16 @@ retry feedback reason codes, market context math, similar-hypothesis
 Single authoritative module, pure functions, no config:
 
 - `isEmbargoedMetricKey(key: string): boolean` — token-wise match of
-  snake_case/camelCase segments against `holdout | oos | promotion | qualification`.
+  snake_case/camelCase segments against `holdout | heldout | oos | promotion |
+  qualification` plus the segment sequence `out_of_sample` (§3.4).
 - `scrubMetricsBag<T>(bag: T): { scrubbed: T; removedKeys: string[] }` —
   **recursive**: walks nested objects/arrays (comparison blocks, `topN` ranked
   points, future nested SDK fields), removing embargoed keys at any depth. Returns
-  removed key names (paths) for logging.
-- `scrubRunResultSummaryForGeneration(summary)` — drops the `promotion` field
-  entirely (when it appears in a future SDK), then applies `scrubMetricsBag` to
-  `metrics` / `comparison`.
+  removed key names (paths) for the scrub event.
+- **No ingress scrub, no summary helper.** The canonical `RunResultSummary` (input
+  to deterministic evaluation, persistence, scorecard) is never modified. Scrubbing
+  happens only at generation-lane egress (S1); a future `promotion` object arriving
+  in a metric/comparison structure is removed there by the `promotion` key token.
 - `SAFE_RETRY_REASONS` — allowlist = proxy-lane evaluator codes
   (`insufficient_sample`, `no_improvement_over_baseline`, `drawdown_regression`,
   `fragile_pnl`, `strong_robust_edge`, `positive_edge` — `src/validation/evaluator.ts`)
@@ -131,9 +137,11 @@ Single authoritative module, pure functions, no config:
 - `sanitizeRetryFeedback(feedback): Feedback` — keeps `hypothesisId` + `decision` +
   only allowlisted reason codes; drops unknown values (I-E5). Operates on the
   feedback object ONLY (I-E2).
-- Structured log on every scrub hit: `outcome_embargo.scrubbed { site, removedKeys }`
-  — **key names/paths only, never values**. This is the staging-validation evidence
-  signal for the E4b card ("Embargo live" gate).
+- On every scrub hit: an **additive `AgentEvent`** `outcome_embargo.scrubbed` with
+  payload `{ site, removedKeys }` — **key names/paths only, never values** (the lab
+  has no shared structured logger; the agent-event ledger is the existing sink).
+  The event is internal observability evidence for the E4b card ("Embargo live"
+  gate); its payload is **NOT** added to the read-API SSE `PAYLOAD_ALLOWLIST`.
 
 ### 6.2 Seams
 
@@ -150,7 +158,9 @@ Single authoritative module, pure functions, no config:
   change to frozen labels beyond the removed field).
 - In `experiment-service.ts`, pass `baselineMetrics` / `baselineTrainSummary` /
   `topN` through `scrubMetricsBag` before invoking `Gate1DecisionPort` /
-  `SweepDesignerPort` / `ResultInterpreterPort`.
+  `SweepDesignerPort` / `ResultInterpreterPort`. Defense-in-depth: today these
+  blocks come from the closed `mapStrategyMetrics` projection (§5 #1); the scrub
+  guards against SDK/mapper widening.
 
 **S2 — retry-feedback construction.**
 
@@ -182,8 +192,13 @@ not a runtime scrub:
 
 - Test: `SimilarHypothesisSummary` contains no metric/outcome fields (type-level
   witness + runtime assertion on the search result shape).
-- Test: `buildStrategyRetrievalText` output contains no outcome/metric/window
-  content for a profile whose adjacent records carry sentinel holdout data.
+- Test: `buildStrategyRetrievalText(profile)` renders from its explicit field list
+  only — a `StrategyProfile` object extended at runtime with extra members
+  (`holdoutValidation`, `promotion`, `evaluationWindow`) produces **byte-identical**
+  output to the clean profile. Separate test: the indexer
+  (`strategy-retrieval-indexer.ts`) passes only the `StrategyProfile` into document
+  construction — no experiment/revision/outcome records enter the retrieval
+  document.
 - Test: researcher context assembly (`research-run-cycle.handler.ts`) reads from
   `strategy_revision` only `mergedRuleSet`-derived fields; a revision fixture with a
   sentinel-filled `holdoutValidation` must produce a researcher prompt without the
@@ -209,35 +224,49 @@ not a runtime scrub:
 
 ## 7. Testing plan
 
-Every leak channel from §5 gets a test; the durable properties get an end-to-end
+Every leak channel from §5 gets a test; the durable properties get a three-layer
 sentinel harness.
 
-1. **Sentinel e2e (fixture composition, fake LLM adapters that capture every prompt
-   and tool argument):** inject a unique sentinel number (e.g. `987654.321`) and a
-   unique sentinel date-boundary into holdout member results, `HoldoutValidation`,
-   experiment verdict reasons, and a synthetic `promotion`-like metrics key. Assert
-   the sentinels appear in ZERO captured prompts/tool args across:
+The sentinel guarantee is delivered by three complementary layers (fake adapters do
+not build real prompts, and no single workflow traverses researcher, WFO, builder,
+critic, and consolidator — so one monolithic e2e would be dishonest):
+
+1. **Orchestration integration (port-input capture).** Fixture composition with
+   capturing fakes at every LLM **port** (researcher, builder, critic, consolidator,
+   WFO ports) that record their full inputs. Inject a unique sentinel number (e.g.
+   `987654.321`) and a unique sentinel window-boundary date into holdout member
+   results, `HoldoutValidation`, and experiment verdict reasons. Assert the
+   sentinels appear in ZERO captured port inputs across:
    - the initial `research.run_cycle` pass;
    - the W2 retry pass (feedback threaded through a real persisted payload);
    - a requeue/replay: re-run the handler from the persisted `research_task.payload`
-     row (fresh process state — persistence-reload path);
-   - the W3 path (`paper.monitor` → Cycle-2 `research.run_cycle`);
-   - hypothesis build / critic / consolidator prompts in the same flow.
-2. **WFO prompt-capture tests (dedicated, not only sentinel):** capture
-   Gate1/sweep-designer/result-interpreter prompts; assert (a) the unique boundary
-   date `T` appears nowhere, (b) embargo-pattern metric keys are absent, (c)
-   **positive control** — train metrics (e.g. `netPnlUsd`, `sharpe`) ARE present
-   (scrub not over-broad).
-3. **Unit tests:** `isEmbargoedMetricKey` (token matching incl. `choose`-vs-`oos`
-   negative), recursive `scrubMetricsBag` (nested comparison/topN/array cases),
-   `scrubRunResultSummaryForGeneration` (drops `promotion` wholesale),
-   `sanitizeRetryFeedback` (allowlist pass, unknown-drop, `evalPlatformRun`
+     row with fresh process state (persistence-reload path);
+   - the W3 path (`paper.monitor` → Cycle-2 `research.run_cycle`).
+   Positive control for I-E2: `evalPlatformRun` remains intact in the persisted
+   orchestration payload.
+2. **Prompt-capture tests of real Mastra adapters (fake `Agent`).** For each real
+   prompt builder (researcher, hypothesis builder, strategy builder, critic,
+   consolidator, Gate1/sweep-designer/result-interpreter): instantiate the real
+   Mastra adapter with a capturing fake `Agent`, feed inputs carrying
+   sentinel/embargo-shaped extras, assert the final prompt string contains neither
+   sentinel nor embargo-pattern keys; positive controls — allowed context (train
+   metrics, paper digest, similar-hypothesis theses) IS present.
+3. **WFO integration (dedicated).** T-removal + recursive scrub end-to-end through
+   `experiment-service`: (a) the unique boundary date `T` appears in no captured
+   WFO port input or prompt, (b) embargo-pattern keys are scrubbed at any nesting
+   depth (nested `topN` case), (c) **positive control** — train metrics (e.g.
+   `netPnlUsd`, `sharpe`) survive the scrub.
+4. **Unit tests:** `isEmbargoedMetricKey` — positives incl. `heldoutSharpe`,
+   `outOfSampleSharpe`, `out_of_sample_sharpe`, `holdout_net_pnl`,
+   `promotionVerdict`, `qualificationEpoch`; negatives incl. `choose`-vs-`oos` and
+   plain train keys; recursive `scrubMetricsBag` (nested comparison/topN/array
+   cases); `sanitizeRetryFeedback` (allowlist pass, unknown-drop, `evalPlatformRun`
    untouched on the payload level).
-4. **S3 digest projection guard** (extended-fixture byte-identity, above).
-5. **S4 shape guards + S5 event regression** (above).
-6. **Observability parity:** scorecard build + markdown render and completion
+5. **S3 digest projection guard** (extended-fixture byte-identity, above).
+6. **S4 shape guards + S5 event regression** (above).
+7. **Observability parity:** scorecard build + markdown render and completion
    summary for a cycle with holdout data — unchanged snapshots (I-E4).
-7. `pnpm check` (= `tsc -p tsconfig.json` + `vitest run`) — full typecheck and test
+8. `pnpm check` (= `tsc -p tsconfig.json` + `vitest run`) — full typecheck and test
    suite, covering orchestrator handlers, research, validation, adapters, read-api.
 
 ## 8. Rollout and evidence (per E4b card, step 2)
@@ -259,6 +288,7 @@ sentinel harness.
   fixture; adding an LLM port without wiring it into the harness is flagged in
   review (checklist item in the implementation plan).
 - **Backtester SDK bump:** when `RunResultSummary.promotion` lands in the SDK, the
-  scrub already handles it (field drop + key patterns); the only follow-up is
-  extending the sentinel fixture to the real field name — tracked in the
-  implementation plan as a TODO-on-SDK-bump test tightening.
+  WFO-egress key patterns (`promotion` token, recursive) and the S3 digest
+  projection guard already cover it; the follow-up is extending the capture-test
+  fixtures to the real field name — tracked in the implementation plan as a
+  TODO-on-SDK-bump test tightening.
