@@ -68,9 +68,11 @@ Ratified scope: **outcomes AND window boundaries**.
    generation target it; boundaries stay available to deterministic orchestration.
 4. **Pattern rule for untyped metric bags:** any key of a `Record<string, number>`
    metric bag whose name token-matches `holdout | heldout | oos | promotion |
-   qualification`, or whose segments contain the sequence `out_of_sample`
-   (token-wise on snake_case/camelCase segments, NOT substring — `choose` must not
-   match `oos`; `heldoutSharpe` and `outOfSampleSharpe` MUST match).
+   qualification`, or whose segments contain the sequence `out_of_sample` or
+   `evaluation_window` (token-wise on snake_case/camelCase segments, NOT
+   substring — `choose` must not match `oos`; `heldoutSharpe`,
+   `outOfSampleSharpe`, and a top-level `evaluationWindow` subtree MUST match;
+   `evaluation` alone and `windowSize` alone must NOT).
 
 **Explicitly allowed (must be preserved, positive controls in tests):** train-lane
 metrics (WFO Gate1/sweep/interpreter inputs after scrub), paper/live bot-results
@@ -120,7 +122,8 @@ Single authoritative module, pure functions, no config:
 
 - `isEmbargoedMetricKey(key: string): boolean` — token-wise match of
   snake_case/camelCase segments against `holdout | heldout | oos | promotion |
-  qualification` plus the segment sequence `out_of_sample` (§3.4).
+  qualification` plus the segment sequences `out_of_sample` and
+  `evaluation_window` (§3.4).
 - `scrubMetricsBag<T>(bag: T): { scrubbed: T; removedKeys: string[] }` —
   **recursive**: walks nested objects/arrays (comparison blocks, `topN` ranked
   points, future nested SDK fields), removing embargoed keys at any depth. Returns
@@ -162,13 +165,18 @@ Single authoritative module, pure functions, no config:
   blocks come from the closed `mapStrategyMetrics` projection (§5 #1); the scrub
   guards against SDK/mapper widening.
 
-**S2 — retry-feedback construction.**
+**S2 — retry-feedback construction AND consumption.**
 
 - `enqueueResearchRetry` (`backtest-completed.handler.ts`) applies
   `sanitizeRetryFeedback` **before** the payload is written, so embargoed content is
   never persisted into `research_task.payload.feedback` and therefore cannot return
   via retry, requeue, or replay. `evalPlatformRun` and all other control-plane
   payload fields are untouched (I-E2).
+- `research-run-cycle.handler.ts` re-applies `sanitizeRetryFeedback` on
+  consumption of `payload.feedback` — payloads persisted before the embargo (or
+  injected via the `/tasks` ingress) may carry non-allowlisted reason strings.
+- Both sides emit `outcome_embargo.scrubbed` when anything was dropped (every
+  scrub hit is evidenced) — index paths only, never the dropped text.
 - Add an assertion test that no holdout/experiment-lane code path constructs retry
   feedback (today: only the proxy lane calls `enqueueBacktestCompleted` →
   `enqueueResearchRetry`).
@@ -246,7 +254,8 @@ critic, and consolidator — so one monolithic e2e would be dishonest):
    orchestration payload.
 2. **Prompt-capture tests of real Mastra adapters (fake `Agent`).** For each real
    prompt builder (researcher, hypothesis builder, strategy builder, critic,
-   consolidator, Gate1/sweep-designer/result-interpreter): instantiate the real
+   consolidator, strategy analyst, Gate1/sweep-designer/result-interpreter):
+   instantiate the real
    Mastra adapter with a capturing fake `Agent`, feed inputs carrying
    sentinel/embargo-shaped extras, assert the final prompt string contains neither
    sentinel nor embargo-pattern keys; positive controls — allowed context (train
@@ -258,9 +267,11 @@ critic, and consolidator — so one monolithic e2e would be dishonest):
    `netPnlUsd`, `sharpe`) survive the scrub.
 4. **Unit tests:** `isEmbargoedMetricKey` — positives incl. `heldoutSharpe`,
    `outOfSampleSharpe`, `out_of_sample_sharpe`, `holdout_net_pnl`,
-   `promotionVerdict`, `qualificationEpoch`; negatives incl. `choose`-vs-`oos` and
-   plain train keys; recursive `scrubMetricsBag` (nested comparison/topN/array
-   cases); `sanitizeRetryFeedback` (allowlist pass, unknown-drop, `evalPlatformRun`
+   `promotionVerdict`, `qualificationEpoch`, `evaluationWindow`,
+   `evaluation_window`; negatives incl. `choose`-vs-`oos`, `evaluation` alone,
+   `windowSize` alone, and plain train keys; recursive `scrubMetricsBag` (nested
+   comparison/topN/array cases, top-level `evaluationWindow` subtree drop);
+   `sanitizeRetryFeedback` (allowlist pass, unknown-drop, `evalPlatformRun`
    untouched on the payload level).
 5. **S3 digest projection guard** (extended-fixture byte-identity, above).
 6. **S4 shape guards + S5 event regression** (above).

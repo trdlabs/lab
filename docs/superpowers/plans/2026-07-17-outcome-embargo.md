@@ -1,6 +1,8 @@
 # Outcome Embargo Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Mandatory controller review:** Tasks 4, 6, and 10 carry the durable embargo invariants (S1 egress + evidence event; S2 write/read sanitize; layer-1 sentinel). The controller MUST review their diffs and test output line-by-line before proceeding to the next task. The remaining tasks are guard coverage and may be reviewed at normal depth.
 
 **Goal:** Durable policy preventing held-out / qualification outcome data (metrics, verdicts, window boundaries) from entering LLM generation context — including via retry, requeue, persistence reload, event payloads, RAG, or summary projections.
 
@@ -15,7 +17,7 @@
 - **Always-on, no config flag** (I-E3). Never add an env var for the embargo.
 - **Never modify the canonical `RunResultSummary`**, persistence writes, deterministic evaluators, scorecards, or read-API outputs (I-E4, spec §6.1/§6.3). Scrub happens ONLY on generation-lane egress.
 - New agent event type `outcome_embargo.scrubbed`, payload exactly `{ site, removedKeys }` — **key names/paths only, never values**. Do NOT add it to `PAYLOAD_ALLOWLIST` in `src/read-api/mappers.ts`.
-- Embargoed key tokens: `holdout | heldout | oos | promotion | qualification` + segment sequence `out_of_sample` (token-wise, NOT substring — `choose` must not match).
+- Embargoed key tokens: `holdout | heldout | oos | promotion | qualification` + segment sequences `out_of_sample` and `evaluation_window` (token-wise, NOT substring — `choose` must not match; `evaluation` alone and `windowSize` alone must not match).
 - `SAFE_RETRY_REASONS` = evaluator codes (`insufficient_sample`, `no_improvement_over_baseline`, `drawdown_regression`, `fragile_pnl`, `strong_robust_edge`, `positive_edge`) ∪ preservation-veto codes (`end_of_data_position`, `abstention_gaming`, `winner_degradation`).
 - **No TS parameter properties** (`constructor(private x)`) — broken under `--experimental-strip-types`; assign fields explicitly. Use `import type` for type-only imports. `.ts` extensions in relative imports.
 - Code/comments/commits in English. Validation command: `pnpm check` (= `tsc -p tsconfig.json` + `vitest run`). For a single file: `pnpm vitest run <path>`.
@@ -46,6 +48,7 @@ describe('isEmbargoedMetricKey', () => {
     'promotion', 'promotionVerdict', 'promotion_reason',
     'qualification', 'qualificationEpochKey', 'qualification_epoch',
     'outOfSampleSharpe', 'out_of_sample_sharpe', 'metricsOutOfSample',
+    'evaluationWindow', 'evaluation_window', 'evaluationWindowFrom',
   ])('embargoes %s', (key) => {
     expect(isEmbargoedMetricKey(key)).toBe(true);
   });
@@ -55,6 +58,8 @@ describe('isEmbargoedMetricKey', () => {
     'netPnlUsd', 'sharpe', 'maxDrawdownPct', 'totalTrades', 'winRate', 'profitFactor',
     'sampleSize',    // 'sample' alone is not embargoed
     'outOf', 'ofSample', // incomplete out_of_sample sequence
+    'evaluation', 'windowSize', 'window', // incomplete evaluation_window sequence
+    'selectionEvaluation', // legit revision field — 'evaluation' without 'window'
   ])('allows %s', (key) => {
     expect(isEmbargoedMetricKey(key)).toBe(false);
   });
@@ -91,6 +96,16 @@ describe('scrubMetricsBag', () => {
     expect(removedKeys).toEqual(['promotion']);
   });
 
+  it('drops a TOP-LEVEL evaluationWindow subtree (window dates must not survive outside promotion)', () => {
+    const { scrubbed, removedKeys } = scrubMetricsBag({
+      sharpe: 1.2,
+      evaluationWindow: { from: '2031-12-31T00:00:00Z', to: '2031-12-31T23:59:59Z' },
+    });
+    expect(scrubbed).toEqual({ sharpe: 1.2 });
+    expect(removedKeys).toEqual(['evaluationWindow']);
+    expect(JSON.stringify(scrubbed)).not.toContain('2031-12-31');
+  });
+
   it('passes primitives and null through untouched', () => {
     expect(scrubMetricsBag(42).scrubbed).toBe(42);
     expect(scrubMetricsBag('s').scrubbed).toBe('s');
@@ -120,8 +135,11 @@ Expected: FAIL — `Cannot find module './outcome-embargo.ts'` (or equivalent re
  */
 
 const EMBARGOED_TOKENS = new Set(['holdout', 'heldout', 'oos', 'promotion', 'qualification']);
-/** Multi-segment sequence embargoed even though its individual tokens are not. */
-const EMBARGOED_SEQUENCE = ['out', 'of', 'sample'] as const;
+/** Multi-segment sequences embargoed even though their individual tokens are not. */
+const EMBARGOED_SEQUENCES: readonly (readonly string[])[] = [
+  ['out', 'of', 'sample'],
+  ['evaluation', 'window'],
+];
 
 /** Lowercase segments split on snake_case / kebab-case / dot / camelCase boundaries. */
 function segmentsOf(key: string): string[] {
@@ -136,8 +154,10 @@ function segmentsOf(key: string): string[] {
 export function isEmbargoedMetricKey(key: string): boolean {
   const segs = segmentsOf(key);
   if (segs.some((s) => EMBARGOED_TOKENS.has(s))) return true;
-  for (let i = 0; i + EMBARGOED_SEQUENCE.length <= segs.length; i += 1) {
-    if (EMBARGOED_SEQUENCE.every((tok, j) => segs[i + j] === tok)) return true;
+  for (const seq of EMBARGOED_SEQUENCES) {
+    for (let i = 0; i + seq.length <= segs.length; i += 1) {
+      if (seq.every((tok, j) => segs[i + j] === tok)) return true;
+    }
   }
   return false;
 }
@@ -407,7 +427,31 @@ In `src/research/experiment-service.wfo.test.ts`:
 
 (a) extend `buildSvc` opts with an optional events override — change the signature object to add `events?: { append: (e: unknown) => Promise<void>; listByTask: () => Promise<never[]> };` and inside the `new ExperimentService({...})` replace `events: { append: async () => {}, listByTask: async () => [] },` with `events: (opts.events ?? { append: async () => {}, listByTask: async () => [] }) as never,`.
 
-(b) append the test:
+(b) extend `seedBaseline` with an extras hook — add to its `opts` object type:
+
+```ts
+  // Embargo-test hook: extra keys merged into the persisted TRAIN metrics (the
+  // agent-facing block), simulating an SDK/mapper widening. Default: none.
+  trainMetricsExtras?: Record<string, unknown>;
+```
+
+and inside the `if (opts.boundary.mode !== 'none')` block change the train-run
+`markCompleted` call to merge them:
+
+```ts
+    await opts.strategyBacktests.markCompleted(trainRunId, {
+      metrics: {
+        ...metrics({ totalTrades: trainTotalTrades, profitFactor: 1.2, sharpe: 2 }),
+        ...(opts.trainMetricsExtras ?? {}),
+      } as never,
+      artifactRefs: [], platformContractVersion: 'v1', finishedAt: NOW,
+    });
+```
+
+Do NOT change `seedBaseline`'s return value or any of its existing call sites —
+the new field is optional and inert when absent.
+
+(c) append the test:
 
 ```ts
 describe('outcome embargo (S1)', () => {
@@ -423,16 +467,13 @@ describe('outcome embargo (S1)', () => {
     const baselineExperimentId = await seedBaseline({
       experiments, strategyBacktests, totalTrades: 5,
       boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+      trainMetricsExtras: {
+        holdoutSharpe: 9.99,
+        promotion: { verdict: 'passed' },
+        outOfSampleNetPnl: 123.45,
+        evaluationWindow: { from: '2031-12-31T00:00:00.000Z', to: '2031-12-31T23:59:59.000Z' },
+      },
     });
-    // Inject embargo-shaped extras into the persisted TRAIN metrics (the agent-facing block):
-    // the train member run is the one whose id starts with 'sbr-train-'.
-    const all = await strategyBacktests.listByProfile?.('p1') ?? [];
-    const train = all.find((r: { id: string }) => r.id.startsWith('sbr-train-'))
-      ?? (() => { throw new Error('train run not found — check seedBaseline'); })();
-    (train as { metrics: Record<string, unknown> }).metrics = {
-      ...(train as { metrics: Record<string, unknown> }).metrics,
-      holdoutSharpe: 9.99, promotion: { verdict: 'passed' }, outOfSampleNetPnl: 123.45,
-    };
 
     const input = baseInput(baselineExperimentId, [ENTRY_PARAM]);
     await svc.runWalkForwardOptimization(input);
@@ -442,8 +483,10 @@ describe('outcome embargo (S1)', () => {
     expect(captured).not.toContain('holdoutSharpe');
     expect(captured).not.toContain('promotion');
     expect(captured).not.toContain('outOfSample');
+    expect(captured).not.toContain('evaluationWindow');
     expect(captured).not.toContain('9.99');
     expect(captured).not.toContain('123.45');
+    expect(captured).not.toContain('2031-12-31');
     // Boundary date T absent from port inputs (periodTo removed in Task 3):
     expect(captured).not.toContain(T);
     // Positive control — train metrics survive the scrub:
@@ -453,15 +496,14 @@ describe('outcome embargo (S1)', () => {
     const scrubEvents = appended.filter((e) => e.type === 'outcome_embargo.scrubbed');
     expect(scrubEvents.length).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(scrubEvents)).not.toContain('9.99');
+    expect(JSON.stringify(scrubEvents)).not.toContain('2031-12-31');
     expect(scrubEvents[0]!.payload['site']).toBe('wfo.gate1.baselineMetrics');
     expect(scrubEvents[0]!.payload['removedKeys']).toEqual(
-      expect.arrayContaining(['holdoutSharpe', 'promotion', 'outOfSampleNetPnl']),
+      expect.arrayContaining(['holdoutSharpe', 'promotion', 'outOfSampleNetPnl', 'evaluationWindow']),
     );
   });
 });
 ```
-
-Note: if `InMemoryStrategyBacktestRunRepository` has no `listByProfile`, use its actual list/find accessor (check `src/adapters/repository/in-memory-strategy-backtest-run.repository.ts`) or capture the train run id from `seedBaseline` by returning it (add a second return value `{ experimentId, trainRunId }` — adjust the two existing callers destructuring only the id). The mutation-by-reference trick works because the in-memory repo stores object references.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -584,12 +626,17 @@ const profile = { coreIdea: 'dump-bounce long' } as unknown as StrategyProfile;
 const dirtyMetrics = {
   netPnlUsd: 100, maxDrawdownPct: 3, totalTrades: 7, winRate: 0.5, profitFactor: 1.2,
   sharpe: 1.1, avgTradePnlUsd: 14, topTradeContributionPct: 20, exposureHours: 5,
-  holdoutSharpe: SENTINEL_NUM, promotion: { verdict: 'passed', evaluationWindow: { from: SENTINEL_DATE, to: SENTINEL_DATE } },
+  holdoutSharpe: SENTINEL_NUM,
+  promotion: { verdict: 'passed', evaluationWindow: { from: SENTINEL_DATE, to: SENTINEL_DATE } },
+  // TOP-LEVEL window subtree — must be caught by the evaluation_window sequence,
+  // not merely hidden under the removed promotion key:
+  evaluationWindow: { from: SENTINEL_DATE, to: SENTINEL_DATE },
 } as unknown as BacktestMetricBlock;
 
 function assertClean(prompt: string): void {
   expect(prompt).not.toContain('holdout');
   expect(prompt).not.toContain('promotion');
+  expect(prompt).not.toContain('evaluationWindow');
   expect(prompt).not.toContain(String(SENTINEL_NUM));
   expect(prompt).not.toContain(SENTINEL_DATE);
 }
@@ -827,13 +874,22 @@ Replace lines ~260-262:
   // R4: feedback from a previous FAIL/MODIFY cycle. Outcome Embargo (S2): re-sanitize on
   // consumption — payloads persisted before the embargo (or hand-injected via /tasks) may
   // carry non-allowlisted reason strings; they must never reach the researcher prompt.
-  const retryFeedback = payload.feedback
-    ? (() => {
-        const { feedback } = sanitizeRetryFeedback(payload.feedback);
-        return { decision: feedback.decision, reasons: feedback.reasons };
-      })()
-    : undefined;
+  let retryFeedback: { decision: string; reasons: string[] } | undefined;
+  if (payload.feedback) {
+    const sanitizedFeedback = sanitizeRetryFeedback(payload.feedback);
+    retryFeedback = { decision: sanitizedFeedback.feedback.decision, reasons: sanitizedFeedback.feedback.reasons };
+    if (sanitizedFeedback.removedKeys.length > 0) {
+      // Every scrub hit is evidenced — index paths only, never the dropped text.
+      await services.events.append({
+        id: randomUUID(), taskId: task.id, type: 'outcome_embargo.scrubbed',
+        payload: { site: 'researchRunCycle.retryFeedback', removedKeys: sanitizedFeedback.removedKeys },
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
 ```
+
+(`randomUUID` is already imported at the top of this handler.)
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -911,24 +967,26 @@ git commit -m "test(embargo): S3 digest frozen-projection guard (runtime extras 
 
 - [ ] **Step 1: RAG document byte-identity test**
 
-Append to `src/operator/strategy-retrieval-document.test.ts`, reusing the file's existing `StrategyProfile` fixture (referred to below as `profileFixture` — substitute the actual fixture identifier used in that file):
+Append to `src/operator/strategy-retrieval-document.test.ts` — the file already defines the fixture factory `makeProfile(over: Partial<StrategyProfile> = {}): StrategyProfile` and imports both `buildStrategyRetrievalText` and `buildStrategyRetrievalDocument`:
 
 ```ts
 describe('outcome embargo (S4) — retrieval document', () => {
   it('renders byte-identically when the profile carries runtime embargo extras', () => {
+    const clean = makeProfile();
     const dirty = {
-      ...profileFixture,
+      ...clean,
       holdoutValidation: { holdoutSharpe: 987654.321 },
       promotion: { verdict: 'passed' },
       evaluationWindow: { from: '2031-12-31', to: '2031-12-31' },
-    } as unknown as typeof profileFixture;
-    expect(buildStrategyRetrievalText(dirty)).toBe(buildStrategyRetrievalText(profileFixture));
+    } as unknown as StrategyProfile;
+    expect(buildStrategyRetrievalText(dirty)).toBe(buildStrategyRetrievalText(clean));
   });
 
   it('document content and contentHash are unaffected by runtime embargo extras', () => {
     const opts = { embedding: [0.1, 0.2], embeddingModel: 'm', indexVersion: 1, indexedAt: '2026-01-01T00:00:00Z' };
-    const dirty = { ...profileFixture, holdoutValidation: { t: '2031-12-31' } } as unknown as typeof profileFixture;
-    const a = buildStrategyRetrievalDocument(profileFixture, opts);
+    const clean = makeProfile();
+    const dirty = { ...clean, holdoutValidation: { t: '2031-12-31' } } as unknown as StrategyProfile;
+    const a = buildStrategyRetrievalDocument(clean, opts);
     const b = buildStrategyRetrievalDocument(dirty, opts);
     expect(b.content).toBe(a.content);
     expect(b.contentHash).toBe(a.contentHash);
@@ -1003,8 +1061,9 @@ import { buildPromptFor as builderPrompt } from './builder/mastra-builder.ts';
 import { buildPrompt as criticPrompt } from './critic/mastra-critic.ts';
 import { renderConsolidationPrompt } from './consolidator/mastra-strategy-consolidator.ts';
 import { buildStrategyUserMessage } from './builder/strategy-user-message.ts';
+import { buildPrompt as analystPrompt } from './analyst/mastra-strategy-analyst.ts';
 import type { ResearcherInput } from '../ports/researcher.port.ts';
-import type { StrategyProfile } from '../domain/strategy-profile.ts';
+import type { StrategyProfile, AnalystProfileOutput } from '../domain/strategy-profile.ts';
 
 const SENTINEL = 987654.321;
 const EXTRAS = {
@@ -1086,11 +1145,37 @@ describe('outcome embargo — generation prompt builders are explicit projection
 
   it('strategy-builder user message ignores runtime embargo extras on the analyst profile', () => {
     // buildStrategyUserMessage(profile: AnalystProfileOutput, feedback?: BuildFeedback)
-    // Reuse the AnalystProfileOutput fixture from strategy-user-message.test.ts as `clean`
-    // (import/extract it into a shared helper if it is file-local), then:
-    const dirtyProfile = { ...cleanAnalystProfile, ...EXTRAS } as typeof cleanAnalystProfile;
+    const cleanAnalystProfile: AnalystProfileOutput = {
+      direction: 'long',
+      coreIdea: 'Buy when open interest spikes above the 20-bar mean.',
+      summary: 'A long-only strategy that enters when OI momentum is strong.',
+      requiredMarketFeatures: ['oi', 'funding'],
+      entryConditions: ['OI > 20-bar mean * 1.05', 'Price above EMA20'],
+      exitConditions: ['Stop-loss at -2%', 'Take-profit at +4%'],
+      timeframes: ['5m'],
+      indicators: ['EMA20'],
+      parameters: [{ name: 'oiMultiplier', value: 1.05, unit: null, description: 'OI threshold multiplier', tunable: true }],
+      watchLifecycleSummary: 'Scan every bar for OI spike',
+      positionManagementSummary: 'Partial exit at TP1',
+      riskManagementSummary: 'Fixed stop at -2%',
+      runnerOwnedAuthorities: ['position sizing', 'fills'],
+      confidence: 0.8,
+      unknowns: ['Slippage model'],
+      evidence: ['OI spike precedes price move (backtested 3 months)'],
+    };
+    const dirtyProfile = { ...cleanAnalystProfile, ...EXTRAS } as AnalystProfileOutput;
     expect(buildStrategyUserMessage(dirtyProfile)).toBe(buildStrategyUserMessage(cleanAnalystProfile));
     expect(buildStrategyUserMessage(dirtyProfile)).not.toContain(String(SENTINEL));
+  });
+
+  it('strategy-analyst prompt renders only the operator-supplied source (no outcome path)', () => {
+    // StrategyAnalyst input = the raw strategy source the operator submitted (kind/title/uri/
+    // content). It has no automated outcome-bearing input; this guard freezes that property.
+    const clean = { kind: 'article', title: 'OI strategy', uri: 'memory://src', content: 'Buy on OI spike.' };
+    const dirty = { ...clean, ...EXTRAS };
+    type AI = Parameters<typeof analystPrompt>[0];
+    expect(analystPrompt(dirty as unknown as AI)).toBe(analystPrompt(clean as unknown as AI));
+    expect(analystPrompt(dirty as unknown as AI)).not.toContain(String(SENTINEL));
   });
 });
 ```
@@ -1116,114 +1201,96 @@ git commit -m "test(embargo): layer-2 prompt byte-identity guards for researcher
 
 **Files:**
 - Test: `src/orchestrator/handlers/research-run-cycle.handler.test.ts` (extend)
-- Test: `src/orchestrator/handlers/paper-monitor.handler.test.ts` (extend)
+- Verify only: `src/orchestrator/handlers/paper-monitor.handler.test.ts` (existing exact-payload pin; no change expected)
 
-- [ ] **Step 1: research-run-cycle sentinel test**
+- [ ] **Step 1: research-run-cycle sentinel tests**
 
-Open `src/orchestrator/handlers/research-run-cycle.handler.test.ts` and copy the arrangement of its first passing happy-path test (services via `makeServices`, a persisted profile, a `research.run_cycle` task fixture). Add a capturing researcher and the sentinel revision:
+Append to `src/orchestrator/handlers/research-run-cycle.handler.test.ts`, inside the top-level `describe('researchRunCycleHandler')`. The file already provides everything needed: `makeServices`, `capturingResearcher(out)` (records the `ResearcherInput`), `profile()` (id `'p1'`), `task(payload)` (id `'t1'`), `seedProfile(services)`, and the pattern `await services.revisions.create(revision)` (see the `activeOverlayRules` describe block at the bottom of the file):
 
 ```ts
-import { FakeResearcher } from '../../adapters/researcher/fake-researcher.ts';
-import type { ResearcherInput } from '../../ports/researcher.port.ts';
-import type { StrategyRevision } from '../../domain/strategy-revision.ts';
+  describe('outcome embargo (layer 1) — researcher input purity', () => {
+    const SENTINEL = '987654.321';
+    const SENTINEL_DATE = '2031-12-31T23:59:59.000Z';
 
-class CapturingResearcher extends FakeResearcher {
-  readonly inputs: ResearcherInput[] = [];
-  override async propose(input: ResearcherInput) {
-    this.inputs.push(input);
-    return super.propose(input);
-  }
-}
+    it('an accepted revision with holdoutValidation never leaks it into the researcher input', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
+      const rev: StrategyRevision = {
+        id: 'rev-emb', strategyProfileId: 'p1', version: 1, hypothesisIds: ['h1'],
+        mergedRuleSet: {
+          order: ['h1'],
+          rules: [{ appliesTo: 'long', rules: [{ when: 'oi rises', action: 'skip_entry', params: {} }] }],
+          theses: ['safe thesis'],
+        },
+        status: 'accepted',
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      };
+      await services.revisions.create({
+        ...rev,
+        // Runtime holdout payload as the R3a gate persists it on accepted revisions:
+        holdoutValidation: {
+          holdoutMetrics: { sharpe: Number(SENTINEL) },
+          trainMetrics: { sharpe: 1 },
+          holdoutDecision: 'FAIL', holdoutReasons: ['holdout_failed'],
+          t: SENTINEL_DATE, mode: 'trade_based',
+        },
+      } as unknown as StrategyRevision);
 
-describe('outcome embargo (layer 1) — researcher input purity', () => {
-  const SENTINEL = '987654.321';
-  const SENTINEL_DATE = '2031-12-31T23:59:59.000Z';
+      await researchRunCycleHandler(task({ strategyProfileId: 'p1' }), services);
 
-  it('an accepted revision with holdoutValidation never leaks it into the researcher input', async () => {
-    const researcher = new CapturingResearcher();
-    // Arrange services + profile + task exactly as the happy-path test in this file does,
-    // passing `researcher` into makeServices overrides, THEN override the revisions read:
-    const sentinelRevision = {
-      id: 'rev-1', strategyProfileId: /* the profile id used by the fixture */ 'profile-1',
-      status: 'accepted',
-      mergedRuleSet: {
-        rules: [{ when: 'oi rises', action: 'no_op', params: {} }],
-        theses: [{ hypothesisId: 'h1', thesis: 'safe thesis', status: 'accepted_revision' }],
-      },
-      holdoutValidation: {
-        holdoutMetrics: { sharpe: Number(SENTINEL) },
-        trainMetrics: { sharpe: 1 },
-        holdoutDecision: 'FAIL', holdoutReasons: ['holdout_failed'],
-        t: SENTINEL_DATE, mode: 'trade_based',
-      },
-    } as unknown as StrategyRevision;
-    s.revisions.findLatestAccepted = async () => sentinelRevision;
+      const captured = JSON.stringify(cap.captured());
+      expect(captured).not.toContain(SENTINEL);
+      expect(captured).not.toContain(SENTINEL_DATE);
+      expect(captured).not.toContain('holdoutValidation');
+      // positive control: the accepted revision's rules DID reach the researcher
+      expect(captured).toContain('oi rises');
+    });
 
-    await researchRunCycleHandler(taskFixture, s);
+    it('a legacy persisted payload with dirty feedback reaches the researcher sanitized + is evidenced', async () => {
+      const cap = capturingResearcher({ hypotheses: [], researchSummary: 's' });
+      const services = makeServices({ researcher: cap.port });
+      await seedProfile(services);
 
-    expect(researcher.inputs.length).toBeGreaterThanOrEqual(1);
-    const captured = JSON.stringify(researcher.inputs);
-    expect(captured).not.toContain(SENTINEL);
-    expect(captured).not.toContain(SENTINEL_DATE);
-    expect(captured).not.toContain('holdoutValidation');
-    // positive control: the accepted revision's rules DID reach the researcher
-    expect(captured).toContain('oi rises');
-  });
-
-  it('a legacy persisted payload with dirty feedback reaches the researcher sanitized', async () => {
-    const researcher = new CapturingResearcher();
-    // Same arrangement; task payload simulates a pre-embargo persisted row:
-    const dirtyTask = {
-      ...taskFixture,
-      payload: {
-        ...taskFixture.payload,
-        cycleDepth: 1,
+      await researchRunCycleHandler(task({
+        strategyProfileId: 'p1', cycleDepth: 1,
         feedback: {
           hypothesisId: 'h1', decision: 'FAIL',
           reasons: ['no_improvement_over_baseline', `holdout_failed: sharpe=${SENTINEL}`],
         },
-      },
-    };
+      }), services);
 
-    await researchRunCycleHandler(dirtyTask, s);
-
-    const captured = JSON.stringify(researcher.inputs);
-    expect(captured).not.toContain(SENTINEL);
-    // positive control: the allowlisted reason survived
-    expect(captured).toContain('no_improvement_over_baseline');
-  });
-});
-```
-
-Where `s` / `taskFixture` / `researchRunCycleHandler` come from the file's existing fixtures; the ONLY new arrangements are the `researcher` override (`makeServices({ researcher, ... })`) and the two stubs shown. If `s.revisions` is read-only, override via `makeServices({ researcher, revisions: { ...realRevisionsFixture, findLatestAccepted: async () => sentinelRevision } as never })`.
-
-- [ ] **Step 2: W3 payload key-set test**
-
-Append to `src/orchestrator/handlers/paper-monitor.handler.test.ts`, inside the existing describe, reusing the file's fixture that drives a `window_complete` outcome (the test that already asserts a Cycle-2 `research.run_cycle` is enqueued):
-
-```ts
-  it('outcome embargo: the Cycle-2 trigger payload carries ids only — no metrics, no windows', async () => {
-    // Arrange exactly as the existing window_complete test in this file, then:
-    const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
-    expect(enqueued).toHaveLength(1);
-    const cycleTask = await s.researchTasks.findById(enqueued[0]!.taskId);
-    expect(Object.keys(cycleTask!.payload as Record<string, unknown>).sort())
-      .toEqual(['paperRunId', 'strategyProfileId']);
+      const captured = JSON.stringify(cap.captured());
+      expect(captured).not.toContain(SENTINEL);
+      // positive control: the allowlisted reason survived
+      expect(captured).toContain('no_improvement_over_baseline');
+      // every scrub hit is evidenced — index paths only, never the dropped text
+      const events = await services.events.listByTask('t1');
+      const scrub = events.filter((e) => e.type === 'outcome_embargo.scrubbed');
+      expect(scrub).toHaveLength(1);
+      expect(scrub[0]!.payload).toEqual({
+        site: 'researchRunCycle.retryFeedback', removedKeys: ['reasons[1]'],
+      });
+    });
   });
 ```
 
-(If the existing handler adds another id-only key to that payload, extend the expected array with it — the assertion's job is to freeze the key set so metrics/windows can never ride the W3 trigger unnoticed.)
+`capturingResearcher`, `seedProfile`, `task`, and `researchRunCycleHandler` already exist in this file; `StrategyRevision` is already imported there. No new imports are needed.
+
+- [ ] **Step 2: W3 payload — verify existing pin**
+
+No new code. The W3 id-only invariant is ALREADY frozen by the existing test in `src/orchestrator/handlers/paper-monitor.handler.test.ts` (the `window_complete` test asserts `expect(queuedCycleTask?.payload).toEqual({ strategyProfileId: 'prof-1', paperRunId: 'run-live-3' })` — an exact-object match, so no metric/window key can ever ride the Cycle-2 trigger unnoticed). Confirm the assertion is still present and exact (`toEqual` with the full literal, not `toMatchObject`); if it ever degrades to a partial match, restore the exact form.
 
 - [ ] **Step 3: Run to verify**
 
 Run: `pnpm vitest run src/orchestrator/handlers/research-run-cycle.handler.test.ts src/orchestrator/handlers/paper-monitor.handler.test.ts`
-Expected: PASS. (The first sentinel test should pass already — the handler maps only `mergedRuleSet`-derived fields; it exists to catch future widening. The dirty-feedback test passes thanks to Task 6's read-side sanitize.)
+Expected: PASS. (The revision sentinel test should pass already — the handler maps only `mergedRuleSet`-derived fields; it exists to catch future widening. The dirty-feedback test passes thanks to Task 6's read-side sanitize + event.)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/orchestrator/handlers/research-run-cycle.handler.test.ts src/orchestrator/handlers/paper-monitor.handler.test.ts
-git commit -m "test(embargo): layer-1 orchestration sentinel — researcher input purity + W3 id-only payload"
+git add src/orchestrator/handlers/research-run-cycle.handler.test.ts
+git commit -m "test(embargo): layer-1 orchestration sentinel — researcher input purity incl. legacy dirty feedback"
 ```
 
 ---
@@ -1236,17 +1303,31 @@ git commit -m "test(embargo): layer-1 orchestration sentinel — researcher inpu
 
 - [ ] **Step 1: `cycle.scorecard.built` exact-payload test**
 
-Append to `src/orchestrator/handlers/cycle-scorecard.handler.test.ts`, reusing the file's existing happy-path arrangement (the test that already drives `cycleScorecardHandler` to completion):
+Append to `src/orchestrator/handlers/cycle-scorecard.handler.test.ts`, inside the top-level `describe('cycleScorecardHandler')`. The file already defines the helpers used below: `buildTask(id, hypId, correlationId)`, `hypothesis(id, over)`, `backtestRun(id, hypId, correlationId)`, `evaluation(id, backtestRunId, hypId, decision, createdAt)`, `T(n)`, and `scorecardTask(payload, overrides)`:
 
 ```ts
   it('outcome embargo (S5): cycle.scorecard.built payload is exactly { correlationId }', async () => {
-    // Arrange exactly as the existing happy-path test, then:
-    const events = await s.events.listByTask(task.id);
+    const services = makeServices();
+    await services.researchTasks.create(buildTask('bt-h1', 'h1', 'c-emb'));
+    await services.hypotheses.create(hypothesis('h1', { status: 'proxy_passed' }));
+    const run1 = backtestRun('run-h1', 'h1', 'c-emb');
+    await services.backtests.createSubmitted(run1);
+    await services.evaluations.create(evaluation('e-h1', 'run-h1', 'h1', 'PASS', T(1)));
+
+    const task = scorecardTask({
+      correlationId: 'c-emb', strategyProfileId: 'p1', sourceTaskId: 'src-1',
+      terminalOutcome: { kind: 'no_candidates', reason: 'none' },
+    });
+    await cycleScorecardHandler(task, services);
+
+    const events = await services.events.listByTask(task.id);
     const built = events.filter((e) => e.type === 'cycle.scorecard.built');
     expect(built).toHaveLength(1);
-    expect(built[0]!.payload).toEqual({ correlationId: task.correlationId });
+    expect(built[0]!.payload).toEqual({ correlationId: 'c-emb' });
   });
 ```
+
+Note: if `terminalOutcome.kind: 'no_candidates'` is not a valid kind in `CycleScorecardPayloadSchema`, reuse the exact `terminalOutcome` literal from the file's first happy-path test (`{ kind: 'accepted', reason: 'pnl_improved' }` with `revisionId`/roster fixtures as that test seeds them) — the assertion under test is only the event payload shape.
 
 - [ ] **Step 2: read-API deny-by-default test for the new event type**
 
