@@ -186,3 +186,26 @@ describe('buildStrategyRetrievalDocument', () => {
     expect(doc.metadata.createdAt).toBe('2026-06-12T00:00:00Z');
   });
 });
+describe('outcome embargo (S4) — retrieval document', () => {
+  it('renders byte-identically when the profile carries runtime embargo extras', () => {
+    const clean = makeProfile();
+    const dirty = {
+      ...clean,
+      holdoutValidation: { holdoutSharpe: 987654.321 },
+      promotion: { verdict: 'passed' },
+      evaluationWindow: { from: '2031-12-31', to: '2031-12-31' },
+    } as unknown as StrategyProfile;
+    expect(buildStrategyRetrievalText(dirty)).toBe(buildStrategyRetrievalText(clean));
+  });
+
+  it('document content and contentHash are unaffected by runtime embargo extras', () => {
+    const opts = { embedding: [0.1, 0.2], embeddingModel: 'm', indexVersion: 1, indexedAt: '2026-01-01T00:00:00Z' };
+    const clean = makeProfile();
+    const dirty = { ...clean, holdoutValidation: { t: '2031-12-31' } } as unknown as StrategyProfile;
+    const a = buildStrategyRetrievalDocument(clean, opts);
+    const b = buildStrategyRetrievalDocument(dirty, opts);
+    expect(b.content).toBe(a.content);
+    expect(b.contentHash).toBe(a.contentHash);
+    expect(JSON.stringify(b)).not.toContain('2031-12-31');
+  });
+});
