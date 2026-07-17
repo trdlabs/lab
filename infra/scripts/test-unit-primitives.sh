@@ -83,7 +83,7 @@ GOOD_DIGEST="ghcr.io/trdlabs/lab@sha256:$(printf 'a%.0s' {1..64})"
 BAD_DIGEST_TAG="ghcr.io/trdlabs/lab:sha-abcdef1"
 
 # ---------------------------------------------------------------------------
-step "1/10 unit-deploy.sh: targeted U6 recreate (migrate -> ingress+worker)"
+step "1/12 unit-deploy.sh: targeted U6 recreate (migrate -> ingress+worker)"
 : > "$CALLS"
 if OUT="$(bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$GOOD_DIGEST" --deploy-id "$DEPLOY_ID")"; then
   ok "unit-deploy.sh exited 0"
@@ -156,7 +156,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "2/10 unit-deploy.sh: a failed migration aborts BEFORE the ingress/worker recreate"
+step "2/12 unit-deploy.sh: a failed migration aborts BEFORE the ingress/worker recreate"
 : > "$CALLS"
 FAKE_MIGRATE_FAIL=1
 export FAKE_MIGRATE_FAIL
@@ -178,7 +178,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "3/10 unit-deploy.sh: rejects a tag (non-digest) reference"
+step "3/12 unit-deploy.sh: rejects a tag (non-digest) reference"
 : > "$CALLS"
 if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$BAD_DIGEST_TAG" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/tag.out" 2>/dev/null; then
   bad "unit-deploy.sh must reject a tag reference"
@@ -197,7 +197,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "4/10 unit-deploy.sh: rejects an unsupported unit (office is never a U6 command target)"
+step "4/12 unit-deploy.sh: rejects an unsupported unit (office is never a U6 command target)"
 : > "$CALLS"
 if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit office --digest "$GOOD_DIGEST" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/unit.out" 2>/dev/null; then
   bad "unit-deploy.sh must reject --unit office"
@@ -211,7 +211,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "5/10 unit-deploy.sh: rejects a digest containing an embedded double-quote, output stays one valid JSON line"
+step "5/12 unit-deploy.sh: rejects a digest containing an embedded double-quote, output stays one valid JSON line"
 : > "$CALLS"
 BAD_DIGEST_QUOTE='ghcr.io/trdlabs/lab@sha256:evil"digest'
 if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$BAD_DIGEST_QUOTE" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/quote.out" 2>/dev/null; then
@@ -231,7 +231,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "6/10 unit-deploy.sh: rejects a digest with an embedded newline"
+step "6/12 unit-deploy.sh: rejects a digest with an embedded newline"
 : > "$CALLS"
 NEWLINE_DIGEST="$(printf 'ghcr.io/trdlabs/lab@sha256:%s\nextra' "$(printf 'd%.0s' {1..64})")"
 if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$NEWLINE_DIGEST" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/newline.out" 2>/dev/null; then
@@ -246,7 +246,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "7/10 unit-deploy.sh: rejects an uppercase-hex digest"
+step "7/12 unit-deploy.sh: rejects an uppercase-hex digest"
 : > "$CALLS"
 UPPER_DIGEST="ghcr.io/trdlabs/lab@sha256:$(printf 'A%.0s' {1..64})"
 if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$UPPER_DIGEST" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/upper.out" 2>/dev/null; then
@@ -261,7 +261,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "8/10 unit-health.sh: happy path (all checks pass)"
+step "8/12 unit-health.sh: happy path (all checks pass)"
 : > "$CALLS"
 if OUT="$(bash "$SCRIPT_DIR/unit-health.sh" --env vps_staging --unit U6 --deploy-id "$DEPLOY_ID")"; then
   ok "unit-health.sh exited 0"
@@ -291,7 +291,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "9/10 unit-health.sh: reports ok:false when the ingress read-API is unreachable"
+step "9/12 unit-health.sh: reports ok:false when the ingress read-API is unreachable"
 : > "$CALLS"
 FAKE_EXEC_FAIL=1
 export FAKE_EXEC_FAIL
@@ -308,7 +308,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-step "10/10 unit-health.sh: reports ok:false when the migration did not exit 0"
+step "10/12 unit-health.sh: reports ok:false when the migration did not exit 0"
 : > "$CALLS"
 FAKE_MIGRATE_EXIT_CODE=1
 export FAKE_MIGRATE_EXIT_CODE
@@ -322,6 +322,82 @@ if grep -Fq '"migrate":"fail"' "$TMP_DIR/migrate-fail.out"; then
   ok "incomplete-migration prints migrate:fail"
 else
   bad "expected migrate:fail, got: $(cat "$TMP_DIR/migrate-fail.out")"
+fi
+
+# ---------------------------------------------------------------------------
+step "11/12 unit-deploy.sh: persists the deployed digest into .env.vps after a successful recreate"
+: > "$CALLS"
+PERSIST_REPO="$TMP_DIR/persist-repo"
+mkdir -p "$PERSIST_REPO"
+: > "$PERSIST_REPO/docker-compose.yml"
+: > "$PERSIST_REPO/docker-compose.vps.yml"
+PERSIST_ENV="$PERSIST_REPO/.env.vps"
+{
+  printf 'COMPOSE_PROJECT_NAME=trading-vps\n'
+  printf 'LAB_U6_IMAGE=ghcr.io/trdlabs/lab@sha256:%s\n' "$(printf '9%.0s' {1..64})"
+  printf 'TRADING_OFFICE_PATH=/opt/trading-office\n'
+  printf 'SOME_OTHER_KEY=unrelated-value\n'
+} > "$PERSIST_ENV"
+chmod 640 "$PERSIST_ENV"
+BEFORE_MODE="$(stat -c '%a' "$PERSIST_ENV")"
+BEFORE_PROJ="$(grep '^COMPOSE_PROJECT_NAME=' "$PERSIST_ENV")"
+BEFORE_OFFICE="$(grep '^TRADING_OFFICE_PATH=' "$PERSIST_ENV")"
+BEFORE_OTHER="$(grep '^SOME_OTHER_KEY=' "$PERSIST_ENV")"
+
+if OUT="$(LAB_REPO_DIR="$PERSIST_REPO" bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$GOOD_DIGEST" --deploy-id "$DEPLOY_ID")"; then
+  ok "persist-path deploy exited 0"
+else
+  bad "persist-path deploy exited non-zero: $OUT"
+fi
+if printf '%s' "$OUT" | grep -Fq '"env_persist":"pass"'; then
+  ok "reports checks.env_persist:pass"
+else
+  bad "expected checks.env_persist:pass, got: $OUT"
+fi
+if grep -Fxq "LAB_U6_IMAGE=$GOOD_DIGEST" "$PERSIST_ENV"; then
+  ok "LAB_U6_IMAGE updated to the deployed digest in .env.vps"
+else
+  bad "expected LAB_U6_IMAGE=$GOOD_DIGEST in $PERSIST_ENV, got: $(cat "$PERSIST_ENV")"
+fi
+if grep -Fxq "$BEFORE_PROJ" "$PERSIST_ENV" && grep -Fxq "$BEFORE_OFFICE" "$PERSIST_ENV" \
+   && grep -Fxq "$BEFORE_OTHER" "$PERSIST_ENV"; then
+  ok "unrelated keys (COMPOSE_PROJECT_NAME/TRADING_OFFICE_PATH/other) byte-identical after persist"
+else
+  bad "expected unrelated lines untouched, got: $(cat "$PERSIST_ENV")"
+fi
+AFTER_MODE="$(stat -c '%a' "$PERSIST_ENV")"
+if [ "$AFTER_MODE" = "$BEFORE_MODE" ]; then
+  ok "file mode unchanged ($AFTER_MODE)"
+else
+  bad "expected file mode to stay $BEFORE_MODE, got $AFTER_MODE"
+fi
+
+# ---------------------------------------------------------------------------
+step "12/12 unit-deploy.sh: a rejected deploy leaves .env.vps untouched"
+: > "$CALLS"
+REJECT_REPO="$TMP_DIR/reject-repo"
+mkdir -p "$REJECT_REPO"
+: > "$REJECT_REPO/docker-compose.yml"
+: > "$REJECT_REPO/docker-compose.vps.yml"
+cp -p "$PERSIST_ENV" "$REJECT_REPO/.env.vps"
+BEFORE_REJECT_SUM="$(sha256sum "$REJECT_REPO/.env.vps" | cut -d' ' -f1)"
+BEFORE_REJECT_MODE="$(stat -c '%a' "$REJECT_REPO/.env.vps")"
+if LAB_REPO_DIR="$REJECT_REPO" bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$BAD_DIGEST_TAG" --deploy-id "$DEPLOY_ID" > "$TMP_DIR/reject-persist.out" 2>/dev/null; then
+  bad "unit-deploy.sh must reject a tag reference (persist test)"
+else
+  ok "rejected deploy exited non-zero"
+fi
+if grep -Fq '"ok":false' "$TMP_DIR/reject-persist.out"; then
+  ok "rejected deploy still prints ok:false JSON"
+else
+  bad "expected ok:false JSON, got: $(cat "$TMP_DIR/reject-persist.out")"
+fi
+AFTER_REJECT_SUM="$(sha256sum "$REJECT_REPO/.env.vps" | cut -d' ' -f1)"
+AFTER_REJECT_MODE="$(stat -c '%a' "$REJECT_REPO/.env.vps")"
+if [ "$BEFORE_REJECT_SUM" = "$AFTER_REJECT_SUM" ] && [ "$BEFORE_REJECT_MODE" = "$AFTER_REJECT_MODE" ]; then
+  ok ".env.vps byte-identical and mode unchanged after a rejected deploy"
+else
+  bad ".env.vps was modified by a rejected deploy"
 fi
 
 if [ "$FAIL" -ne 0 ]; then

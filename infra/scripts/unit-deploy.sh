@@ -12,11 +12,18 @@
 #
 # Sequence: pull the shared digest -> run `migrate` to completion (one-shot, must exit 0
 # before ingress/worker start against the new schema) -> targeted `up -d --no-deps
-# --force-recreate ingress worker`.
+# --force-recreate ingress worker`. After that recreate succeeds, LAB_U6_IMAGE is ALSO
+# persisted into .env.vps itself (in place, atomically) — see persist_env_digest — so a
+# later plain `docker compose up -d` or legacy script run resolves the same digest instead
+# of silently rolling U6 back to the bootstrap-time value.
 #
 # Prints exactly one JSON object to stdout:
 #   {"unit": string, "digest": string, "ok": boolean,
-#    "checks": {<name>: "pass"|"fail"|"skip"}, "detail"?: string}
+#    "checks": {<name>: "pass"|"fail"|"skip", "env_persist"?: "pass"|"fail"},
+#    "detail"?: string}
+# checks.env_persist only appears once the recreate has passed: "pass" once .env.vps
+# carries the new digest, "fail" if the recreate succeeded but writing it back failed
+# (ok is then false — see persist_env_digest).
 # Never prints secrets (diagnostics go to stderr).
 #
 #   Usage:
@@ -76,6 +83,47 @@ fail() {
   # $1=detail $2=checks-json-fragment (optional, defaults to empty)
   emit_json "false" "${2:-}" "$1"
   exit 1
+}
+
+# persist_env_digest: called ONLY after the targeted recreate has already succeeded.
+# Writes $2 (the just-deployed digest) into $ENV_FILE under the $1= key, in place:
+# replaces an existing "$1=..." line if present, appends a new "$1=$2" line
+# (creating a trailing newline first if the file doesn't already end in one) if
+# absent. Every other line is left byte-for-byte untouched — this must never touch
+# any office/redis/postgres/phoenix variable.
+#
+# Atomic + permission-safe: cp -p the original onto a same-directory mktemp'd file
+# first (this copies the original's mode/ownership/timestamps onto the temp file,
+# so the replacement can never end up with looser permissions than the original —
+# $ENV_FILE holds secrets), edit the copy, then mv it over the original (rename
+# within the same directory/filesystem, so readers never observe a partial file).
+# Returns 1 on any failure (temp-file creation, copy, edit, or rename) and leaves
+# $ENV_FILE untouched; the caller decides what that means for the overall result.
+persist_env_digest() {
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp "${ENV_FILE}.XXXXXX")" || return 1
+  if ! cp -p "$ENV_FILE" "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if grep -q "^${key}=" "$tmp"; then
+    if ! sed -i "s|^${key}=.*|${key}=${value}|" "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  else
+    if [ -s "$tmp" ] && [ -n "$(tail -c1 "$tmp")" ]; then
+      printf '\n' >> "$tmp" || { rm -f "$tmp"; return 1; }
+    fi
+    if ! printf '%s=%s\n' "$key" "$value" >> "$tmp"; then
+      rm -f "$tmp"
+      return 1
+    fi
+  fi
+  if ! mv "$tmp" "$ENV_FILE"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 while [ $# -gt 0 ]; do
@@ -156,4 +204,15 @@ if ! dc up -d --no-deps --force-recreate ingress worker >&2; then
 fi
 
 echo "[unit-deploy] DONE: unit=U6 deploy-id=$DEPLOY_ID digest applied to migrate+ingress+worker." >&2
-emit_json "true" "$CHECKS_SO_FAR,\"recreate\":\"pass\""
+
+# The recreate has already succeeded at this point — everything below only decides
+# whether .env.vps ends up reflecting it. A persistence failure must NOT be
+# swallowed: it is reported as ok:false (via fail(), which still exits non-zero) but
+# the detail is explicit that the recreate itself already happened, so the operator
+# doesn't mistake this for a failed deploy that can just be retried from scratch.
+if persist_env_digest "LAB_U6_IMAGE" "$DIGEST"; then
+  emit_json "true" "$CHECKS_SO_FAR,\"recreate\":\"pass\",\"env_persist\":\"pass\""
+else
+  fail "targeted recreate to $DIGEST succeeded — migrate ran and ingress/worker are running it now — but persisting LAB_U6_IMAGE into $REPO_DIR/$ENV_FILE failed, so that file still has the previous digest. Fix it manually (set LAB_U6_IMAGE=$DIGEST in $ENV_FILE) before running any legacy 'docker compose up'/compose command against this stack, or U6 will be silently recreated on the old digest." \
+    "$CHECKS_SO_FAR,\"recreate\":\"pass\",\"env_persist\":\"fail\""
+fi
