@@ -18,8 +18,11 @@ demo: .env.demo
 local: .env.local
 	docker compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.local up --build
 
+# F5a: migrate/ingress/worker (U6) pull the digest-pinned LAB_U6_IMAGE — see docs/docker-vps.md.
+# --profile office keeps today's default behavior (office included) for operators who run it;
+# infra/scripts/unit-deploy.sh / unit-health.sh deliberately omit --profile office.
 vps: .env.vps
-	docker compose -f docker-compose.yml -f docker-compose.vps.yml --env-file .env.vps up --build -d
+	docker compose -f docker-compose.yml -f docker-compose.vps.yml --env-file .env.vps --profile office up --build -d
 
 # Dev (minimal-docker): infra in docker, app services on the host via mprocs (watch).
 # Installs lab + backtester deps, brings up infra detached, runs migrations, then launches mprocs.
@@ -39,7 +42,7 @@ dev: .env.dev
 down:
 	-docker compose -f docker-compose.yml -f docker-compose.demo.yml down
 	-docker compose -f docker-compose.yml -f docker-compose.local.yml down
-	-docker compose -f docker-compose.yml -f docker-compose.vps.yml down
+	-docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile office down
 
 # Usage: make smoke MODE=demo
 smoke:
@@ -60,5 +63,9 @@ cross-repo-e2e:
 config:
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml  --env-file .env.demo.example  config >/dev/null && echo "demo OK"
 	docker compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.local.example config >/dev/null && echo "local OK"
-	docker compose -f docker-compose.yml -f docker-compose.vps.yml   --env-file .env.vps.example   config >/dev/null && echo "vps OK"
+	docker compose -f docker-compose.yml -f docker-compose.vps.yml   --env-file .env.vps.example   --profile office config >/dev/null && echo "vps OK"
 	docker compose -f docker-compose.yml -f docker-compose.demo.yml -f docker-compose.dev.yml --env-file .env.dev.example config >/dev/null && echo "dev OK"
+	# F5a: U6 (migrate/ingress/worker) must render clean with office excluded — no --profile
+	# office, so office-web/office-server (profiles: ["office"] in docker-compose.vps.yml) are
+	# never evaluated even though .env.vps.example happens to set TRADING_OFFICE_PATH.
+	docker compose -f docker-compose.yml -f docker-compose.vps.yml   --env-file .env.vps.example   config >/dev/null && echo "vps U6 (office excluded) OK"
