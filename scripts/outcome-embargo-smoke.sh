@@ -1,40 +1,62 @@
 #!/usr/bin/env bash
 # outcome-embargo-smoke.sh — post-deploy smoke check (F5a, task brief step 5).
 #
-# Confirms a held-out outcome fixture seeded on the DEPLOYED U6 stack (per the operator
-# runbook — see docs/docker-vps.md) is NOT visible through the lab read path:
-#   GET /v1/tasks/:taskId/completion-summary
-# Exits non-zero if any configured "held-out marker" (the held-out outcome value and/or its
-# qualification verdict) is found anywhere in the response body. Fails CLOSED on any error
-# (missing fixture, unreachable endpoint, bad auth, non-200 status) — a broken smoke check
-# must never read as "pass".
+# Two-tier design:
+#   PRIMARY   generation_lane_check — execs into the deployed U6 `worker` container (the
+#             process that actually calls scrubMetricsBag/sanitizeRetryFeedback before any
+#             LLM call — see src/research/outcome-embargo.ts's module docstring) and runs
+#             scripts/embargo-enforcement-probe.mjs FROM THE IMAGE'S OWN /app tree against
+#             fixture markers. This proves the DEPLOYED artifact enforces the embargo — the
+#             actual F5a/E4b readiness question. Fails CLOSED: a missing/broken deployed
+#             module is a FAIL, never a skip.
+#   SECONDARY read_api_canary — the original read-path HTTP check, kept as an operator-
+#             surface regression canary. It intentionally hits an UNSCRUBBED surface: the
+#             read API (GET /v1/tasks/:taskId/completion-summary) is OUT OF embargo scope
+#             BY DESIGN — deterministic evaluators, persistence, and the read API keep full
+#             holdout access and are never scrubbed (see outcome-embargo.ts). This canary
+#             catches accidental read-API regressions (e.g. the operator surface starting
+#             to 500 or mis-render); it is NOT embargo-enforcement coverage and must never
+#             be read as such.
 #
-# Two invocation modes:
+# Fails CLOSED on any error (missing fixture, unreachable endpoint, bad auth, non-200
+# status, missing/broken deployed module) — a broken smoke check must never read as "pass".
+#
+# Required env (both checks):
+#   SMOKE_TASK_ID          — id of a completed backtest.completed task whose payload was
+#                             seeded with a held-out outcome fixture (read_api_canary only).
+#   SMOKE_HELDOUT_MARKERS  — comma-separated substrings that must never appear in the
+#                             read_api_canary response body.
+#   SMOKE_READ_TOKEN       — read-API bearer token (falls back to TRADING_LAB_READ_TOKEN).
+#
+# Optional env:
+#   MODE (positional $1)   — compose overlay / project suffix: vps (default) | demo | local.
+#   READ_API_PORT          — internal read-API port (default 3100), read_api_canary only.
+#   PRIMARY_MARKER          — override generation_lane_check's fixture marker.
+#
+# Two invocation modes for read_api_canary:
 #   1) SMOKE_BASE_URL set   — curl that URL directly. Used by the shell-contract test harness
 #      (test/outcome-embargo-smoke.test.ts) and any host with direct network access to the
-#      read API.
+#      read API. generation_lane_check is SKIPPED in this mode (no deployed container to
+#      exec into) — its coverage comes from test/outcome-embargo-smoke.test.ts running
+#      scripts/embargo-enforcement-probe.mjs directly against the local build.
 #   2) SMOKE_BASE_URL unset — exec into the deployed ingress container via
 #      `docker compose ... exec -T ingress node -e "fetch(...)"`, mirroring the existing
 #      scripts/smoke.sh pattern (the read-API port is not published to the VPS host — see
-#      docker-compose.vps.yml, ingress has no `ports:`).
+#      docker-compose.vps.yml, ingress has no `ports:`). generation_lane_check ALWAYS runs
+#      in this mode.
 #
-# Required env:
-#   SMOKE_TASK_ID          — id of a completed backtest.completed task whose payload was
-#                             seeded with a held-out outcome fixture.
-#   SMOKE_HELDOUT_MARKERS  — comma-separated substrings that must never appear in the
-#                             response body.
-#   SMOKE_READ_TOKEN       — read-API bearer token (falls back to TRADING_LAB_READ_TOKEN).
-#
-# Optional env (mode 2 only):
-#   MODE (positional $1)   — compose overlay: vps (default) | demo | local
-#   READ_API_PORT          — internal read-API port (default 3100)
+# generation_lane_check uses label-based container discovery (com.docker.compose.project /
+# com.docker.compose.service), consistent with infra/scripts/unit-health.sh's
+# container_id() — NOT `docker compose exec` — so it never depends on compose file
+# interpolation succeeding (e.g. LAB_U6_IMAGE being resolvable).
 #
 #   Использование:
 #     SMOKE_TASK_ID=<id> SMOKE_HELDOUT_MARKERS=<m1,m2> SMOKE_READ_TOKEN=<token> \
 #       bash scripts/outcome-embargo-smoke.sh [vps|demo|local]
 #
-# Никогда не печатает секреты — diagnostics go to stderr, and the read token is never echoed.
-set -uo pipefail
+# Никогда не печатает секреты — diagnostics go to stderr, and the read token / markers are
+# never echoed.
+set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_DIR"
@@ -44,6 +66,11 @@ TASK_ID="${SMOKE_TASK_ID:-}"
 MARKERS_RAW="${SMOKE_HELDOUT_MARKERS:-}"
 READ_TOKEN="${SMOKE_READ_TOKEN:-${TRADING_LAB_READ_TOKEN:-}}"
 BASE_URL="${SMOKE_BASE_URL:-}"
+PRIMARY_MARKER="${PRIMARY_MARKER:-__HELDOUT_ENFORCEMENT_PROBE_MARKER__}"
+# Exported (not interpolated into any exec'd command string) so `docker compose exec -e
+# READ_TOKEN` (bare, no `=value`) can forward it from THIS process's environment — the
+# value never appears in the docker/compose invocation's own argv (host `ps` visibility).
+export READ_TOKEN
 
 fail() {
   echo "[outcome-embargo-smoke] FAIL: $1" >&2
@@ -72,17 +99,19 @@ fetch_body() {
     fi
     if [ "$http_code" != "200" ]; then
       rm -f "$tmp_body" "$tmp_err"
-      fail "read path returned HTTP ${http_code} (expected 200) — cannot validate the embargo without the seeded fixture"
+      fail "read path returned HTTP ${http_code} (expected 200) — cannot validate the read_api_canary without the seeded fixture"
     fi
     cat "$tmp_body"
     rm -f "$tmp_body" "$tmp_err"
   else
     # Mode 2: exec into the deployed ingress container — the read-API port is internal-only.
+    # `-e READ_TOKEN` (bare — no `=value`) forwards the already-exported value from this
+    # process's environment; it never appears in the docker compose invocation's own argv.
     local compose port
     compose="docker compose -f docker-compose.yml -f docker-compose.${MODE}.yml --env-file .env.${MODE}"
     port="${READ_API_PORT:-3100}"
-    $compose exec -T ingress node -e "
-      fetch('http://localhost:${port}${READ_PATH}', { headers: { authorization: 'Bearer ${READ_TOKEN}' } })
+    $compose exec -T -e READ_TOKEN ingress node -e "
+      fetch('http://localhost:${port}${READ_PATH}', { headers: { authorization: 'Bearer ' + process.env.READ_TOKEN } })
         .then(async (r) => {
           const body = await r.text();
           if (r.status !== 200) { process.stderr.write('read path returned HTTP ' + r.status + '\n'); process.exit(1); }
@@ -93,23 +122,77 @@ fetch_body() {
   fi
 }
 
-if ! BODY="$(fetch_body)"; then
-  exit 1
-fi
-
-IFS=',' read -r -a MARKERS <<< "$MARKERS_RAW"
-LEAKED=0
-for marker in "${MARKERS[@]}"; do
-  [ -n "$marker" ] || continue
-  if printf '%s' "$BODY" | grep -F -q -- "$marker"; then
-    # The marker itself is never echoed — only its presence is reported.
-    echo "[outcome-embargo-smoke] FAIL: a held-out marker was found in the deployed read-path response (value redacted)" >&2
-    LEAKED=1
+# read_api_canary (SECONDARY): NOT embargo-enforcement coverage — the read API intentionally
+# returns full holdout data to operators (see outcome-embargo.ts). This only catches the
+# read-API operator surface regressing (unreachable, bad auth, malformed response) or, as a
+# canary, an unexpected appearance of the configured markers.
+read_api_canary() {
+  local body leaked marker
+  if ! body="$(fetch_body)"; then
+    exit 1
   fi
-done
 
-if [ "$LEAKED" -ne 0 ]; then
-  exit 1
+  IFS=',' read -r -a markers <<< "$MARKERS_RAW"
+  leaked=0
+  for marker in "${markers[@]}"; do
+    [ -n "$marker" ] || continue
+    if printf '%s' "$body" | grep -F -q -- "$marker"; then
+      # The marker itself is never echoed — only its presence is reported.
+      echo "[outcome-embargo-smoke] FAIL: read_api_canary — a configured marker was found in the read-path response (value redacted; NOT embargo-enforcement coverage — see header)" >&2
+      leaked=1
+    fi
+  done
+
+  if [ "$leaked" -ne 0 ]; then
+    exit 1
+  fi
+
+  echo "[outcome-embargo-smoke] PASS: read_api_canary — no configured marker found at ${READ_PATH} (task=${TASK_ID})"
+}
+
+# generation_lane_check (PRIMARY): execs into the deployed worker container and runs
+# scripts/embargo-enforcement-probe.mjs against the IMAGE's own copy of
+# src/research/outcome-embargo.ts — proves the deployed artifact enforces the embargo.
+generation_lane_check() {
+  local project cid probe_path
+  local -x EMBARGO_MODULE_PATH EMBARGO_MARKER
+
+  # Label-based discovery (NOT `docker compose exec`) — consistent with
+  # infra/scripts/unit-health.sh's container_id(), and does not depend on compose file
+  # interpolation succeeding.
+  project="trading-${MODE}"
+  cid="$(docker ps -a -q \
+    --filter "label=com.docker.compose.project=${project}" \
+    --filter "label=com.docker.compose.service=worker" \
+    2>/dev/null | head -n1 || true)"
+  if [ -z "$cid" ]; then
+    fail "generation_lane_check: no 'worker' container found for compose project '${project}' (label discovery — is the U6 stack up?)"
+  fi
+
+  EMBARGO_MODULE_PATH="/app/src/research/outcome-embargo.ts"
+  EMBARGO_MARKER="$PRIMARY_MARKER"
+  probe_path="/app/scripts/embargo-enforcement-probe.mjs"
+
+  # `-e EMBARGO_MODULE_PATH -e EMBARGO_MARKER` (bare — no `=value`) forward the local-scoped
+  # exports above; same argv-hygiene pattern as read_api_canary's READ_TOKEN handling.
+  if docker exec \
+      -e EMBARGO_MODULE_PATH \
+      -e EMBARGO_MARKER \
+      "$cid" node --experimental-transform-types "$probe_path" 1>&2; then
+    echo "[outcome-embargo-smoke] PASS: generation_lane_check — deployed worker (${cid:0:12}) scrubs held-out markers"
+  else
+    fail "generation_lane_check: deployed generation-lane enforcement probe failed inside worker container ${cid:0:12} — embargo NOT enforced by the deployed image (or scrubMetricsBag/sanitizeRetryFeedback is missing from it)"
+  fi
+}
+
+if [ -n "$BASE_URL" ]; then
+  # Test-harness / direct-network mode: only the read-API canary is runnable (no deployed
+  # container to exec into). generation_lane_check's coverage lives in
+  # test/outcome-embargo-smoke.test.ts, run directly against the local build.
+  read_api_canary
+else
+  # Deployed-stack mode: PRIMARY first (fail fast on real embargo breakage), then the
+  # SECONDARY canary.
+  generation_lane_check
+  read_api_canary
 fi
-
-echo "[outcome-embargo-smoke] PASS: no held-out marker found at ${READ_PATH} (task=${TASK_ID})"

@@ -1,17 +1,30 @@
 // Harness test for scripts/outcome-embargo-smoke.sh (F5a, brief step 5).
 //
-// The script is a post-deploy smoke check: it hits the DEPLOYED lab read path
-// (GET /v1/tasks/:taskId/completion-summary) for a task an operator has seeded with a
-// held-out outcome fixture, and must exit non-zero if any configured "held-out marker"
-// (standing in for a real held-out outcome value / qualification verdict) shows up in the
-// response body. This harness boots the real read-API app (in-memory adapters) as an
-// actual HTTP listener — the closest in-process stand-in for "the deployed read path" —
-// then drives the script as a subprocess against it via SMOKE_BASE_URL.
+// scripts/outcome-embargo-smoke.sh is a two-tier post-deploy smoke check:
+//   PRIMARY   generation_lane_check — execs into the deployed U6 worker container and runs
+//             scripts/embargo-enforcement-probe.mjs against the IMAGE's own copy of
+//             src/research/outcome-embargo.ts. This is the actual embargo-enforcement
+//             coverage. It cannot run against a real container in CI, so it is instead
+//             covered below (see the second describe block) by running the SAME probe
+//             directly against the LOCAL build — the CI-safe substitute.
+//   SECONDARY read_api_canary — hits the DEPLOYED lab read path
+//             (GET /v1/tasks/:taskId/completion-summary) and must exit non-zero if any
+//             configured "held-out marker" (standing in for a real held-out outcome value /
+//             qualification verdict) shows up in the response body. This is an
+//             OPERATOR-SURFACE REGRESSION CANARY, NOT embargo-enforcement coverage — the
+//             read API by design returns full holdout data to operators (see
+//             src/research/outcome-embargo.ts's module docstring); it only catches the
+//             read-API surface regressing (unreachable, bad auth, malformed response).
 //
-// Before the script exists, spawnSync fails to exec it (ENOENT) and every assertion below
-// fails — this file is written BEFORE scripts/outcome-embargo-smoke.sh (TDD RED).
-import { describe, it, expect, afterEach } from 'vitest';
-import { spawn } from 'node:child_process';
+// This first describe block covers read_api_canary: it boots the real read-API app
+// (in-memory adapters) as an actual HTTP listener — the closest in-process stand-in for
+// "the deployed read path" — then drives the script as a subprocess against it via
+// SMOKE_BASE_URL (which also skips generation_lane_check, since there is no container to
+// exec into in this mode — see the script's header comment).
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serve, type ServerType } from '@hono/node-server';
@@ -89,7 +102,7 @@ function runScript(env: Record<string, string>): Promise<{ status: number | null
   });
 }
 
-describe('outcome-embargo-smoke.sh (deployed read-path smoke)', () => {
+describe('outcome-embargo-smoke.sh — read_api_canary (secondary, operator-surface regression check, NOT embargo-enforcement coverage)', () => {
   let server: ServerType | undefined;
 
   afterEach(async () => {
@@ -175,5 +188,89 @@ describe('outcome-embargo-smoke.sh (deployed read-path smoke)', () => {
     });
     expect(result.status).not.toBe(0);
     expect(result.stderr.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// scripts/embargo-enforcement-probe.mjs — generation-lane embargo enforcement (PRIMARY
+// check). This is the CI-safe substitute for generation_lane_check's in-container run: it
+// runs the SAME probe file scripts/outcome-embargo-smoke.sh execs into the deployed worker
+// container, but against the LOCAL build (src/research/outcome-embargo.ts on the host
+// checkout) instead of a running container's /app tree.
+const PROBE_PATH = path.join(__dirname, '..', 'scripts', 'embargo-enforcement-probe.mjs');
+const REAL_MODULE_PATH = path.join(__dirname, '..', 'src', 'research', 'outcome-embargo.ts');
+const PROBE_NODE_FLAGS = ['--experimental-transform-types'];
+
+const probeTmpDirs: string[] = [];
+
+function runProbe(env: Record<string, string>): { status: number | null; stdout: string; stderr: string } {
+  const result = spawnSync('node', [...PROBE_NODE_FLAGS, PROBE_PATH], {
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+  });
+  return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+}
+
+describe('embargo-enforcement-probe.mjs — generation-lane enforcement (primary check, run against the local build)', () => {
+  afterAll(() => {
+    for (const dir of probeTmpDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 0 when the real outcome-embargo module scrubs the marker from both scrubMetricsBag and sanitizeRetryFeedback', () => {
+    const result = runProbe({ EMBARGO_MODULE_PATH: REAL_MODULE_PATH });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('PASS');
+  });
+
+  it('exits non-zero and never echoes the marker when scrubbing is broken (module passes the marker through unchanged)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embargo-probe-passthrough-'));
+    probeTmpDirs.push(dir);
+    const stubPath = path.join(dir, 'passthrough.mjs');
+    writeFileSync(
+      stubPath,
+      [
+        'export function scrubMetricsBag(bag) { return { scrubbed: bag, removedKeys: [] }; }',
+        'export function sanitizeRetryFeedback(feedback) {',
+        '  return {',
+        '    feedback: { hypothesisId: feedback.hypothesisId, decision: feedback.decision, reasons: [...feedback.reasons] },',
+        '    removedKeys: [],',
+        '  };',
+        '}',
+        '',
+      ].join('\n'),
+    );
+
+    const marker = '__PROBE_TEST_MARKER_XYZ__';
+    const result = runProbe({ EMBARGO_MODULE_PATH: stubPath, EMBARGO_MARKER: marker });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain(marker);
+    expect(result.stderr).not.toContain(marker);
+  });
+
+  it('fails closed (non-zero) when scrubMetricsBag/sanitizeRetryFeedback are missing from the imported module', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embargo-probe-missing-'));
+    probeTmpDirs.push(dir);
+    const stubPath = path.join(dir, 'missing.mjs');
+    writeFileSync(stubPath, 'export const notTheRightExports = true;\n');
+
+    const result = runProbe({ EMBARGO_MODULE_PATH: stubPath });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('missing');
+  });
+
+  it('fails closed (non-zero) when EMBARGO_MODULE_PATH is not set', () => {
+    const result = runProbe({ EMBARGO_MODULE_PATH: '' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('EMBARGO_MODULE_PATH is required');
+  });
+
+  it('fails closed (non-zero) when EMBARGO_MODULE_PATH points at a module that fails to import', () => {
+    const result = runProbe({ EMBARGO_MODULE_PATH: path.join(tmpdir(), 'does-not-exist-embargo-module.mjs') });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('failed to import');
   });
 });

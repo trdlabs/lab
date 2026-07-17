@@ -136,6 +136,9 @@ ingress_read_api_check() {
   # $1=path (/healthz | /readyz) -> "pass" | "fail". Execs into the running ingress
   # container and fetches its OWN read-API listener on :3100 — the port is not published
   # to the host (see docker-compose.vps.yml). Mirrors scripts/smoke.sh's existing pattern.
+  # The :3100 listener only binds when TRADING_LAB_READ_TOKEN is set (see
+  # docker-compose.yml's ingress healthcheck comment) — a host provisioned without that
+  # token correctly fails this check (fail-closed), it is not a false negative.
   local cid
   cid="$(container_id ingress)"
   [ -n "$cid" ] || { echo "fail"; return; }
