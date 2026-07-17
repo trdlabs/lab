@@ -3,6 +3,16 @@ name: Publish image
 # Builds the runtime image on CI (where the network can reach the SDK release
 # CDN) and pushes it to GHCR, so consumers `docker pull` a ready image instead of
 # building from source. The lab demo overlay references ghcr.io/<owner>/<repo>.
+#
+# F5a: this is also the source of the immutable, digest-addressable U6 artifact
+# (migrate/ingress/worker share one image) — same OCI metadata policy as the
+# platform F1 workflow (../platform/.github/workflows/platform-image.yml):
+# `org.opencontainers.image.revision` pinned to the exact source SHA, a
+# single-manifest push (provenance/sbom disabled) so digest-based inspection
+# works, and the digest surfaced as a step + job output. Staging/production
+# deploy inputs (LAB_U6_IMAGE) are `image@sha256:...` only — the `latest` /
+# short-sha convenience tags below remain for the demo stack and are never a
+# valid staging/production input.
 on:
   push:
     branches: [main]
@@ -12,12 +22,17 @@ concurrency:
   group: publish-image-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,15 +47,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -49,3 +68,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Disabled so the pushed reference is a single-manifest image (not an
+          # OCI index wrapping a provenance/SBOM attestation manifest) — the
+          # verification step below inspects `.Config.Labels` directly, which
+          # requires a plain image manifest at the returned digest. Same policy
+          # as the platform F1 workflow.
+          provenance: false
+          sbom: false
+
+      - name: Verify immutable artifact metadata
+        run: |
+          test -n "${{ steps.build.outputs.digest }}"
+          test "$(docker buildx imagetools inspect "$IMAGE@${{ steps.build.outputs.digest }}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"

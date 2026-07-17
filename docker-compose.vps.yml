@@ -4,9 +4,24 @@ services:
     restart: unless-stopped
   redis:
     restart: unless-stopped
+
+  # U6 (F5a): pull the immutable, digest-pinned lab image published by
+  # .github/workflows/docker-publish.yml instead of building on-host — staging/production
+  # deploy inputs are `image@sha256:...` only (see infra/scripts/unit-deploy.sh,
+  # docs/docker-vps.md). `build: !reset null` drops the base file's `x-lab-image` build
+  # section (context: ., image: trading-lab:local) so compose never falls back to a local
+  # build: without the reset, compose would build AND then apply the `image:` tag below,
+  # silently defeating the digest pin.
+  migrate:
+    image: ${LAB_U6_IMAGE:?LAB_U6_IMAGE must be set to a digest-pinned lab image (repo@sha256:<64 hex>) for VPS deploys — see docs/docker-vps.md}
+    build: !reset null
   ingress:
+    image: ${LAB_U6_IMAGE:?LAB_U6_IMAGE must be set to a digest-pinned lab image (repo@sha256:<64 hex>) for VPS deploys — see docs/docker-vps.md}
+    build: !reset null
     restart: unless-stopped
   worker:
+    image: ${LAB_U6_IMAGE:?LAB_U6_IMAGE must be set to a digest-pinned lab image (repo@sha256:<64 hex>) for VPS deploys — see docs/docker-vps.md}
+    build: !reset null
     restart: unless-stopped
 
   phoenix:
@@ -14,11 +29,17 @@ services:
       - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
     restart: unless-stopped
 
+  # Office is NOT part of U6 (F5a) — gated behind the `office` Compose profile so
+  # `docker compose config` and every U6 primitive (unit-deploy.sh / unit-health.sh, which
+  # never pass --profile office) succeed on a host with no office checkout at all. Operators
+  # who DO run office pass --profile office explicitly (`make vps` does this by default).
   office-web:
+    profiles: ["office"]
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${OFFICE_WEB_PORT:-8080}:80"
     restart: unless-stopped
   office-server:
+    profiles: ["office"]
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${OFFICE_SERVER_PORT:-8787}:8787"
     restart: unless-stopped
