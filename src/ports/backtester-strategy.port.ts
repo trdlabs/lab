@@ -1,4 +1,4 @@
-import type { createModuleManifest } from '@trading-backtester/sdk/builder';
+import type { createModuleManifest } from '@trdlabs/backtester-sdk/builder';
 
 export type BundleManifest = ReturnType<typeof createModuleManifest>;
 

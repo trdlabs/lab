@@ -81,7 +81,7 @@ import { sourceFingerprint } from '../src/domain/fingerprint.ts';
 import { assembleStrategyBundle } from '../src/domain/strategy-bundle.ts';
 import { RESEARCH_RUN_METRICS } from '../src/domain/platform-comparison.ts';
 import { MODEL_PROVIDERS } from '../src/adapters/llm/model-provider.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
+import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import type { DatasetScope } from '../src/domain/research-experiment.ts';
 import type { PlatformRunConfig } from '../src/ports/research-platform.port.ts';
 

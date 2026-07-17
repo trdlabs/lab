@@ -41,7 +41,7 @@ import { MastraStrategyBuilder } from '../src/adapters/builder/mastra-strategy-b
 import { createStrategyBuilderAgent } from '../src/mastra/agents/strategy-builder.agent.ts';
 import { assembleStrategyBundle } from '../src/domain/strategy-bundle.ts';
 import { createShellBundleProver } from '../src/proof/shell-bundle-prover.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
+import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import { resolveLanguageModel, MODEL_PROVIDERS } from '../src/adapters/llm/model-provider.ts';
 import type { ModelProviderEnv, ModelProvider } from '../src/adapters/llm/model-provider.ts';
 import { STRATEGY_PROFILE_CONTRACT_VERSION } from '../src/domain/strategy-profile.ts';

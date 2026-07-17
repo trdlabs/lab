@@ -1,5 +1,5 @@
 // HttpBacktesterAdapter — implements ResearchPlatformPort by talking to the trading-backtester service
-// through @trading-backtester/sdk. This is the target-architecture boundary: trading-lab submits /
+// through @trdlabs/backtester-sdk. This is the target-architecture boundary: trading-lab submits /
 // polls / reads backtests via the backtesterClient (separate from the platform client), not the MCP
 // gateway. Selected by `selectResearchPlatform('backtester')`.
 //
@@ -23,9 +23,9 @@ import type {
   MetricDelta as BtMetricDelta,
   RegistryDescriptor,
   OverlayRunPreset,
-} from '@trading-backtester/sdk/contracts';
-import { createModuleBundle } from '@trading-backtester/sdk/builder';
-import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trading-backtester/sdk/client';
+} from '@trdlabs/backtester-sdk/contracts';
+import { createModuleBundle } from '@trdlabs/backtester-sdk/builder';
+import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trdlabs/backtester-sdk/client';
 import type {
   ResearchPlatformPort,
   ResearchCapabilityDescriptor,

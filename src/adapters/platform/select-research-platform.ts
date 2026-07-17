@@ -1,6 +1,6 @@
 import type { ResearchPlatformPort } from '../../ports/research-platform.port.ts';
 import { MockResearchPlatformAdapter } from './mock-research-platform.adapter.ts';
-import { BacktesterClient } from '@trading-backtester/sdk/client';
+import { BacktesterClient } from '@trdlabs/backtester-sdk/client';
 import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';
 
 export function selectResearchPlatform(integration: 'mock' | 'backtester'): ResearchPlatformPort {

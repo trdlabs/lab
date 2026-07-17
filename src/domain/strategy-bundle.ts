@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild';
-import { computeBundleHash, createModuleManifest } from '@trading-backtester/sdk/builder';
+import { computeBundleHash, createModuleManifest } from '@trdlabs/backtester-sdk/builder';
 import type { StrategyBuilderOutput } from '../ports/strategy-builder.port.ts';
 
 export interface AssembledStrategyBundle {

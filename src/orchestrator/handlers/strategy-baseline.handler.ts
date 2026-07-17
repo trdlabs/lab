@@ -5,7 +5,7 @@ import { validateWithSchema } from '../../validation/validator.ts';
 import { assembleStrategyBundle, type AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { reconstructStrategyBundle } from '../../research/reconstruct-strategy-bundle.ts';
 import { RESEARCH_RUN_METRICS } from '../../domain/platform-comparison.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
+import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import { createAndEnqueueTask } from '../task-intake.ts';
 import { event } from './backtest-support.ts';
 import type { ArtifactRef } from '../../domain/types.ts';

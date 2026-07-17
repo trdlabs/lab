@@ -27,7 +27,7 @@ import type { StrategyBuilderOutput, StrategyManifestMeta } from '../ports/strat
 // ---------------------------------------------------------------------------
 
 /**
- * Hand-written zod mirror of CreateModuleManifestInput from @trading-backtester/sdk/builder,
+ * Hand-written zod mirror of CreateModuleManifestInput from @trdlabs/backtester-sdk/builder,
  * with `kind` pinned to 'strategy' and optional SDK fields mapped to .nullable().
  *
  * Hooks restricted to the strategy lifecycle subset (task brief spec).

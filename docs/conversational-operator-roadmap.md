@@ -176,7 +176,7 @@ the catalog should bind to that surface, not the legacy vendored SDK. See *SDK b
 A second index over research-report / hypothesis-rationale / critic-output / notes
 chunks (with profileId/taskId/type/timestamp metadata) for explanatory answers
 ("what was tried before", "why was this hypothesis rejected"). Reference: research §5.
-**Deferred** until the `@trading-backtester/sdk` artifact API (`/artifacts` descriptors /
+**Deferred** until the `@trdlabs/backtester-sdk` artifact API (`/artifacts` descriptors /
 references / pagination DTO) is fixed — the index keys off that contract. See *SDK
 boundaries + distribution* below.
 
@@ -257,7 +257,7 @@ platform side (separate decision/owner).
   catalog, historical-data DTO+client, ops-read (bot/paper/live observations),
   paper-candidate intake, platform capabilities/versioning, platform HTTP/MCP transports.
   Sheds its legacy builder / backtest-lifecycle surface.
-- **`@trading-backtester/sdk`** (in the already-public `trading-backtester` as
+- **`@trdlabs/backtester-sdk`** (in the already-public `trading-backtester` as
   `packages/sdk`, subpath exports `/builder` `/client` `/contracts` `/artifacts`): the
   source of truth for module build / validate / run / result / artifacts. The current
   `@trading-backtester/client` stays as a deprecated compat wrapper for one migration window.

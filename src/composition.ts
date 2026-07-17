@@ -53,7 +53,7 @@ import { MastraBuilder } from './adapters/builder/mastra-builder.ts';
 import { FakeStrategyBuilder } from './adapters/builder/fake-strategy-builder.ts';
 import { MastraStrategyBuilder } from './adapters/builder/mastra-strategy-builder.ts';
 import { createStrategyBuilderAgent } from './mastra/agents/strategy-builder.agent.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
+import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import type { StrategyBuilder } from './ports/strategy-builder.port.ts';
 import { FakeStrategyConsolidator } from './adapters/consolidator/fake-strategy-consolidator.ts';
 import { MastraStrategyConsolidator } from './adapters/consolidator/mastra-strategy-consolidator.ts';
