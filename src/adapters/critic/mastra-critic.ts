@@ -3,7 +3,7 @@ import type { CriticPort, AgentCallOpts } from '../../ports/critic.port.ts';
 import { CriticOutputSchema, type CriticInput, type CriticOutput } from '../../domain/critic.ts';
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
 
-function buildPrompt(input: CriticInput): string {
+export function buildPrompt(input: CriticInput): string {
   return [
     `Strategy core idea: ${input.profile.coreIdea}`,
     `Thesis: ${input.proposal.thesis}`,

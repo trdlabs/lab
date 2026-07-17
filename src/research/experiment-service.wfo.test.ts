@@ -184,6 +184,9 @@ async function seedBaseline(opts: {
   // explicitly to simulate a train window whose metrics diverge from the sanity/full-period run
   // (no-leakage regression coverage — see runWalkForwardOptimization).
   trainTotalTrades?: number;
+  // Embargo-test hook: extra keys merged into the persisted TRAIN metrics (the
+  // agent-facing block), simulating an SDK/mapper widening. Default: none.
+  trainMetricsExtras?: Record<string, unknown>;
 }): Promise<string> {
   const experimentId = `baseline-${randomUUID()}`;
   const strategyBacktestRunId = `sbr-${randomUUID()}`;
@@ -227,7 +230,10 @@ async function seedBaseline(opts: {
       submittedAt: NOW, finishedAt: null, createdAt: NOW, updatedAt: NOW,
     });
     await opts.strategyBacktests.markCompleted(trainRunId, {
-      metrics: metrics({ totalTrades: trainTotalTrades, profitFactor: 1.2, sharpe: 2 }),
+      metrics: {
+        ...metrics({ totalTrades: trainTotalTrades, profitFactor: 1.2, sharpe: 2 }),
+        ...(opts.trainMetricsExtras ?? {}),
+      } as never,
       artifactRefs: [], platformContractVersion: 'v1', finishedAt: NOW,
     });
     await opts.experiments.addMember({
@@ -248,6 +254,7 @@ function buildSvc(opts: {
   wfoBudget?: Partial<WfoBudget>;
   tokenUsage?: Pick<TokenUsageRepository, 'get'>;
   researchTaskTokenBudget?: number;
+  events?: { append: (e: unknown) => Promise<void>; listByTask: () => Promise<never[]> };
 }): { svc: ExperimentService; experiments: InMemoryResearchExperimentRepository; strategyBacktests: InMemoryStrategyBacktestRunRepository } {
   const experiments = new InMemoryResearchExperimentRepository();
   const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
@@ -264,7 +271,7 @@ function buildSvc(opts: {
     strategyRunExecutor,
     newId: (p) => `${p}-${++counter}`,
     now: () => NOW,
-    events: { append: async () => {}, listByTask: async () => [] },
+    events: (opts.events ?? { append: async () => {}, listByTask: async () => [] }) as never,
     gate1: opts.gate1 ?? new FakeGate1(),
     sweepDesigner: opts.sweepDesigner ?? new FakeSweepDesigner(),
     resultInterpreter: opts.resultInterpreter ?? new FakeResultInterpreter(),
@@ -602,5 +609,55 @@ describe('runWalkForwardOptimization', () => {
 
     // gate1.decide + sweepDesigner.design + resultInterpreter.interpret each report usage.
     expect(seen.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('outcome embargo (S1)', () => {
+  it('scrubs embargoed metric keys from gate1/sweep inputs, emits scrubbed events, keeps train metrics', async () => {
+    const gate1 = new FakeGate1();
+    const sweepDesigner = new FakeSweepDesigner();
+    const appended: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5 }),
+      gate1, sweepDesigner,
+      events: { append: async (e) => { appended.push(e as { type: string; payload: Record<string, unknown> }); }, listByTask: async () => [] },
+    });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+      trainMetricsExtras: {
+        holdoutSharpe: 9.99,
+        promotion: { verdict: 'passed' },
+        outOfSampleNetPnl: 123.45,
+        evaluationWindow: { from: '2031-12-31T00:00:00.000Z', to: '2031-12-31T23:59:59.000Z' },
+      },
+    });
+
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM]);
+    await svc.runWalkForwardOptimization(input);
+
+    // No embargo keys or sentinel values in ANY captured LLM port input:
+    const captured = JSON.stringify({ gate1: gate1.calls, sweep: sweepDesigner.calls });
+    expect(captured).not.toContain('holdoutSharpe');
+    expect(captured).not.toContain('promotion');
+    expect(captured).not.toContain('outOfSample');
+    expect(captured).not.toContain('evaluationWindow');
+    expect(captured).not.toContain('9.99');
+    expect(captured).not.toContain('123.45');
+    expect(captured).not.toContain('2031-12-31');
+    // Boundary date T absent from port inputs (periodTo removed in Task 3):
+    expect(captured).not.toContain(T);
+    // Positive control — train metrics survive the scrub:
+    expect(gate1.calls[0]!.baselineMetrics.totalTrades).toBe(5);
+    expect(sweepDesigner.calls[0]!.baselineTrainSummary.sharpe).toBeDefined();
+    // Scrub evidence event, names only:
+    const scrubEvents = appended.filter((e) => e.type === 'outcome_embargo.scrubbed');
+    expect(scrubEvents.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(scrubEvents)).not.toContain('9.99');
+    expect(JSON.stringify(scrubEvents)).not.toContain('2031-12-31');
+    expect(scrubEvents[0]!.payload['site']).toBe('wfo.gate1.baselineMetrics');
+    expect(scrubEvents[0]!.payload['removedKeys']).toEqual(
+      expect.arrayContaining(['<holdout>', '<promotion>', '<out_of_sample>', '<evaluation_window>']),
+    );
   });
 });

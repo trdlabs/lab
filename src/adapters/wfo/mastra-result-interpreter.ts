@@ -2,11 +2,12 @@ import type { Agent } from '@mastra/core/agent';
 import type { ResultInterpreterPort, InterpretInput, AgentCallOpts } from '../../ports/wfo-agents.port.ts';
 import { ResultInterpretOutputSchema, type ResultInterpretOutput } from '../../domain/wfo.ts';
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
+import { scrubMetricsBag } from '../../research/outcome-embargo.ts';
 
 function buildPrompt(input: InterpretInput): string {
+  const { scrubbed: topN } = scrubMetricsBag(input.topN);
   return [
-    `Top-N ranked results: ${JSON.stringify(input.topN)}`,
-    `Period end (T, no data beyond this — no-leakage boundary): ${input.periodTo}`,
+    `Top-N ranked results: ${JSON.stringify(topN)}`,
     `Rounds so far: ${input.roundsSoFar}`,
     `Max rounds: ${input.maxRounds}`,
   ].join('\n');

@@ -87,3 +87,26 @@ describe('buildBotResultsDigestText', () => {
     expect(buildBotResultsDigestText([])).toBeNull();
   });
 });
+
+describe('outcome embargo (S3) — frozen projection', () => {
+  const clean: BotRunResultDetail = {
+    run: { runId: 'r1', mode: 'paper', status: 'finished', bundleId: null, strategy: { name: 's', version: '1' }, startedAtMs: 1, finishedAtMs: 2, lastSeenMs: 2, symbols: ['BTCUSDT'] },
+    summary: { runId: 'r1', excludesReconcile: true, asOf: 2, closedTrades: 2, wins: 1, losses: 1, breakeven: 0, winratePct: 50, pnlUsd: '7.5', avgPnl: '3.75', exitReasons: { tp: 1, stop_loss: 1 } },
+    trades: [],
+  };
+
+  it('renders byte-identically when the summary carries runtime embargo extras', () => {
+    const dirty = {
+      ...clean,
+      summary: {
+        ...clean.summary,
+        promotion: { verdict: 'passed' },
+        holdoutSharpe: 987654.321,
+        qualificationEpochKey: 'epoch-1',
+        evaluationWindow: { from: '2031-12-31', to: '2031-12-31' },
+      },
+    } as unknown as BotRunResultDetail;
+    expect(buildBotResultsDigestText([dirty])).toBe(buildBotResultsDigestText([clean]));
+    expect(buildBotResultsDigestText([dirty])).not.toContain('987654');
+  });
+});

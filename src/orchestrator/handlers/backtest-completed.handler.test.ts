@@ -499,4 +499,53 @@ describe('backtestCompletedHandler', () => {
       expect(revisionTasks).toHaveLength(1);
     });
   });
+
+  describe('outcome embargo (S2)', () => {
+    it('drops non-allowlisted reasons from the persisted retry feedback, fail-closed', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      await backtestCompletedHandler(
+        task({
+          ...BASE_PAYLOAD, decision: 'FAIL', cycleDepth: 0,
+          reasons: ['no_improvement_over_baseline', 'holdout_failed: sharpe=1.23', 'heldout window 2031-12-31'],
+        }),
+        s,
+      );
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
+      expect(enqueued).toHaveLength(1);
+      const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+      const feedback = (retryTask!.payload as { feedback: { reasons: string[] } }).feedback;
+      expect(feedback.reasons).toEqual(['no_improvement_over_baseline']);
+      // durable: the embargoed strings must not exist ANYWHERE in the persisted payload
+      expect(JSON.stringify(retryTask!.payload)).not.toContain('sharpe=1.23');
+      expect(JSON.stringify(retryTask!.payload)).not.toContain('2031-12-31');
+      // scrub evidence event, paths only
+      const events = await s.events.listByTask('task-bt-completed');
+      const scrub = events.filter((e) => e.type === 'outcome_embargo.scrubbed');
+      expect(scrub).toHaveLength(1);
+      expect(scrub[0]!.payload).toEqual({
+        site: 'enqueueResearchRetry.feedback',
+        removedKeys: ['reasons[1]', 'reasons[2]'],
+      });
+    });
+
+    it('keeps evalPlatformRun (orchestration window) verbatim in the retry payload (I-E2)', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue });
+      const evalPlatformRun = {
+        datasetId: 'ds-1', symbols: ['BTCUSDT'], timeframe: '1m', seed: 42,
+        period: { from: '2026-06-22T00:00:00.000Z', to: '2026-06-28T00:00:00.000Z' },
+      };
+      await backtestCompletedHandler(
+        task({ ...BASE_PAYLOAD, decision: 'MODIFY', cycleDepth: 0, reasons: ['drawdown_regression'], evalPlatformRun }),
+        s,
+      );
+      const enqueued = queue.queued.filter((q) => q.taskType === 'research.run_cycle');
+      const retryTask = await s.researchTasks.findById(enqueued[0]!.taskId);
+      expect((retryTask!.payload as { evalPlatformRun: unknown }).evalPlatformRun).toEqual(evalPlatformRun);
+      // no scrub event when nothing was dropped
+      const events = await s.events.listByTask('task-bt-completed');
+      expect(events.filter((e) => e.type === 'outcome_embargo.scrubbed')).toHaveLength(0);
+    });
+  });
 });

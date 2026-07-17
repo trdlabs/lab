@@ -2,14 +2,15 @@ import type { Agent } from '@mastra/core/agent';
 import type { SweepDesignerPort, SweepInput, AgentCallOpts } from '../../ports/wfo-agents.port.ts';
 import { SweepDesignOutputSchema, type SweepDesignOutput } from '../../domain/wfo.ts';
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
+import { scrubMetricsBag } from '../../research/outcome-embargo.ts';
 
 function buildPrompt(input: SweepInput): string {
+  const { scrubbed: baselineTrainSummary } = scrubMetricsBag(input.baselineTrainSummary);
   return [
     `Strategy core idea: ${input.profile.coreIdea}`,
-    `Baseline train metrics: ${JSON.stringify(input.baselineTrainSummary)}`,
+    `Baseline train metrics: ${JSON.stringify(baselineTrainSummary)}`,
     `Tunable params: ${JSON.stringify(input.tunableParams)}`,
     `Restrict to entry-affecting params only: ${input.restrictToEntryParams}`,
-    `Period end (T, no data beyond this): ${input.periodTo}`,
     `Max grid points: ${input.maxPoints}`,
   ].join('\n');
 }

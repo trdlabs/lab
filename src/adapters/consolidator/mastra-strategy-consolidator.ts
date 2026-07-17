@@ -6,7 +6,7 @@ import { StrategyLlmOutputSchema, llmToStrategyBuilderOutput } from '../../domai
 import { MAX_OUTPUT_TOKENS } from '../llm/generate-defaults.ts';
 
 /** Builds the user message: stacked source + mergedRuleSet given as reference material, not to be altered. */
-function renderConsolidationPrompt(args: StrategyConsolidateArgs): string {
+export function renderConsolidationPrompt(args: StrategyConsolidateArgs): string {
   const sections = [
     'Rewrite the composed strategy below into ONE flat, self-contained `export default function` factory with IDENTICAL behavior.',
     'Add, remove, or alter NO rule or condition. No imports.',

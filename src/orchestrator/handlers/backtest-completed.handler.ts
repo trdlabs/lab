@@ -10,6 +10,7 @@ import { withinTokenBudget } from '../token-budget.ts';
 import type { HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 import { PlatformRunConfigSchema } from './platform-run-config.schema.ts';
 import type { PlatformRunConfig } from '../../ports/research-platform.port.ts';
+import { sanitizeRetryFeedback } from '../../research/outcome-embargo.ts';
 
 export const BacktestCompletedPayloadSchema = z.object({
   backtestRunId: z.string().min(1),
@@ -59,6 +60,16 @@ async function enqueueResearchRetry(
   symbol?: string,
   evalPlatformRun?: PlatformRunConfig,
 ): Promise<void> {
+  // Outcome Embargo (S2, I-E5): fail-closed reason allowlist BEFORE the payload is written —
+  // embargoed content must never persist into research_task.payload.feedback (it would be
+  // replayed verbatim on every retry/requeue). Touches ONLY feedback; evalPlatformRun and
+  // other control-plane fields are exempt by design (I-E2).
+  const sanitized = sanitizeRetryFeedback(feedback);
+  if (sanitized.removedKeys.length > 0) {
+    await services.events.append(event(task.id, 'outcome_embargo.scrubbed', {
+      site: 'enqueueResearchRetry.feedback', removedKeys: sanitized.removedKeys,
+    }));
+  }
   const retryTaskId = randomUUID();
   const retryTask: ResearchTask = {
     id: retryTaskId,
@@ -67,7 +78,7 @@ async function enqueueResearchRetry(
     correlationId: task.correlationId,
     status: 'queued',
     payload: {
-      strategyProfileId, cycleDepth: nextCycleDepth, feedback,
+      strategyProfileId, cycleDepth: nextCycleDepth, feedback: sanitized.feedback,
       ...(symbol ? { symbol } : {}),
       ...(evalPlatformRun ? { evalPlatformRun } : {}),
     },

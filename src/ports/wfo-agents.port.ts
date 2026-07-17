@@ -18,13 +18,11 @@ export interface SweepInput {
   baselineTrainSummary: BacktestMetricBlock;
   tunableParams: ProfileParam[];
   restrictToEntryParams: boolean;
-  periodTo: string; // = T
   maxPoints: number;
 }
 
 export interface InterpretInput {
   topN: RankedPoint[];
-  periodTo: string; // = T
   roundsSoFar: number;
   maxRounds: number;
 }

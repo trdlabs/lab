@@ -311,3 +311,47 @@ describe('StrategyRetrievalIndexer.reindex', () => {
     expect(summary.failed).toBe(1);
   });
 });
+
+describe('outcome embargo (S4) — indexer production path', () => {
+  const SENTINEL_NUM = '987654.321';
+  const SENTINEL_DATE = '2031-12-31T23:59:59.000Z';
+
+  it('a dirty profile embeds + upserts byte-identically to a clean one, and no holdout value reaches embed()/upsert()', async () => {
+    const clean = makeProfile();
+    const dirty = {
+      ...makeProfile(),
+      // runtime-extra embargo payloads that the R3a/promotion paths can hang off a profile object
+      holdoutValidation: { holdoutSharpe: Number(SENTINEL_NUM), t: SENTINEL_DATE },
+      promotion: { verdict: 'passed', evaluationWindow: { from: SENTINEL_DATE, to: SENTINEL_DATE } },
+    } as unknown as StrategyProfile;
+
+    const embClean = makeEmbeddingPort();
+    const idxClean = makeIndexPort();
+    await new StrategyRetrievalIndexer(embClean, idxClean, CONFIG, CLOCK, makeEventRepo()).index(clean);
+
+    const embDirty = makeEmbeddingPort();
+    const idxDirty = makeIndexPort();
+    await new StrategyRetrievalIndexer(embDirty, idxDirty, CONFIG, CLOCK, makeEventRepo()).index(dirty);
+
+    // 1) the text handed to the embedding model is byte-identical
+    const cleanEmbedArg = (embClean.embed as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const dirtyEmbedArg = (embDirty.embed as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(dirtyEmbedArg).toEqual(cleanEmbedArg);
+
+    // 2) the upserted document (content + hash) is byte-identical
+    const cleanDoc = idxClean.upserted[0]!;
+    const dirtyDoc = idxDirty.upserted[0]!;
+    expect(dirtyDoc.content).toBe(cleanDoc.content);
+    expect(dirtyDoc.contentHash).toBe(cleanDoc.contentHash);
+
+    // 3) no embargoed value or key survives anywhere in what leaves the indexer
+    const serialized = JSON.stringify({ embed: dirtyEmbedArg, doc: dirtyDoc });
+    expect(serialized).not.toContain(SENTINEL_NUM);
+    expect(serialized).not.toContain('2031-12-31');
+    expect(serialized).not.toContain('holdoutValidation');
+    expect(serialized).not.toContain('promotion');
+
+    // positive control: real profile content still made it through
+    expect(dirtyDoc.content).toContain('Buy on OI spike');
+  });
+});

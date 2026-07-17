@@ -214,4 +214,29 @@ describe('cycleScorecardHandler', () => {
     await expect(cycleScorecardHandler(task, services)).rejects.toThrow();
     expect(await services.cycleScorecards.findByCorrelation('c1')).toHaveLength(0);
   });
+
+  it('outcome embargo (S5): cycle.scorecard.built payload is exactly { correlationId }', async () => {
+    const services = makeServices();
+    await services.researchTasks.create(buildTask('bt-h1', 'h1', 'c-emb'));
+    await services.hypotheses.create(hypothesis('h1', { status: 'proxy_passed' }));
+    const run1 = backtestRun('run-h1', 'h1', 'c-emb');
+    await services.backtests.createSubmitted(run1);
+    await services.evaluations.create(evaluation('e-h1', 'run-h1', 'h1', 'PASS', T(1)));
+
+    await services.revisions.create(revision({
+      id: 'r-emb', strategyProfileId: 'p1', version: 1, status: 'accepted', hypothesisIds: ['h1'],
+    }));
+
+    const task = scorecardTask({
+      correlationId: 'c-emb', strategyProfileId: 'p1', sourceTaskId: 'src-1',
+      terminalOutcome: { kind: 'accepted', reason: 'pnl_improved' },
+      revisionId: 'r-emb', eligibleHypIds: ['h1'], consideredHypIds: ['h1'],
+    });
+    await cycleScorecardHandler(task, services);
+
+    const events = await services.events.listByTask(task.id);
+    const built = events.filter((e) => e.type === 'cycle.scorecard.built');
+    expect(built).toHaveLength(1);
+    expect(built[0]!.payload).toEqual({ correlationId: 'c-emb' });
+  });
 });

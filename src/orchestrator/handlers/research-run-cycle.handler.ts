@@ -19,6 +19,7 @@ import {
 } from '../../domain/hypothesis.ts';
 import type { ResearcherFocus, ActiveOverlayRuleSummary, ResearcherInput, DecisionExcerpt } from '../../ports/researcher.port.ts';
 import { toDecisionExcerpts } from '../../research/decision-excerpts.ts';
+import { sanitizeRetryFeedback } from '../../research/outcome-embargo.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
 import { buildMarketContextMath } from '../../research-math/market-context-math.ts';
 import { formatMarketContextMath } from '../../research-math/format-market-context-math.ts';
@@ -257,9 +258,22 @@ export const researchRunCycleHandler: WorkflowHandler = async (task, services) =
   }
 
   // R4: bounded decision-log excerpts for the suspicious losers (fail-soft, one page per distinct run).
-  const retryFeedback = payload.feedback
-    ? { decision: payload.feedback.decision, reasons: payload.feedback.reasons }
-    : undefined;
+  // Outcome Embargo (S2): re-sanitize on consumption — payloads persisted before the embargo
+  // (or hand-injected via /tasks) may carry non-allowlisted reason strings; they must never
+  // reach the researcher prompt.
+  let retryFeedback: { decision: string; reasons: string[] } | undefined;
+  if (payload.feedback) {
+    const sanitizedFeedback = sanitizeRetryFeedback(payload.feedback);
+    retryFeedback = { decision: sanitizedFeedback.feedback.decision, reasons: sanitizedFeedback.feedback.reasons };
+    if (sanitizedFeedback.removedKeys.length > 0) {
+      // Every scrub hit is evidenced — index paths only, never the dropped text.
+      await services.events.append({
+        id: randomUUID(), taskId: task.id, type: 'outcome_embargo.scrubbed',
+        payload: { site: 'researchRunCycle.retryFeedback', removedKeys: sanitizedFeedback.removedKeys },
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
 
   let decisionExcerpts: DecisionExcerpt[] = [];
   if (suspicious.length > 0) {
