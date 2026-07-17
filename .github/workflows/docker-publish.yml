@@ -70,7 +70,7 @@ jobs:
           cache-to: type=gha,mode=max
           # Disabled so the pushed reference is a single-manifest image (not an
           # OCI index wrapping a provenance/SBOM attestation manifest) — the
-          # verification step below inspects `.Config.Labels` directly, which
+          # verification step below inspects `.Image.Config.Labels` directly, which
           # requires a plain image manifest at the returned digest. Same policy
           # as the platform F1 workflow.
           provenance: false
@@ -79,4 +79,4 @@ jobs:
       - name: Verify immutable artifact metadata
         run: |
           test -n "${{ steps.build.outputs.digest }}"
-          test "$(docker buildx imagetools inspect "$IMAGE@${{ steps.build.outputs.digest }}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+          test "$(docker buildx imagetools inspect "$IMAGE@${{ steps.build.outputs.digest }}" --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
