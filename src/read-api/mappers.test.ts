@@ -109,7 +109,7 @@ describe('agent-event mapper (deny-by-default)', () => {
   it('outcome embargo: outcome_embargo.scrubbed payload is NOT exposed through the read API', () => {
     const dto = toAgentEventDto({
       id: 'e1', taskId: 't1', type: 'outcome_embargo.scrubbed',
-      payload: { site: 'wfo.gate1.baselineMetrics', removedKeys: ['holdoutSharpe'] },
+      payload: { site: 'wfo.gate1.baselineMetrics', removedKeys: ['<holdout>'] },
       createdAt: '2026-01-01T00:00:00Z',
     } as never);
     expect(dto.payloadSummary).toBeUndefined(); // deny-by-default PAYLOAD_ALLOWLIST

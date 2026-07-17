@@ -30,24 +30,40 @@ function segmentsOf(key: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-export function isEmbargoedMetricKey(key: string): boolean {
+/**
+ * The embargo CATEGORY a key belongs to (`holdout`, `promotion`, `out_of_sample`, …)
+ * or null if the key is not embargoed. The category is a fixed structural label
+ * derived only from the matched token/sequence — it deliberately discards the rest
+ * of the key so a categorical VALUE glued into the name (`promotion_REJECT`,
+ * `qualification_failed`, `holdout_winner_degradation`) can never be reported.
+ */
+export function embargoCategory(key: string): string | null {
   const segs = segmentsOf(key);
-  if (segs.some((s) => EMBARGOED_TOKENS.has(s))) return true;
-  for (const seq of EMBARGOED_SEQUENCES) {
-    for (let i = 0; i + seq.length <= segs.length; i += 1) {
-      if (seq.every((tok, j) => segs[i + j] === tok)) return true;
+  for (const s of segs) {
+    if (EMBARGOED_TOKENS.has(s)) return s;
+  }
+  for (let i = 0; i < segs.length; i += 1) {
+    for (const seq of EMBARGOED_SEQUENCES) {
+      if (i + seq.length <= segs.length && seq.every((tok, j) => segs[i + j] === tok)) {
+        return seq.join('_');
+      }
     }
   }
-  return false;
+  return null;
+}
+
+export function isEmbargoedMetricKey(key: string): boolean {
+  return embargoCategory(key) !== null;
 }
 
 export interface ScrubResult<T> {
   scrubbed: T;
   /**
-   * Dot/index-joined paths of removed keys — names only, NEVER values (spec §6.1).
-   * Digit runs inside key-name segments are masked to `#` so a dynamic key
-   * (date- or id-suffixed, e.g. `holdout_2031-12-31`) cannot carry an embargoed
-   * VALUE into the path. Array indices (`[0]`) are structural and preserved.
+   * Dot/index-joined paths of removed keys — structural only, NEVER values (spec §6.1).
+   * An embargoed key is reported as its fixed CATEGORY token (`<holdout>`,
+   * `<promotion>`, …), never the raw key, so a verdict/reason glued into the name
+   * (`promotion_REJECT`) cannot leak. Non-embargoed parent segments keep their
+   * name with digit runs masked to `#` (dates/ids); array indices (`[0]`) preserved.
    */
   removedKeys: string[];
 }
@@ -70,13 +86,15 @@ function scrubValue(value: unknown, path: string, removed: string[]): unknown {
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      // isEmbargoedMetricKey / out[] use the RAW key; only the reported path is masked.
-      const seg = maskKeySegment(k);
-      const p = path ? `${path}.${seg}` : seg;
-      if (isEmbargoedMetricKey(k)) {
-        removed.push(p);
+      // out[] uses the RAW key (data integrity); the reported path never does.
+      const category = embargoCategory(k);
+      if (category !== null) {
+        const label = `<${category}>`;
+        removed.push(path ? `${path}.${label}` : label);
         continue;
       }
+      const seg = maskKeySegment(k);
+      const p = path ? `${path}.${seg}` : seg;
       out[k] = scrubValue(v, p, removed);
     }
     return out;

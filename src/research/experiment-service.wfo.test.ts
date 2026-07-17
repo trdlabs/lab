@@ -657,7 +657,7 @@ describe('outcome embargo (S1)', () => {
     expect(JSON.stringify(scrubEvents)).not.toContain('2031-12-31');
     expect(scrubEvents[0]!.payload['site']).toBe('wfo.gate1.baselineMetrics');
     expect(scrubEvents[0]!.payload['removedKeys']).toEqual(
-      expect.arrayContaining(['holdoutSharpe', 'promotion', 'outOfSampleNetPnl', 'evaluationWindow']),
+      expect.arrayContaining(['<holdout>', '<promotion>', '<out_of_sample>', '<evaluation_window>']),
     );
   });
 });

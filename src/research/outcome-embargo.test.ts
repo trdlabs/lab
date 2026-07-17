@@ -38,7 +38,7 @@ describe('scrubMetricsBag', () => {
       netPnlUsd: 100, sharpe: 1.2, holdoutSharpe: 9.99, promotionVerdict: 1,
     });
     expect(scrubbed).toEqual({ netPnlUsd: 100, sharpe: 1.2 });
-    expect(removedKeys.sort()).toEqual(['holdoutSharpe', 'promotionVerdict']);
+    expect(removedKeys.sort()).toEqual(['<holdout>', '<promotion>']);
   });
 
   it('recurses into nested objects and arrays (comparison / topN shapes)', () => {
@@ -51,7 +51,7 @@ describe('scrubMetricsBag', () => {
       { paramsHash: 'a', point: { x: 1 }, metrics: { sharpe: 2 } },
       { paramsHash: 'b', point: { x: 2 }, metrics: { sharpe: 1 } },
     ]);
-    expect(removedKeys.sort()).toEqual(['[0].metrics.holdout_net_pnl', '[1].metrics.qualification']);
+    expect(removedKeys.sort()).toEqual(['[0].metrics.<holdout>', '[1].metrics.<qualification>']);
   });
 
   it('drops an embargoed subtree wholesale (a future promotion object)', () => {
@@ -60,7 +60,7 @@ describe('scrubMetricsBag', () => {
       promotion: { verdict: 'passed', evaluationWindow: { from: 'x', to: 'y' } },
     });
     expect(scrubbed).toEqual({ metrics: { sharpe: 1 } });
-    expect(removedKeys).toEqual(['promotion']);
+    expect(removedKeys).toEqual(['<promotion>']);
   });
 
   it('drops a TOP-LEVEL evaluationWindow subtree (window dates must not survive outside promotion)', () => {
@@ -69,22 +69,40 @@ describe('scrubMetricsBag', () => {
       evaluationWindow: { from: '2031-12-31T00:00:00Z', to: '2031-12-31T23:59:59Z' },
     });
     expect(scrubbed).toEqual({ sharpe: 1.2 });
-    expect(removedKeys).toEqual(['evaluationWindow']);
+    expect(removedKeys).toEqual(['<evaluation_window>']);
     expect(JSON.stringify(scrubbed)).not.toContain('2031-12-31');
   });
 
-  it('masks value-bearing digits in dynamic embargoed key paths — path never carries a value', () => {
+  it('reports an embargoed key as its category token, never the raw key — dynamic values never survive', () => {
     const { scrubbed, removedKeys } = scrubMetricsBag({
       periodBreakdown: { 'holdout_2031-12-31': 987654.321 },
       oos_987654: 1,
       sharpe: 1.2,
     });
     expect(scrubbed).toEqual({ periodBreakdown: {}, sharpe: 1.2 });
-    // dates / ids / sentinels inside a KEY name are masked to '#' in the reported path
-    expect(removedKeys.sort()).toEqual(['oos_#', 'periodBreakdown.holdout_#-#-#']);
+    // the embargoed leaf collapses to <category>; any date/id/value glued in is gone
+    expect(removedKeys.sort()).toEqual(['<oos>', 'periodBreakdown.<holdout>']);
     const s = JSON.stringify(removedKeys);
     expect(s).not.toContain('2031');
     expect(s).not.toContain('987654');
+  });
+
+  it('never reports a categorical verdict/reason glued into an embargoed key (zero-bit)', () => {
+    const { scrubbed, removedKeys } = scrubMetricsBag({
+      promotion_REJECT: 1,
+      qualification_failed: 1,
+      holdout_winner_degradation: 1,
+      holdout_failed: 'FAIL',
+      sharpe: 1.2,
+    });
+    expect(scrubbed).toEqual({ sharpe: 1.2 });
+    // each embargoed key is reduced to its fixed category — no verdict/reason leaks
+    expect(removedKeys.sort()).toEqual(['<holdout>', '<holdout>', '<promotion>', '<qualification>']);
+    const s = JSON.stringify(removedKeys);
+    expect(s).not.toContain('REJECT');
+    expect(s).not.toContain('failed');
+    expect(s).not.toContain('winner_degradation');
+    expect(s).not.toContain('FAIL');
   });
 
   it('passes primitives and null through untouched', () => {
