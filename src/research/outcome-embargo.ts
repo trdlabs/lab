@@ -59,18 +59,15 @@ export function isEmbargoedMetricKey(key: string): boolean {
 export interface ScrubResult<T> {
   scrubbed: T;
   /**
-   * Dot/index-joined paths of removed keys — structural only, NEVER values (spec §6.1).
-   * An embargoed key is reported as its fixed CATEGORY token (`<holdout>`,
-   * `<promotion>`, …), never the raw key, so a verdict/reason glued into the name
-   * (`promotion_REJECT`) cannot leak. Non-embargoed parent segments keep their
-   * name with digit runs masked to `#` (dates/ids); array indices (`[0]`) preserved.
+   * Structural-only paths of removed keys — NEVER values (spec §6.1). No raw
+   * object-key name ever appears: an embargoed key is reported as its fixed
+   * CATEGORY token (`<holdout>`, `<promotion>`, …), and every non-embargoed
+   * parent object-key is replaced by `*`. Array indices (`[0]`) are positional
+   * structure and are preserved. So a path is at most category + depth +
+   * array position, e.g. `[1].*.<holdout>` — carrying no metric magnitude,
+   * verdict, reason, window boundary, date, or id.
    */
   removedKeys: string[];
-}
-
-/** Mask digit runs in an object-key segment so a dynamic key never leaks a value. */
-function maskKeySegment(k: string): string {
-  return k.replace(/[0-9]+/g, '#');
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -93,8 +90,9 @@ function scrubValue(value: unknown, path: string, removed: string[]): unknown {
         removed.push(path ? `${path}.${label}` : label);
         continue;
       }
-      const seg = maskKeySegment(k);
-      const p = path ? `${path}.${seg}` : seg;
+      // Non-embargoed object keys collapse to `*`: a categorical/value-bearing
+      // parent name (verdict_REJECT, a date-keyed bucket) must never ride out.
+      const p = path ? `${path}.*` : '*';
       out[k] = scrubValue(v, p, removed);
     }
     return out;

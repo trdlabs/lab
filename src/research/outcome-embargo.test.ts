@@ -51,7 +51,7 @@ describe('scrubMetricsBag', () => {
       { paramsHash: 'a', point: { x: 1 }, metrics: { sharpe: 2 } },
       { paramsHash: 'b', point: { x: 2 }, metrics: { sharpe: 1 } },
     ]);
-    expect(removedKeys.sort()).toEqual(['[0].metrics.<holdout>', '[1].metrics.<qualification>']);
+    expect(removedKeys.sort()).toEqual(['[0].*.<holdout>', '[1].*.<qualification>']);
   });
 
   it('drops an embargoed subtree wholesale (a future promotion object)', () => {
@@ -80,11 +80,29 @@ describe('scrubMetricsBag', () => {
       sharpe: 1.2,
     });
     expect(scrubbed).toEqual({ periodBreakdown: {}, sharpe: 1.2 });
-    // the embargoed leaf collapses to <category>; any date/id/value glued in is gone
-    expect(removedKeys.sort()).toEqual(['<oos>', 'periodBreakdown.<holdout>']);
+    // embargoed leaf → <category>; non-embargoed parent → *; no date/id survives
+    expect(removedKeys.sort()).toEqual(['*.<holdout>', '<oos>']);
     const s = JSON.stringify(removedKeys);
     expect(s).not.toContain('2031');
     expect(s).not.toContain('987654');
+    expect(s).not.toContain('periodBreakdown');
+  });
+
+  it('never reports a categorical/value-bearing PARENT object-key name (arbitrary future bags)', () => {
+    const { scrubbed, removedKeys } = scrubMetricsBag({
+      verdict_REJECT: { promotion: 1 },
+      reason_winner_degradation: { holdoutSharpe: 1 },
+      runs: [{ '2031-12-31': { oosSharpe: 1 } }],
+    });
+    expect(scrubbed).toEqual({ verdict_REJECT: {}, reason_winner_degradation: {}, runs: [{ '2031-12-31': {} }] });
+    // every object-key parent collapses to * (array indices kept); leaves to <category>
+    expect(removedKeys.sort()).toEqual(['*.<holdout>', '*.<promotion>', '*[0].*.<oos>']);
+    const s = JSON.stringify(removedKeys);
+    expect(s).not.toContain('verdict');
+    expect(s).not.toContain('REJECT');
+    expect(s).not.toContain('reason');
+    expect(s).not.toContain('winner_degradation');
+    expect(s).not.toContain('2031-12-31');
   });
 
   it('never reports a categorical verdict/reason glued into an embargoed key (zero-bit)', () => {
