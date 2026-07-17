@@ -1,7 +1,7 @@
 // src/domain/strategy-llm-output.test.ts
 import { describe, it, expect } from 'vitest';
 import { StrategyLlmOutputSchema, llmToStrategyBuilderOutput } from './strategy-llm-output.ts';
-import { createModuleManifest } from '@trading-backtester/sdk/builder';
+import { createModuleManifest } from '@trdlabs/backtester-sdk/builder';
 
 /** OpenAI-strict-shaped fixture: all nullable fields present (possibly null). */
 const VALID_MANIFEST = {

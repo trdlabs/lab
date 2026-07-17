@@ -3,7 +3,7 @@
 // as selectResearchPlatform. The client is stateless HTTP so two instances are safe and equivalent.
 import type { RunTradesPort } from '../../ports/run-trades.port.ts';
 import { MockRunTradesAdapter } from './mock-run-trades.adapter.ts';
-import { BacktesterClient } from '@trading-backtester/sdk/client';
+import { BacktesterClient } from '@trdlabs/backtester-sdk/client';
 import { HttpBacktesterRunTradesAdapter } from './http-backtester.adapter.ts';
 
 export function selectRunTrades(integration: 'mock' | 'backtester'): RunTradesPort {

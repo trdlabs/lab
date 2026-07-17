@@ -2,7 +2,7 @@
 // local trading-backtester (dedup+coalesce+obs all ON) + local mock-platform historical fixture.
 // See trading-backtester CLAUDE.md task for full spec. Run: tsx scripts/enablement-sweep.mts
 import { readFileSync, writeFileSync } from 'node:fs';
-import { BacktesterClient } from '@trading-backtester/sdk/client';
+import { BacktesterClient } from '@trdlabs/backtester-sdk/client';
 
 const BASE_URL = 'http://127.0.0.1:18080';
 const TOKEN = 'dev-token';

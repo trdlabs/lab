@@ -5,7 +5,7 @@ import { makeServices } from '../../../test/support/make-services.ts';
 import { FakeStrategyBuilder } from '../../adapters/builder/fake-strategy-builder.ts';
 import { assembleStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { InMemoryStrategyRevisionRepository } from '../../adapters/repository/in-memory-strategy-revision.repository.ts';
-import { getAuthoringDoc } from '@trading-backtester/sdk/builder';
+import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import type { AppServices } from '../app-services.ts';
 import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';

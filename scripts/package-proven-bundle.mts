@@ -7,7 +7,7 @@
 // Запуск: SRC=<path-to-proven.mjs> OUT_DIR=<dir> npx tsx scripts/package-proven-bundle.mts
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { scaffoldStrategyBundle } from '@trading-backtester/sdk/builder';
+import { scaffoldStrategyBundle } from '@trdlabs/backtester-sdk/builder';
 
 const SRC = process.env['SRC'] ?? '/home/alexxxnikolskiy/long_oi-proven-bundle.mjs';
 const OUT_DIR = process.env['OUT_DIR'] ?? '/tmp';

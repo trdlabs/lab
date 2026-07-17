@@ -11,7 +11,7 @@ import { assembleStrategyBundle, type AssembledStrategyBundle } from '../domain/
  * `manifest` here is the FULL createModuleManifest() output (AssembledStrategyBundle['manifest']),
  * not the narrower StrategyManifestMeta input createModuleManifest was originally called with.
  * createModuleManifest is a pure function of its named input fields (see
- * @trading-backtester/sdk/builder), and ModuleManifest is structurally a superset of
+ * @trdlabs/backtester-sdk/builder), and ModuleManifest is structurally a superset of
  * CreateModuleManifestInput (every required input field is present, computed-only output fields
  * like contractVersion/bundleContractVersion are simply ignored on re-read) — so re-passing the
  * persisted manifest back in as manifestMeta reproduces the identical manifest object.

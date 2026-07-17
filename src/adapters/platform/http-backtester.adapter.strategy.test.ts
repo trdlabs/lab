@@ -7,8 +7,8 @@ import type {
   RunSubmitRequest as BtRunSubmitRequest,
   ValidationReport as BtValidationReport,
   RegistryDescriptor,
-} from '@trading-backtester/sdk/contracts';
-import { createModuleManifest } from '@trading-backtester/sdk/builder';
+} from '@trdlabs/backtester-sdk/contracts';
+import { createModuleManifest } from '@trdlabs/backtester-sdk/builder';
 import type { RunJobHandle } from '../../ports/research-platform.port.ts';
 import type { BacktesterClientLike } from './http-backtester.adapter.ts';
 import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';

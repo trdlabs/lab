@@ -17,7 +17,7 @@ this file keeps only the lab-local slice (registry rule: no plan duplication).
   Lab part: `src/research/proposed-risk-profile.ts` stays a *proposal* (CAL assigns final
   sizing); surface `no_capital_slot` rejections in the paper flow instead of swallowing them.
 - [b2c-sdk-consolidation](../../../control-center/docs/delivery/initiatives/b2c-sdk-consolidation.md) — `proposed`.
-  **Step 0 lives here:** realign lab off the pinned `@trading-backtester/sdk` v0.7.0 tarball
+  **Step 0 lives here:** realign lab off the pinned `@trdlabs/backtester-sdk` v0.7.0 tarball
   to the current version (small PR, before any contract changes); later migrate imports to
   `@trdlabs/sdk/backtester`.
 - [b2c-ops-hardening](../../../control-center/docs/delivery/initiatives/b2c-ops-hardening.md) — `proposed`.

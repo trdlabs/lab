@@ -4,7 +4,7 @@
 // backtester repo. Needs the backtester running with its Docker sandbox available.
 
 import { describe, it, expect } from 'vitest';
-import { BacktesterClient } from '@trading-backtester/sdk/client';
+import { BacktesterClient } from '@trdlabs/backtester-sdk/client';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { HttpBacktesterAdapter } from './http-backtester.adapter.ts';
 

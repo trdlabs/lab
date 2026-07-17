@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trading-backtester/sdk/client';
+import { BacktesterConflictError, BacktesterError, BacktesterRateLimitError } from '@trdlabs/backtester-sdk/client';
 import type {
   CapabilityDescriptor as BtCapabilityDescriptor,
   DatasetDescriptor as BtDatasetDescriptor,
@@ -9,7 +9,7 @@ import type {
   ValidationReport as BtValidationReport,
   ModuleValidateRequest as BtModuleValidateRequest,
   RegistryDescriptor,
-} from '@trading-backtester/sdk/contracts';
+} from '@trdlabs/backtester-sdk/contracts';
 import type { RunJobHandle, SubmitOverlayRunOptions, SubmitStrategyResearchRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import type { AssembledStrategyBundle } from '../../domain/strategy-bundle.ts';

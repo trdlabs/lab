@@ -32,9 +32,9 @@ importers:
       '@openrouter/ai-sdk-provider':
         specifier: ^2.9.1
         version: 2.9.1(ai@6.0.201(zod@3.25.76))(zod@3.25.76)
-      '@trading-backtester/sdk':
-        specifier: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz
-        version: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz
+      '@trdlabs/backtester-sdk':
+        specifier: 0.8.0
+        version: 0.8.0
       '@trdlabs/sdk':
         specifier: 0.10.0
         version: 0.10.0
@@ -1137,9 +1137,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz':
-    resolution: {tarball: https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz}
-    version: 0.7.0
+  '@trdlabs/backtester-sdk@0.8.0':
+    resolution: {integrity: sha512-MXOCAcfqJTFOSBNAViBfD3bwRlUghCGqaESu9TSpMmKotYJ35idLJyqx1qS9rvlgEDZ4vwob8QAUkrk9c3b4Dg==}
 
   '@trdlabs/sdk@0.10.0':
     resolution: {integrity: sha512-olJmhzC1ilaCxwf5G9UukOQ3LMhkWi6Jj/ZWhp6H2BofGLG1qYqBc/gQyqJgssbjXVk5TwyiRJ3mxgjU1fcqTg==}
@@ -3287,7 +3286,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@trading-backtester/sdk@https://github.com/alexnikolskiy/trading-backtester/releases/download/sdk-v0.7.0/trading-backtester-sdk-0.7.0.tgz':
+  '@trdlabs/backtester-sdk@0.8.0':
     dependencies:
       decimal.js: 10.6.0
 

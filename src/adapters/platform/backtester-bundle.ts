@@ -5,8 +5,8 @@
 // `overlay` kind. The canonical executable bundle is built via the SDK builder so it is exactly the
 // inline bundle the service accepts (canonical file ordering, frozen, pinned bundleContractVersion).
 
-import { createModuleBundle, createModuleManifest } from '@trading-backtester/sdk/builder';
-import type { ModuleBundle as BacktesterModuleBundle } from '@trading-backtester/sdk/contracts';
+import { createModuleBundle, createModuleManifest } from '@trdlabs/backtester-sdk/builder';
+import type { ModuleBundle as BacktesterModuleBundle } from '@trdlabs/backtester-sdk/contracts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
 import { OVERLAY_INTERCEPTION_POINT } from '../../domain/overlay-manifest-meta.ts';
 

@@ -1,4 +1,4 @@
-import type { CreateModuleManifestInput } from '@trading-backtester/sdk/builder';
+import type { CreateModuleManifestInput } from '@trdlabs/backtester-sdk/builder';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { AgentCallOpts } from './agent-call-opts.ts';
 

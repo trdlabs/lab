@@ -8,7 +8,7 @@
 //     pnpm vitest run src/adapters/platform/strategy-route-equivalence.integration.test.ts
 
 import { describe, it, expect } from 'vitest';
-import { BacktesterClient } from '@trading-backtester/sdk/client';
+import { BacktesterClient } from '@trdlabs/backtester-sdk/client';
 import { FakeStrategyBuilder } from '../builder/fake-strategy-builder.ts';
 import { assembleStrategyBundle } from '../../domain/strategy-bundle.ts';
 import { validateStrategyBundle } from '../../validation/strategy-bundle-validator.ts';
