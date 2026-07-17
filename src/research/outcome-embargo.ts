@@ -43,8 +43,18 @@ export function isEmbargoedMetricKey(key: string): boolean {
 
 export interface ScrubResult<T> {
   scrubbed: T;
-  /** Dot/index-joined paths of removed keys — names only, NEVER values (spec §6.1). */
+  /**
+   * Dot/index-joined paths of removed keys — names only, NEVER values (spec §6.1).
+   * Digit runs inside key-name segments are masked to `#` so a dynamic key
+   * (date- or id-suffixed, e.g. `holdout_2031-12-31`) cannot carry an embargoed
+   * VALUE into the path. Array indices (`[0]`) are structural and preserved.
+   */
   removedKeys: string[];
+}
+
+/** Mask digit runs in an object-key segment so a dynamic key never leaks a value. */
+function maskKeySegment(k: string): string {
+  return k.replace(/[0-9]+/g, '#');
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -60,7 +70,9 @@ function scrubValue(value: unknown, path: string, removed: string[]): unknown {
   if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      const p = path ? `${path}.${k}` : k;
+      // isEmbargoedMetricKey / out[] use the RAW key; only the reported path is masked.
+      const seg = maskKeySegment(k);
+      const p = path ? `${path}.${seg}` : seg;
       if (isEmbargoedMetricKey(k)) {
         removed.push(p);
         continue;

@@ -73,6 +73,20 @@ describe('scrubMetricsBag', () => {
     expect(JSON.stringify(scrubbed)).not.toContain('2031-12-31');
   });
 
+  it('masks value-bearing digits in dynamic embargoed key paths — path never carries a value', () => {
+    const { scrubbed, removedKeys } = scrubMetricsBag({
+      periodBreakdown: { 'holdout_2031-12-31': 987654.321 },
+      oos_987654: 1,
+      sharpe: 1.2,
+    });
+    expect(scrubbed).toEqual({ periodBreakdown: {}, sharpe: 1.2 });
+    // dates / ids / sentinels inside a KEY name are masked to '#' in the reported path
+    expect(removedKeys.sort()).toEqual(['oos_#', 'periodBreakdown.holdout_#-#-#']);
+    const s = JSON.stringify(removedKeys);
+    expect(s).not.toContain('2031');
+    expect(s).not.toContain('987654');
+  });
+
   it('passes primitives and null through untouched', () => {
     expect(scrubMetricsBag(42).scrubbed).toBe(42);
     expect(scrubMetricsBag('s').scrubbed).toBe('s');
