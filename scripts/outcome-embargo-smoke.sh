@@ -31,6 +31,8 @@
 # Optional env:
 #   MODE (positional $1)   — compose overlay / project suffix: vps (default) | demo | local.
 #   READ_API_PORT          — internal read-API port (default 3100), read_api_canary only.
+#                             Digits only, 1-65535 — it is interpolated into the in-container
+#                             `node -e` program, same as SMOKE_TASK_ID.
 #   PRIMARY_MARKER          — override generation_lane_check's fixture marker.
 #
 # Two invocation modes for read_api_canary:
@@ -81,6 +83,38 @@ fail() {
 [ -n "$MARKERS_RAW" ] || fail "SMOKE_HELDOUT_MARKERS is required (comma-separated)"
 [ -n "$READ_TOKEN" ] || fail "SMOKE_READ_TOKEN (or TRADING_LAB_READ_TOKEN) is required"
 
+# MODE picks the compose overlay + env file (docker-compose.$MODE.yml / .env.$MODE) and the
+# compose project label generation_lane_check discovers containers by — constrain it to the
+# three shipped overlays so it can never name an arbitrary file path or project.
+case "$MODE" in
+  vps|demo|local) ;;
+  *) fail "invalid mode '$MODE' (expected vps|demo|local)" ;;
+esac
+
+# TASK_ID is interpolated into a URL and — in deployed-stack mode — into the `node -e`
+# program string executed inside the ingress container. Constrain it to id-safe characters
+# (uuids, slugs) so it can never inject JS, quote out of the program string, or append extra
+# URL path/query segments.
+if ! [[ "$TASK_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+  fail "SMOKE_TASK_ID must match ^[A-Za-z0-9._-]{1,128}\$ (got an id with unsupported characters)"
+fi
+# The id is meant to be ONE URL path segment. A bare "." or ".." passes the charset check but
+# is normalized away by URL resolution (Node's fetch, curl, any browser), so
+# /v1/tasks/../completion-summary silently becomes a DIFFERENT endpoint — the canary would
+# then report on a path it was never pointed at. Rejected explicitly (dots inside a longer id
+# are fine — without a "/" they cannot traverse).
+case "$TASK_ID" in
+  .|..) fail "SMOKE_TASK_ID must not be '.' or '..' — the id is a single URL path segment and those are normalized away" ;;
+esac
+
+# READ_API_PORT is interpolated into the same `node -e` program string executed inside the
+# ingress container, so it is the same injection surface as TASK_ID. Digits only, and a real
+# TCP port range — validated here, before any docker invocation.
+PORT="${READ_API_PORT:-3100}"
+if ! [[ "$PORT" =~ ^[0-9]{1,5}$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  fail "READ_API_PORT must be digits only in the range 1-65535"
+fi
+
 READ_PATH="/v1/tasks/${TASK_ID}/completion-summary"
 
 # fetch_body: prints the response body to stdout on HTTP 200, otherwise prints a diagnostic
@@ -107,11 +141,10 @@ fetch_body() {
     # Mode 2: exec into the deployed ingress container — the read-API port is internal-only.
     # `-e READ_TOKEN` (bare — no `=value`) forwards the already-exported value from this
     # process's environment; it never appears in the docker compose invocation's own argv.
-    local compose port
+    local compose
     compose="docker compose -f docker-compose.yml -f docker-compose.${MODE}.yml --env-file .env.${MODE}"
-    port="${READ_API_PORT:-3100}"
     $compose exec -T -e READ_TOKEN ingress node -e "
-      fetch('http://localhost:${port}${READ_PATH}', { headers: { authorization: 'Bearer ' + process.env.READ_TOKEN } })
+      fetch('http://localhost:${PORT}${READ_PATH}', { headers: { authorization: 'Bearer ' + process.env.READ_TOKEN } })
         .then(async (r) => {
           const body = await r.text();
           if (r.status !== 200) { process.stderr.write('read path returned HTTP ' + r.status + '\n'); process.exit(1); }
@@ -128,6 +161,7 @@ fetch_body() {
 # canary, an unexpected appearance of the configured markers.
 read_api_canary() {
   local body leaked marker
+  local -a markers
   if ! body="$(fetch_body)"; then
     exit 1
   fi

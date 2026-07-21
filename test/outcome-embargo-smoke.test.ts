@@ -23,7 +23,7 @@
 // exec into in this mode — see the script's header comment).
 import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,9 +90,9 @@ function stopServer(server: ServerType): Promise<void> {
 // event loop. A synchronous child-process call would block that loop while curl (a
 // separate process) tries to connect to it — a self-deadlock masked only by curl's own
 // --max-time timeout. Async spawn keeps the loop free to service the HTTP server.
-function runScript(env: Record<string, string>): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runScript(env: Record<string, string>, args: string[] = []): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn('bash', [SCRIPT_PATH], { env: { ...process.env, ...env } });
+    const child = spawn('bash', [SCRIPT_PATH, ...args], { env: { ...process.env, ...env } });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += String(d); });
@@ -179,6 +179,31 @@ describe('outcome-embargo-smoke.sh — read_api_canary (secondary, operator-surf
     expect(result.status).not.toBe(0);
   });
 
+  // SMOKE_TASK_ID lands in a URL and, in deployed-stack mode, inside the `node -e` program
+  // string run in the ingress container; MODE picks the compose overlay/env file and the
+  // project label. Both are rejected up front rather than interpolated blind.
+  it('rejects a SMOKE_TASK_ID with characters that could break out of the URL / node -e program', async () => {
+    const result = await runScript({
+      SMOKE_BASE_URL: 'http://127.0.0.1:1',
+      SMOKE_READ_TOKEN: TOKEN,
+      SMOKE_TASK_ID: "x'+process.env.TRADING_LAB_READ_TOKEN+'",
+      SMOKE_HELDOUT_MARKERS: HELDOUT_MARKERS.join(','),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SMOKE_TASK_ID');
+  });
+
+  it('rejects an unsupported mode before touching any compose file', async () => {
+    const result = await runScript({
+      SMOKE_BASE_URL: 'http://127.0.0.1:1',
+      SMOKE_READ_TOKEN: TOKEN,
+      SMOKE_TASK_ID: 'clean-1',
+      SMOKE_HELDOUT_MARKERS: HELDOUT_MARKERS.join(','),
+    }, ['../../etc']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('invalid mode');
+  });
+
   it('rejects missing required arguments before ever reaching the network', async () => {
     const result = await runScript({
       SMOKE_BASE_URL: 'http://127.0.0.1:1',
@@ -188,6 +213,80 @@ describe('outcome-embargo-smoke.sh — read_api_canary (secondary, operator-surf
     });
     expect(result.status).not.toBe(0);
     expect(result.stderr.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Input validation. SMOKE_TASK_ID and READ_API_PORT are both interpolated into the `node -e`
+// program string the script executes INSIDE the deployed ingress container (and into the read
+// URL), so they must be rejected before anything reaches docker. These cases therefore run in
+// deployed-stack mode (no SMOKE_BASE_URL) with a fake `docker` first on PATH that records the
+// fact it was called: a passing case must leave that marker, a rejected one must not.
+describe('outcome-embargo-smoke.sh — input validation (before any docker invocation)', () => {
+  let fakeDir: string | undefined;
+
+  afterEach(() => {
+    if (fakeDir) {
+      rmSync(fakeDir, { recursive: true, force: true });
+      fakeDir = undefined;
+    }
+  });
+
+  function withFakeDocker(): { bin: string; marker: string } {
+    fakeDir = mkdtempSync(path.join(tmpdir(), 'smoke-fake-docker-'));
+    const marker = path.join(fakeDir, 'docker-was-called');
+    const bin = path.join(fakeDir, 'docker');
+    writeFileSync(bin, `#!/usr/bin/env bash\ntouch ${JSON.stringify(marker)}\nexit 0\n`);
+    chmodSync(bin, 0o755);
+    return { bin: fakeDir, marker };
+  }
+
+  function runDeployedMode(over: Record<string, string>) {
+    const { bin, marker } = withFakeDocker();
+    return runScript({
+      SMOKE_READ_TOKEN: TOKEN,
+      SMOKE_TASK_ID: 'clean-1',
+      SMOKE_HELDOUT_MARKERS: HELDOUT_MARKERS.join(','),
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      ...over,
+    }).then((result) => ({ ...result, dockerWasCalled: existsSync(marker) }));
+  }
+
+  it('rejects a READ_API_PORT carrying a JS fragment (it lands inside the in-container node -e program)', async () => {
+    const result = await runDeployedMode({ READ_API_PORT: "3100'+process.env.TRADING_LAB_READ_TOKEN+'" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('READ_API_PORT');
+    expect(result.dockerWasCalled).toBe(false);
+  });
+
+  it('rejects READ_API_PORT=0 (below the valid TCP range)', async () => {
+    const result = await runDeployedMode({ READ_API_PORT: '0' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('READ_API_PORT');
+    expect(result.dockerWasCalled).toBe(false);
+  });
+
+  it('rejects READ_API_PORT=65536 (above the valid TCP range)', async () => {
+    const result = await runDeployedMode({ READ_API_PORT: '65536' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('READ_API_PORT');
+    expect(result.dockerWasCalled).toBe(false);
+  });
+
+  it('accepts a valid READ_API_PORT and proceeds to the deployed-stack checks', async () => {
+    const result = await runDeployedMode({ READ_API_PORT: '3100' });
+    // The fake docker reports no worker container, so the run still fails — but it fails in
+    // generation_lane_check, i.e. AFTER validation, having actually reached docker.
+    expect(result.dockerWasCalled).toBe(true);
+    expect(result.stderr).toContain('generation_lane_check');
+    expect(result.stderr).not.toContain('READ_API_PORT');
+  });
+
+  it.each(['.', '..'])('rejects SMOKE_TASK_ID=%j (URL path segments, normalized away by fetch/curl)', async (taskId) => {
+    const result = await runDeployedMode({ SMOKE_TASK_ID: taskId });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SMOKE_TASK_ID');
+    expect(result.dockerWasCalled).toBe(false);
   });
 });
 

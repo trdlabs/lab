@@ -27,8 +27,12 @@ CALLS="$TMP_DIR/calls.log"
 # Fake docker: logs argv, then returns just enough canned data for the happy-path plumbing
 # in unit-health.sh / unit-deploy.sh to proceed without a real daemon.
 #   - `docker compose ...` (pull/up) always succeeds UNLESS FAKE_MIGRATE_FAIL=1 and the
-#     invocation is the migrate-only run-to-completion step (never the ingress/worker
-#     recreate, which always contains "-d").
+#     invocation is the migrate-only run-to-completion step (matched on --exit-code-from,
+#     which only that step passes — never the ingress/worker recreate).
+#     NOTE: the fake returns the exit status directly, so it cannot reproduce the real
+#     Compose behaviour that made --exit-code-from necessary (attached `up` exits 0 even
+#     when the container exits non-zero). Step 2b below therefore asserts on the FLAG, not
+#     only on the propagated status.
 #   - `docker ps -a -q --filter ...` -> one fake container id.
 #   - `docker inspect --format ... <cid>` -> canned Health/State/Image fields.
 #   - `docker exec <cid> node -e "..."` -> succeeds UNLESS FAKE_EXEC_FAIL=1.
@@ -38,9 +42,9 @@ printf '%s\n' "$*" >> "$FAKE_DOCKER_CALLS"
 case "$1" in
   compose)
     case "$*" in
-      *"--force-recreate migrate"*)
+      *"--exit-code-from migrate"*)
         # The migrate-only (non -d) run-to-completion step. Never matches the
-        # ingress/worker recreate, which always has "-d ... ingress worker".
+        # ingress/worker recreate, which passes no --exit-code-from.
         if [ "${FAKE_MIGRATE_FAIL:-0}" = "1" ]; then exit 1; fi
         ;;
     esac
@@ -97,10 +101,10 @@ else
   bad "expected 'pull migrate ingress worker' in argv log"
 fi
 
-if grep -F -- "up --no-deps --force-recreate migrate" "$CALLS" >/dev/null; then
-  ok "compose up runs migrate to completion (no -d)"
+if grep -F -- "up --no-deps --force-recreate --exit-code-from migrate migrate" "$CALLS" >/dev/null; then
+  ok "compose up runs migrate to completion (no -d) with --exit-code-from"
 else
-  bad "expected 'up --no-deps --force-recreate migrate' in argv log"
+  bad "expected 'up --no-deps --force-recreate --exit-code-from migrate migrate' in argv log"
 fi
 
 if grep -F -- "up -d --no-deps --force-recreate ingress worker" "$CALLS" >/dev/null; then
@@ -146,7 +150,7 @@ fi
 
 # Ordering: pull line must precede the migrate-only line must precede the ingress+worker line.
 PULL_LINE="$(grep -n -F -- "pull migrate ingress worker" "$CALLS" | head -n1 | cut -d: -f1 || true)"
-MIGRATE_LINE="$(grep -n -F -- "up --no-deps --force-recreate migrate" "$CALLS" | head -n1 | cut -d: -f1 || true)"
+MIGRATE_LINE="$(grep -n -F -- "up --no-deps --force-recreate --exit-code-from migrate migrate" "$CALLS" | head -n1 | cut -d: -f1 || true)"
 RECREATE_LINE="$(grep -n -F -- "up -d --no-deps --force-recreate ingress worker" "$CALLS" | head -n1 | cut -d: -f1 || true)"
 if [ -n "$PULL_LINE" ] && [ -n "$MIGRATE_LINE" ] && [ -n "$RECREATE_LINE" ] \
    && [ "$PULL_LINE" -lt "$MIGRATE_LINE" ] && [ "$MIGRATE_LINE" -lt "$RECREATE_LINE" ]; then
@@ -175,6 +179,29 @@ if printf '%s' "$OUT" | grep -Fq '"ok":false'; then
   ok "migrate-failure prints ok:false JSON"
 else
   bad "expected ok:false JSON on migrate failure, got: $OUT"
+fi
+
+# ---------------------------------------------------------------------------
+# Regression guard for the real-Compose behaviour the mock cannot reproduce: attached
+# `docker compose up <service>` returns 0 even when the container exits non-zero, so the
+# migrate step MUST carry --exit-code-from migrate or a failed migration is invisible and
+# ingress/worker get recreated against a half-migrated schema.
+step "2b/12 unit-deploy.sh: the migrate step passes --exit-code-from (failed migrations must surface)"
+: > "$CALLS"
+if bash "$SCRIPT_DIR/unit-deploy.sh" --env vps_staging --unit U6 --digest "$GOOD_DIGEST" --deploy-id "$DEPLOY_ID" >/dev/null 2>&1; then
+  MIGRATE_ARGV="$(grep -F -- " up --no-deps --force-recreate " "$CALLS" | head -n1 || true)"
+  if printf '%s' "$MIGRATE_ARGV" | grep -F -- "--exit-code-from migrate" >/dev/null; then
+    ok "migrate step passes --exit-code-from migrate"
+  else
+    bad "migrate step must pass --exit-code-from migrate, got: $MIGRATE_ARGV"
+  fi
+  if grep -F -- "up -d --no-deps --force-recreate ingress worker" "$CALLS" | grep -F -- "--exit-code-from" >/dev/null; then
+    bad "the ingress/worker recreate must NOT pass --exit-code-from (it is detached)"
+  else
+    ok "ingress/worker recreate carries no --exit-code-from"
+  fi
+else
+  bad "unit-deploy.sh happy path exited non-zero"
 fi
 
 # ---------------------------------------------------------------------------
