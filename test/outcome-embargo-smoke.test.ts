@@ -90,9 +90,9 @@ function stopServer(server: ServerType): Promise<void> {
 // event loop. A synchronous child-process call would block that loop while curl (a
 // separate process) tries to connect to it — a self-deadlock masked only by curl's own
 // --max-time timeout. Async spawn keeps the loop free to service the HTTP server.
-function runScript(env: Record<string, string>): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runScript(env: Record<string, string>, args: string[] = []): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn('bash', [SCRIPT_PATH], { env: { ...process.env, ...env } });
+    const child = spawn('bash', [SCRIPT_PATH, ...args], { env: { ...process.env, ...env } });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += String(d); });
@@ -177,6 +177,31 @@ describe('outcome-embargo-smoke.sh — read_api_canary (secondary, operator-surf
     });
 
     expect(result.status).not.toBe(0);
+  });
+
+  // SMOKE_TASK_ID lands in a URL and, in deployed-stack mode, inside the `node -e` program
+  // string run in the ingress container; MODE picks the compose overlay/env file and the
+  // project label. Both are rejected up front rather than interpolated blind.
+  it('rejects a SMOKE_TASK_ID with characters that could break out of the URL / node -e program', async () => {
+    const result = await runScript({
+      SMOKE_BASE_URL: 'http://127.0.0.1:1',
+      SMOKE_READ_TOKEN: TOKEN,
+      SMOKE_TASK_ID: "x'+process.env.TRADING_LAB_READ_TOKEN+'",
+      SMOKE_HELDOUT_MARKERS: HELDOUT_MARKERS.join(','),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('SMOKE_TASK_ID');
+  });
+
+  it('rejects an unsupported mode before touching any compose file', async () => {
+    const result = await runScript({
+      SMOKE_BASE_URL: 'http://127.0.0.1:1',
+      SMOKE_READ_TOKEN: TOKEN,
+      SMOKE_TASK_ID: 'clean-1',
+      SMOKE_HELDOUT_MARKERS: HELDOUT_MARKERS.join(','),
+    }, ['../../etc']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('invalid mode');
   });
 
   it('rejects missing required arguments before ever reaching the network', async () => {

@@ -186,11 +186,23 @@ else
   fail "docker compose pull failed" "\"pull\":\"fail\",\"migrate\":\"skip\",\"recreate\":\"skip\""
 fi
 
-# migrate is a one-shot (restart: "no") service — `up` (no -d) runs it to completion and
-# returns its exit code, so a failed migration aborts BEFORE ingress/worker ever start
-# against a half-migrated schema.
-echo "[unit-deploy] (2/3) up --no-deps --force-recreate migrate (run-to-completion)..." >&2
-if dc up --no-deps --force-recreate migrate >&2; then
+# migrate is a one-shot (restart: "no") service — `up` (no -d) runs it to completion, so a
+# failed migration aborts BEFORE ingress/worker ever start against a half-migrated schema.
+#
+# --exit-code-from migrate is REQUIRED for that abort to actually happen: attached
+# `docker compose up <service>` exits 0 even when the container exits non-zero (verified on
+# Compose v5.1.4 — a service exiting 7 still yielded `up` exit status 0). Without this flag
+# a failed migration reads as "migrate":"pass" and the deploy proceeds. It implies
+# --abort-on-container-exit, whose scope is only the services named in THIS invocation:
+# verified that a already-running `worker` in the same compose project keeps running when
+# the attached migrate container exits (both 0 and non-zero) — U6's targeted-recreate and
+# never-touch-other-services invariants still hold.
+#
+# `up` (not `run --rm`) on purpose: `run --rm` deletes the one-shot container, and
+# unit-health.sh's migrate check asserts on the *persisted* migrate container's last exit
+# code (docker inspect). `run --rm` would leave that check with nothing to inspect.
+echo "[unit-deploy] (2/3) up --no-deps --force-recreate --exit-code-from migrate (run-to-completion)..." >&2
+if dc up --no-deps --force-recreate --exit-code-from migrate migrate >&2; then
   MIGRATE_CHECK="pass"
 else
   fail "migrate failed" "\"pull\":\"pass\",\"migrate\":\"fail\",\"recreate\":\"skip\""

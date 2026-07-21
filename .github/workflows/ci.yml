@@ -30,3 +30,11 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm check
+
+      # U6 deploy/health primitives (F5a). Runs against a fake `docker` on PATH — no daemon,
+      # no network, no host mutation — so the shell contract (targeted recreate, digest-only
+      # input, office never named, .env.vps persistence) is guarded on every PR like the
+      # TypeScript suite. Without this the primitives were only ever run by hand.
+      - name: U6 primitive contract tests
+        working-directory: trading-lab
+        run: bash infra/scripts/test-unit-primitives.sh

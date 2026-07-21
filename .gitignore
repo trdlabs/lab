@@ -10,6 +10,9 @@ dist
 .env.demo
 .env.local
 .env.vps
+# infra/scripts/unit-deploy.sh writes .env.vps atomically via mktemp .env.vps.XXXXXX —
+# those temp copies hold the same secrets and must never be committed if one is orphaned.
+.env.vps.??????
 
 # Git worktrees (managed by tooling)
 .worktrees/

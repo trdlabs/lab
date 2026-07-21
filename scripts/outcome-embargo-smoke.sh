@@ -81,6 +81,22 @@ fail() {
 [ -n "$MARKERS_RAW" ] || fail "SMOKE_HELDOUT_MARKERS is required (comma-separated)"
 [ -n "$READ_TOKEN" ] || fail "SMOKE_READ_TOKEN (or TRADING_LAB_READ_TOKEN) is required"
 
+# MODE picks the compose overlay + env file (docker-compose.$MODE.yml / .env.$MODE) and the
+# compose project label generation_lane_check discovers containers by — constrain it to the
+# three shipped overlays so it can never name an arbitrary file path or project.
+case "$MODE" in
+  vps|demo|local) ;;
+  *) fail "invalid mode '$MODE' (expected vps|demo|local)" ;;
+esac
+
+# TASK_ID is interpolated into a URL and — in deployed-stack mode — into the `node -e`
+# program string executed inside the ingress container. Constrain it to id-safe characters
+# (uuids, slugs) so it can never inject JS, quote out of the program string, or append extra
+# URL path/query segments.
+if ! [[ "$TASK_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+  fail "SMOKE_TASK_ID must match ^[A-Za-z0-9._-]{1,128}\$ (got an id with unsupported characters)"
+fi
+
 READ_PATH="/v1/tasks/${TASK_ID}/completion-summary"
 
 # fetch_body: prints the response body to stdout on HTTP 200, otherwise prints a diagnostic
@@ -128,6 +144,7 @@ fetch_body() {
 # canary, an unexpected appearance of the configured markers.
 read_api_canary() {
   local body leaked marker
+  local -a markers
   if ! body="$(fetch_body)"; then
     exit 1
   fi
