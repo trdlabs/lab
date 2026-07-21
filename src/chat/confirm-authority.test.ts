@@ -178,4 +178,28 @@ describe('consumeConfirmation — authority boundary', () => {
     expect(c.queue.queued).toHaveLength(0);
     expect((await c.proposals.findById('p1'))?.status).toBe('pending');
   });
+
+  // TOCTOU defense-in-depth: the port does not guarantee findById and confirmPending observe the
+  // same object. A racing/inconsistent adapter could pass a safe (or empty) precheck and still
+  // hand executeConfirmedProposal an execution-capable proposal. The second gate must catch it.
+  it('re-authorizes the confirmPending result even when the precheck saw a safe/absent proposal', async () => {
+    const c = ctx();
+    // findById → null (precheck sees nothing to judge); confirmPending → an unsafe confirmed_now.
+    const skewed: typeof c.d.proposals = {
+      ...c.d.proposals,
+      findById: async () => null,
+      confirmPending: async () => ({ kind: 'confirmed_now', proposal: proposal({ taskType: 'paper.start' }) }),
+    };
+    const seen: string[] = [];
+    const ev = async (type: string): Promise<void> => { seen.push(type); };
+
+    await expect(
+      consumeConfirmation({ proposalId: 'p1', decision: 'confirm', session: session() }, { ...c.d, proposals: skewed }, ev, now),
+    ).rejects.toBeInstanceOf(ExecutionAuthorityError);
+
+    // executeConfirmedProposal never ran (it enqueues via createAndEnqueueTask), and the refusal
+    // is still audited.
+    expect(c.queue.queued).toHaveLength(0);
+    expect(seen).toContain('chat.proposal.authority_denied');
+  });
 });

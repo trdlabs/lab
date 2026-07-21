@@ -112,26 +112,40 @@ export async function consumeConfirmation(
     });
   }
 
-  // Authority check BEFORE confirmPending (SEC-O4). It runs here, not next to
-  // executeConfirmedProposal, because confirmPending is itself a side effect: refusing after it
-  // would burn a legitimate proposal into 'confirmed' and wedge the session. findById is
-  // unscoped, so only a proposal belonging to THIS session is judged — anything else falls
-  // through to confirmPending, which already answers not_found without leaking that it exists.
-  const candidate = await deps.proposals.findById(proposalId);
-  if (candidate && candidate.sessionId === sid && candidate.status === 'pending') {
+  // Authority chokepoint (SEC-O4). Audits then rethrows an ExecutionAuthorityError; other errors
+  // pass through untouched.
+  const authorize = async (proposal: ActionProposal): Promise<void> => {
     try {
-      assertConfirmableProposal(candidate);
+      assertConfirmableProposal(proposal);
     } catch (err) {
       if (err instanceof ExecutionAuthorityError) {
-        await ev('chat.proposal.authority_denied', { proposalId, sessionId: sid, action: candidate.action, taskType: candidate.task?.taskType });
+        await ev('chat.proposal.authority_denied', { proposalId, sessionId: sid, action: proposal.action, taskType: proposal.task?.taskType });
       }
       throw err;
     }
+  };
+
+  // First gate, BEFORE confirmPending: this is what keeps a normally-denied proposal from being
+  // consumed. confirmPending is a side effect (it flips the row to 'confirmed'), so refusing here
+  // leaves a legitimate-but-unauthorized proposal pending rather than burned. findById is
+  // unscoped, so only a proposal belonging to THIS session is judged — anything else falls through
+  // to confirmPending, which answers not_found without leaking that it exists.
+  const candidate = await deps.proposals.findById(proposalId);
+  if (candidate && candidate.sessionId === sid && candidate.status === 'pending') {
+    await authorize(candidate);
   }
 
   const result = await deps.proposals.confirmPending(proposalId, sid, now());
   switch (result.kind) {
     case 'confirmed_now':
+      // Second gate, defense-in-depth: the port does NOT guarantee this is the same object
+      // findById returned — a racing or inconsistent adapter could pass the safe/empty precheck
+      // above and still hand back an execution-capable confirmed_now proposal. The chokepoint
+      // must guard the object actually executed, so re-authorize result.proposal before enqueuing.
+      // (A refusal here leaves the row 'confirmed' with no task; that anomaly is acceptable — a
+      // "never burn under this race" guarantee needs an atomic authorize+confirm port contract,
+      // tracked as separate hardening. What is NOT acceptable is executing an unauthorized action.)
+      await authorize(result.proposal);
       return executeConfirmedProposal(result.proposal, session, deps, ev, now, decision);
     case 'already_confirmed': {
       // Clear the (possibly stuck) pending state: a crash between confirmPending and task creation
