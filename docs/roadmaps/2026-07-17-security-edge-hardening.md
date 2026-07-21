@@ -29,3 +29,17 @@ Remaining items:
 - office-server (baked into lab's VPS compose) publishes on `0.0.0.0:8787` by
   default and ships no `OFFICE_OPERATOR_PASSWORD` → wire the password + default
   `BIND_ADDR=127.0.0.1` here (office fail-closes on its side).
+  - **Password wiring: done.** Base compose passes `OFFICE_OPERATOR_PASSWORD`
+    through to office-server and every env template declares it empty, so a
+    connected stack stays down until one is provisioned out of band. Paired with
+    the office-side fail-closed guard — the two must ship together.
+  - **`BIND_ADDR` default: still open** (initiative item 5), tracked separately.
+- `/chat/confirm` authority (initiative item 4): trading-office confirms an
+  opaque `pendingInteractionId` and cannot see the class of action behind it, so
+  the refusal lives here, next to the real `ActionProposal`
+  (`src/chat/confirm-authority.ts`). Fail-closed allowlist of research/backtest
+  actions; anything else — including a future execution-capable proposal — is
+  refused before `confirmPending`, with a typed 403.
+  - Follow-up (SEC-O5): the confirm contract still hands out a bare proposal id.
+    A signed, TTL-bound, session-bound capability token would additionally stop a
+    substituted id; not required for this item.

@@ -6,6 +6,7 @@ import type { TaskSource } from '../domain/types.ts';
 import type { ChatSessionContext } from '../ports/chat-session.repository.ts';
 import { handleChatMessage, consumeConfirmation, type ChatHandlerDeps, type ChatEvFn } from './chat-handler.ts';
 import { chatAuthMiddleware } from './auth.ts';
+import { ExecutionAuthorityError } from './confirm-authority.ts';
 import type { ChatRateLimiter } from './chat-rate-limiter.ts';
 
 export interface ChatAppDeps extends ChatHandlerDeps {
@@ -57,6 +58,14 @@ export function createChatApp(deps: ChatAppDeps): Hono {
         deps,
       );
       return c.json(response, 200);
+    } catch (err) {
+      // A typed "да" resolves a pending proposal through the same path as POST /confirm, so the
+      // authority refusal can surface here too. 403, not 500: the request was understood and
+      // refused. Body carries the stable reason only — never the proposal's action or payload.
+      if (err instanceof ExecutionAuthorityError) {
+        return c.json({ status: 'rejected', reason: err.reason }, 403);
+      }
+      throw err;
     } finally {
       if (gate?.ok) deps.rateLimiter?.release(sessionId);
     }
@@ -78,13 +87,22 @@ export function createChatApp(deps: ChatAppDeps): Hono {
     const existing = await deps.sessions.get(req.sessionId);
     const session: ChatSessionContext = existing ?? { sessionId: req.sessionId, updatedAt: now() };
 
-    const response = await consumeConfirmation(
-      { proposalId: req.pendingInteractionId, decision: req.decision, session },
-      deps,
-      ev,
-      now,
-    );
-    return c.json(response, 200);
+    try {
+      const response = await consumeConfirmation(
+        { proposalId: req.pendingInteractionId, decision: req.decision, session },
+        deps,
+        ev,
+        now,
+      );
+      return c.json(response, 200);
+    } catch (err) {
+      // The confirmation asked for more authority than a chat turn carries (SEC-O4). The proposal
+      // is left pending and untouched — the refusal happens before confirmPending.
+      if (err instanceof ExecutionAuthorityError) {
+        return c.json({ status: 'rejected', reason: err.reason }, 403);
+      }
+      throw err;
+    }
   });
 
   return app;

@@ -21,6 +21,7 @@ import { parseTurn, planChatAction, type PlanDecision } from './guard.ts';
 import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
 import { buildActionProposal } from './action-proposal.ts';
 import { resolveConfirmationReply } from './confirmation-resolver.ts';
+import { assertConfirmableProposal, ExecutionAuthorityError } from './confirm-authority.ts';
 import {
   assistantMessage, taskCreated, taskStatus, rejected, errorResponse, buildEvidenceCards,
   type ChatResponse, type PlannedNextStep, type ProposedActionView,
@@ -109,6 +110,23 @@ export async function consumeConfirmation(
       actions: PENDING_ACTIONS,
       pendingInteractionId: proposalId,
     });
+  }
+
+  // Authority check BEFORE confirmPending (SEC-O4). It runs here, not next to
+  // executeConfirmedProposal, because confirmPending is itself a side effect: refusing after it
+  // would burn a legitimate proposal into 'confirmed' and wedge the session. findById is
+  // unscoped, so only a proposal belonging to THIS session is judged — anything else falls
+  // through to confirmPending, which already answers not_found without leaking that it exists.
+  const candidate = await deps.proposals.findById(proposalId);
+  if (candidate && candidate.sessionId === sid && candidate.status === 'pending') {
+    try {
+      assertConfirmableProposal(candidate);
+    } catch (err) {
+      if (err instanceof ExecutionAuthorityError) {
+        await ev('chat.proposal.authority_denied', { proposalId, sessionId: sid, action: candidate.action, taskType: candidate.task?.taskType });
+      }
+      throw err;
+    }
   }
 
   const result = await deps.proposals.confirmPending(proposalId, sid, now());

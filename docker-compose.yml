@@ -310,6 +310,12 @@ services:
       dockerfile: apps/server/Dockerfile
     environment:
       OFFICE_CONNECTOR_MODE: trading-lab
+      # REQUIRED here (SEC-O2). office-server runs in connected mode below, holds the lab
+      # read/chat tokens, and proxies them on every call — so it refuses to start without a
+      # non-empty operator password rather than expose a credential-bearing unauthenticated
+      # port. Passed through, never defaulted: a compose-side fallback would be a known
+      # password shared by every deployment. Provision it out of band in the env file.
+      OFFICE_OPERATOR_PASSWORD: ${OFFICE_OPERATOR_PASSWORD:-}
       OFFICE_SERVER_PORT: "8787"
       OFFICE_CORS_ORIGIN: ${OFFICE_CORS_ORIGIN:-http://localhost:8080}
       TRADING_LAB_READ_URL: http://ingress:3100
