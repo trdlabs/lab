@@ -135,6 +135,42 @@ describe('POST /chat/confirm', () => {
     expect(body.taskId).toBeTruthy();
   });
 
+  // SEC-O4: trading-office confirms an opaque pendingInteractionId — it cannot tell a research
+  // proposal from an execution-capable one, so the refusal has to happen here, where the real
+  // ActionProposal is. A refused confirm is 403 with a stable reason, never a 500 or a 200.
+  it('refuses an execution-capable proposal with a typed 403 and leaves it pending', async () => {
+    const proposals = new InMemoryActionProposalRepository();
+    const queue = new InMemoryQueueAdapter();
+    const app = createChatApp(appDeps({ proposals, queue }));
+    await proposals.create({
+      id: 'p-exec',
+      sessionId: 'sess-exec',
+      subjectHash: 'h1',
+      action: 'strategy.analyze',
+      source: 'web',
+      // A row today's planner would never write — the allowlist is what keeps it unconfirmable
+      // if a later planner change starts writing it.
+      task: { taskType: 'paper.start' as never, payload: {}, dedupeKey: 'chat-proposal:p-exec', userGoal: 'go live' },
+      status: 'pending',
+      evidenceRefs: [],
+      evidenceWarnings: [],
+      expiresAt: '2999-01-01T00:00:00.000Z',
+      createdAt: '2026-07-21T00:00:00.000Z',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+    });
+
+    const res = await app.request('/confirm', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${CHAT_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pendingInteractionId: 'p-exec', sessionId: 'sess-exec', decision: 'confirm' }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ status: 'rejected', reason: 'execution_authority_denied' });
+    expect(queue.queued).toHaveLength(0);
+    expect((await proposals.findById('p-exec'))?.status).toBe('pending');
+  });
+
   it('with unset token -> 503', async () => {
     const noAuth = createChatApp(appDeps({ authToken: undefined }));
     const res = await noAuth.request('/confirm', {
