@@ -33,6 +33,17 @@ Principle for every item: the verdict stays with deterministic versioned code
   `src/validation/strategy-baseline-evaluator.ts` (today's floors —
   `sharpe > 0 ∧ PF ≥ 1` — pass a strategy whose OOS collapsed vs IS).
   Log-mode first, enforce after calibration.
+- **R3 (lab side) — done.** `rankTopN`
+  (`src/research/top-n-prefilter.ts`) now computes a deterministic axial
+  (Von-Neumann) neighbor-sharpe-median per candidate against the FULL grid,
+  flags `lonePeak: true` below a preliminary 0.5 neighbor-ratio (points with
+  <2 valid neighbors get `plateauEvidence: 'insufficient_neighbors'` and are
+  never penalized), and demotes lone peaks in rank right after the existing
+  `lowConfidence` key. The flag survives `scrubMetricsBag` and is surfaced to
+  the result-interpreter as an explicit "lone peak" prompt fact
+  (`src/adapters/wfo/mastra-result-interpreter.ts`) — informational only, the
+  LLM never decides on it. See the
+  [research-validation-hardening card](../../../control-center/docs/delivery/initiatives/research-validation-hardening.md).
 - **R3 — plateau analysis**: in `src/research/top-n-prefilter.ts::rankTopN`,
   a deterministic neighbour-cell stability metric per grid point; lone peak →
   `lone_peak` flag, rank lowered; flag surfaced to the result-interpreter as
