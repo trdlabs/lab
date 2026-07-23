@@ -10,6 +10,7 @@ import type {
   RunStatusView,
   RunResultResult,
   Ref,
+  TrialContext,
 } from './research-run-lifecycle.ts';
 import { isTerminal } from './research-run-lifecycle.ts';
 import type { ModuleBundle } from '../domain/module-bundle.ts';
@@ -20,6 +21,7 @@ export type {
   ValidationReport, ValidationIssueDTO,
   RunResultSummary, ComparisonSummaryDTO,
   RunJobHandle, RunStatusView, RunResultResult, Ref,
+  TrialContext,
 };
 export { isTerminal };
 

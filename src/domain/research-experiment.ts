@@ -1,4 +1,5 @@
 import type { ArtifactRef } from './types.ts';
+import type { TrialContext } from '../ports/research-platform.port.ts';
 
 export type ExperimentType =
   | 'new_strategy_validation'
@@ -122,4 +123,8 @@ export interface ExperimentEvaluation {
   verdict: ExperimentVerdict;
   verdictReason?: string;
   createdAt: string;
+  /** E2 (research-validation-hardening R1): advisory DSR + trial count from the holdout/sanity
+   *  run of the corresponding lane. Absent when the backtester's trial ledger is disabled, or
+   *  for evaluators that never receive a strategy-lane result carrying it. */
+  trialContext?: TrialContext;
 }

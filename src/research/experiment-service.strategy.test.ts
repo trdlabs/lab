@@ -477,6 +477,55 @@ describe('runStrategyBaselineValidation', () => {
     expect(deg.oosIsSharpeRatio as number).toBeCloseTo(0.2, 5);
     expect(persisted.flags.fragility).toContain('oos_degradation');
   });
+
+  // research-validation-hardening R1 (lab side): the holdout run's advisory E2 trial-ledger
+  // (DSR + trial count) must reach the persisted evaluation row unmodified.
+  it('persists evaluation.trialContext from the holdout result (R1 passthrough)', async () => {
+    const trialContext = {
+      familyKey: 'fam-1', familyHint: 'ema-cross', trialCount: 8,
+      deflatedSharpe: 0.55, sr0: 0.1, vSR: 0.03, vSRBasis: 'asymptotic' as const, tCount: 8,
+    };
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'holdout') {
+        return {
+          status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout',
+          totalTrades: 30, metrics: viableHoldoutMetrics(), trialContext,
+        };
+      }
+      if (role === 'train') {
+        return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+      }
+      return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    expect(persisted.trialContext).toEqual(trialContext);
+  });
+
+  // Backward compat: a holdout result without trialContext (pre-R1 backtester, or the ledger
+  // disabled) must persist the evaluation exactly as before — trialContext simply absent.
+  it('persists evaluation with trialContext undefined when the holdout result carries none (backward compat)', async () => {
+    const { svc, experiments } = buildSvc(
+      (role) => {
+        if (role === 'holdout') return { status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout', totalTrades: 30, metrics: viableHoldoutMetrics() };
+        if (role === 'train') return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: viableHoldoutMetrics() };
+        return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+      },
+      { 'plat-sanity': trades(90) },
+    );
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    expect(persisted.trialContext).toBeUndefined();
+  });
 });
 
 describe('runStrategyBaselineValidation — bootstrap strategy_revision v1', () => {

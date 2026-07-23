@@ -1,6 +1,6 @@
 import type { MemberRole } from '../domain/research-experiment.ts';
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
-import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
+import type { PlatformRunConfig, TrialContext } from '../ports/research-platform.port.ts';
 import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 
 /**
@@ -25,6 +25,8 @@ export interface StrategyExperimentRunResult {
   readonly platformRunId: string;
   readonly metrics?: BacktestMetricBlock;
   readonly totalTrades?: number;
+  /** E2 (research-validation-hardening R1): advisory DSR + trial count, threaded from outcome.summary. */
+  readonly trialContext?: TrialContext;
 }
 
 export interface StrategyExperimentRunExecutor {

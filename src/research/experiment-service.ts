@@ -374,6 +374,9 @@ export class ExperimentService {
       id: this.d.newId('expeval'), experimentId, evaluatorVersion: STRATEGY_BASELINE_EVALUATOR_VERSION,
       rawScores: result.rawScores, flags: result.flags, verdict: result.verdict,
       verdictReason: result.verdictReason, createdAt: this.d.now(),
+      // R1 (research-validation-hardening): advisory E2 DSR + trial ledger from the holdout run
+      // (verdict source) — absent when the backtester's trial ledger is disabled.
+      ...(holdout.trialContext !== undefined ? { trialContext: holdout.trialContext } : {}),
     };
     await this.d.experiments.addEvaluation(evaluation);
     await this.d.experiments.updateExperiment(experimentId, {
@@ -705,6 +708,9 @@ export class ExperimentService {
       id: this.d.newId('expeval'), experimentId, evaluatorVersion: STRATEGY_BASELINE_EVALUATOR_VERSION,
       rawScores: result.rawScores, flags: result.flags, verdict: result.verdict,
       verdictReason: result.verdictReason, createdAt: this.d.now(),
+      // R1 (research-validation-hardening): advisory E2 DSR + trial ledger from the OOS holdout
+      // run — absent when the backtester's trial ledger is disabled.
+      ...(holdoutOutcome.trialContext !== undefined ? { trialContext: holdoutOutcome.trialContext } : {}),
     };
     await this.d.experiments.addEvaluation(evaluation);
 

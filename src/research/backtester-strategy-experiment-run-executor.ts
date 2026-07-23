@@ -109,6 +109,10 @@ export class BacktesterStrategyExperimentRunExecutor implements StrategyExperime
       platformContractVersion: outcome.summary.evidence?.contractVersion ?? 'unknown',
       finishedAt: this.d.now(),
     });
-    return { status: 'completed', runId: labRunId, platformRunId: handle.runId, metrics, totalTrades: metrics.totalTrades };
+    return {
+      status: 'completed', runId: labRunId, platformRunId: handle.runId, metrics, totalTrades: metrics.totalTrades,
+      // E2 (research-validation-hardening R1): passthrough, absence is valid.
+      ...(outcome.summary.trialContext !== undefined ? { trialContext: outcome.summary.trialContext } : {}),
+    };
   }
 }

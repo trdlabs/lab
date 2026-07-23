@@ -9,6 +9,7 @@ import type {
   ValidationReport as BtValidationReport,
   ModuleValidateRequest as BtModuleValidateRequest,
   RegistryDescriptor,
+  TrialContext as BtTrialContext,
 } from '@trdlabs/backtester-sdk/contracts';
 import type { RunJobHandle, SubmitOverlayRunOptions, SubmitStrategyResearchRunOptions } from '../../ports/research-platform.port.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
@@ -19,6 +20,8 @@ import { HttpBacktesterAdapter, type BacktesterClientLike } from './http-backtes
 class FakeClient implements BacktesterClientLike {
   submitted?: BtRunSubmitRequest;
   resultMode: 'summary' | 'conflict' | 'error' | 'overlay-summary' = 'summary';
+  /** Set to attach a trialContext (E2 advisory DSR ledger) to the plain 'summary' result branch. */
+  trialContext?: BtTrialContext;
 
   async submitRun(req: BtRunSubmitRequest): Promise<RunJobHandle> {
     this.submitted = req;
@@ -69,6 +72,7 @@ class FakeClient implements BacktesterClientLike {
       artifactRefs: [{ artifactId: 'sha256:aa', artifactType: 'trades', availability: 'available', approxItemCount: 3 }],
       evidence: { seed: 42, contractVersion: '017.2', moduleVersions: [{ id: 'm', version: '1' }], datasetRef: 'd' },
       resultHash: 'sha256:rh',
+      ...(this.trialContext !== undefined ? { trialContext: this.trialContext } : {}),
     };
   }
   async validateModule(_req: BtModuleValidateRequest): Promise<BtValidationReport> {
@@ -303,5 +307,27 @@ describe('HttpBacktesterAdapter', () => {
     expect(res.summary.comparison?.baseline.pnl).toBe(10);
     expect(res.summary.comparison?.variant.pnl).toBe(15);
     expect(res.summary.comparison?.deltas.pnl).toBe(5);
+  });
+
+  // research-validation-hardening R1 (lab side): the backtester's E2 advisory trial-ledger
+  // projection (DSR + trial count) must survive the adapter passthrough untouched.
+  it('passes through trialContext from the SDK summary (E2 advisory DSR ledger)', async () => {
+    const fake = new FakeClient();
+    fake.trialContext = {
+      familyKey: 'fam-1', familyHint: 'ema-cross', trialCount: 12,
+      deflatedSharpe: 0.42, sr0: 0.1, vSR: 0.05, vSRBasis: 'asymptotic', tCount: 12,
+    };
+    const res = await new HttpBacktesterAdapter(fake).getRunResult('r');
+    if (res.kind !== 'summary') throw new Error('expected summary');
+    expect(res.summary.trialContext).toEqual({
+      familyKey: 'fam-1', familyHint: 'ema-cross', trialCount: 12,
+      deflatedSharpe: 0.42, sr0: 0.1, vSR: 0.05, vSRBasis: 'asymptotic', tCount: 12,
+    });
+  });
+
+  it('omits trialContext when the SDK summary carries none (backward compat)', async () => {
+    const res = await new HttpBacktesterAdapter(new FakeClient()).getRunResult('r');
+    if (res.kind !== 'summary') throw new Error('expected summary');
+    expect(res.summary.trialContext).toBeUndefined();
   });
 });

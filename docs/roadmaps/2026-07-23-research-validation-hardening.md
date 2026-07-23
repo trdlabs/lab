@@ -24,6 +24,18 @@ Principle for every item: the verdict stays with deterministic versioned code
   is deferred to a calibrated wave after item 7's SSOT threshold pinning. See
   the
   [research-validation-hardening card](../../../control-center/docs/delivery/initiatives/research-validation-hardening.md).
+- **R1 (lab side) — done.** The lab port `RunResultSummary`
+  (`src/ports/research-run-lifecycle.ts`) now carries an optional
+  `trialContext: TrialContext` (byte-identical shape to the backtester SDK's
+  advisory E2 projection), threaded passthrough from
+  `HttpBacktesterAdapter.getRunResult` through
+  `BacktesterStrategyExperimentRunExecutor`'s `StrategyExperimentRunResult`
+  and persisted onto `experiment_evaluation.trial_context` (new nullable
+  jsonb column, migration 0027, no backfill) from the holdout-lane result in
+  both `runStrategyBaselineValidation` and `runWalkForwardOptimization`. DSR
+  is now available to the ladders — the ladders themselves still don't read
+  it (later items). See the
+  [research-validation-hardening card](../../../control-center/docs/delivery/initiatives/research-validation-hardening.md).
 - **R1 (consumer side)**: persist `RunResultSummary.trialContext`
   (trialCount, deflatedSharpe — already in the backtester SDK contract,
   advisory) into `experiment_evaluation`, so DSR becomes available to the
