@@ -8,7 +8,7 @@ import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
 import type { ModuleManifest } from '../domain/module-bundle.ts';
 import type { BacktestMetricBlock, ComparisonSummary } from '../ports/platform-gateway.port.ts';
-import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
+import type { PlatformRunConfig, TrialContext } from '../ports/research-platform.port.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
 import type { ActionProposalStatus, ProposedTaskSnapshot, OperatorAction } from '../domain/action-proposal.ts';
 import type { PendingOperatorInteraction } from '../ports/chat-session.repository.ts';
@@ -432,6 +432,9 @@ export const experimentEvaluation = pgTable('experiment_evaluation', {
   verdict: text('verdict').notNull().$type<ExperimentVerdict>(),
   verdictReason: text('verdict_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // R1 (research-validation-hardening): advisory E2 DSR + trial-ledger data, nullable, no backfill —
+  // absent on every pre-R1 row and on any evaluation whose source run carries no trial ledger.
+  trialContext: jsonb('trial_context').$type<TrialContext>(),
 }, (t) => ({
   experimentIdx: index('experiment_evaluation_experiment_idx').on(t.experimentId),
 }));

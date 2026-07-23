@@ -66,6 +66,55 @@ describe('BacktesterStrategyExperimentRunExecutor', () => {
     expect(persisted?.platformContractVersion).toBe('platform-v1');
   });
 
+  // research-validation-hardening R1 (lab side): the backtester's E2 advisory trial-ledger
+  // (DSR + trial count) must reach StrategyExperimentRunResult unmodified when present.
+  it('propagates trialContext from outcome.summary when present (E2 passthrough)', async () => {
+    const repo = new InMemoryStrategyBacktestRunRepository();
+    const trialContext = {
+      familyKey: 'fam-1', familyHint: 'ema-cross', trialCount: 4,
+      deflatedSharpe: 0.3, sr0: 0.05, vSR: 0.02, vSRBasis: 'empirical' as const, tCount: 4,
+    };
+    const exec = new BacktesterStrategyExperimentRunExecutor({
+      platform: fakePlatform({
+        status: 'completed',
+        artifactRefs: [],
+        metrics: rawMetrics,
+        evidence: { seed: 42, contractVersion: 'platform-v1', moduleVersions: [] },
+        trialContext,
+      }),
+      strategyBacktests: repo,
+      poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} },
+      now: () => 't',
+    });
+    const out = await exec.execute({
+      experimentId: 'e1', role: 'sanity', strategyBundle: bundle,
+      strategyProfileId: 'p1', run, params: {}, metrics: ['netPnlUsd'],
+    });
+
+    expect(out.trialContext).toEqual(trialContext);
+  });
+
+  it('leaves trialContext undefined when outcome.summary carries none (backward compat)', async () => {
+    const repo = new InMemoryStrategyBacktestRunRepository();
+    const exec = new BacktesterStrategyExperimentRunExecutor({
+      platform: fakePlatform({
+        status: 'completed',
+        artifactRefs: [],
+        metrics: rawMetrics,
+        evidence: { seed: 42, contractVersion: 'platform-v1', moduleVersions: [] },
+      }),
+      strategyBacktests: repo,
+      poll: { maxPolls: 1, pollDelayMs: 0, sleep: async () => {} },
+      now: () => 't',
+    });
+    const out = await exec.execute({
+      experimentId: 'e1', role: 'sanity', strategyBundle: bundle,
+      strategyProfileId: 'p1', run, params: {}, metrics: ['netPnlUsd'],
+    });
+
+    expect(out.trialContext).toBeUndefined();
+  });
+
   it('marks rejected on a rejected outcome', async () => {
     const repo = new InMemoryStrategyBacktestRunRepository();
     const exec = new BacktesterStrategyExperimentRunExecutor({

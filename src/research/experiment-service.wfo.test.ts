@@ -70,7 +70,13 @@ function metrics(over: Partial<BacktestMetricBlock>): BacktestMetricBlock {
   };
 }
 
-type ResultForFn = (params: Record<string, unknown>) => { totalTrades: number; rejected?: boolean; sharpe?: number };
+type ResultForFn = (params: Record<string, unknown>) => {
+  totalTrades: number; rejected?: boolean; sharpe?: number;
+  trialContext?: {
+    familyKey: string; familyHint?: string; trialCount: number; deflatedSharpe: number;
+    sr0: number; vSR: number; vSRBasis: 'asymptotic' | 'empirical'; tCount: number;
+  };
+};
 
 /** Fake ResearchPlatformPort whose strategy-run outcome varies deterministically by submitted params. */
 class FakeWfoPlatform implements ResearchPlatformPort {
@@ -115,6 +121,7 @@ class FakeWfoPlatform implements ResearchPlatformPort {
           total_trades: r.totalTrades, profit_factor: 1.2, top_trade_contribution_pct: 10,
         },
         coverage: [], artifactRefs: [], evidence: { seed: 0, contractVersion: 'v1', moduleVersions: [] },
+        ...(r.trialContext !== undefined ? { trialContext: r.trialContext } : {}),
       },
     };
   }
@@ -634,6 +641,48 @@ describe('runWalkForwardOptimization', () => {
     expect(deg.oosIsSharpeRatio).not.toBeNull();
     expect(deg.isSharpe).toBe(3);
     expect(deg.oosSharpe).toBe(3);
+  });
+
+  // research-validation-hardening R1 (lab side): the OOS holdout run's advisory E2 trial-ledger
+  // (DSR + trial count) must reach the persisted WFO evaluation row unmodified.
+  it('persists evaluation.trialContext from the OOS holdout result (R1 passthrough)', async () => {
+    const trialContext = {
+      familyKey: 'fam-wfo', familyHint: 'wfo-sweep', trialCount: 6,
+      deflatedSharpe: 0.28, sr0: 0.08, vSR: 0.04, vSRBasis: 'asymptotic' as const, tCount: 6,
+    };
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5, sharpe: 3, trialContext }),
+    });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM]);
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    await svc.runWalkForwardOptimization(input);
+
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    expect(persisted.trialContext).toEqual(trialContext);
+  });
+
+  // Backward compat: no trialContext anywhere (pre-R1 backtester / ledger disabled) → the WFO
+  // evaluation persists exactly as before, trialContext simply absent.
+  it('persists WFO evaluation with trialContext undefined when the holdout result carries none (backward compat)', async () => {
+    const { svc, experiments, strategyBacktests } = buildSvc({ resultFor: () => ({ totalTrades: 5, sharpe: 3 }) });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM]);
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    await svc.runWalkForwardOptimization(input);
+
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    expect(persisted.trialContext).toBeUndefined();
   });
 });
 

@@ -158,6 +158,9 @@ function toSdkSummary(s: BtRunResultSummary): Extract<RunResultView, { kind: 'su
       contractVersion: s.evidence.contractVersion,
       moduleVersions: s.evidence.moduleVersions,
     },
+    // E2 (research-validation-hardening R1): passthrough, no transformation. Absence is valid —
+    // the backtester's trial ledger is opt-in (BACKTESTER_TRIAL_LEDGER); NEVER covered by resultHash.
+    ...(s.trialContext !== undefined ? { trialContext: s.trialContext } : {}),
   };
 }
 

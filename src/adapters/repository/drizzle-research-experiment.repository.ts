@@ -119,6 +119,7 @@ export class DrizzleResearchExperimentRepository implements ResearchExperimentRe
       id: ev.id, experimentId: ev.experimentId, evaluatorVersion: ev.evaluatorVersion,
       rawScores: ev.rawScores, flags: ev.flags, verdict: ev.verdict,
       verdictReason: ev.verdictReason ?? null, createdAt: new Date(ev.createdAt),
+      trialContext: ev.trialContext ?? null,
     });
   }
 }

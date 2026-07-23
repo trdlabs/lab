@@ -139,6 +139,23 @@ export interface ValidationReport {
   readonly executed: false;
 }
 
+/**
+ * E2 (research-validation-hardening R1): advisory Deflated Sharpe Ratio + trial provenance,
+ * copied byte-identical from `@trdlabs/backtester-sdk/contracts` TrialContext (dist/contracts/index.d.ts).
+ * NEVER part of any hashed result payload — DSR depends on the family's trial history (stateful),
+ * so it lives on this projection only, present solely when the backtester's trial ledger is enabled.
+ */
+export interface TrialContext {
+  readonly familyKey: string;
+  readonly familyHint?: string;
+  readonly trialCount: number;
+  readonly deflatedSharpe: number;
+  readonly sr0: number;
+  readonly vSR: number;
+  readonly vSRBasis: 'asymptotic' | 'empirical';
+  readonly tCount: number;
+}
+
 export interface RunResultSummary {
   readonly runId: string;
   readonly status: RunStatus;
@@ -153,6 +170,8 @@ export interface RunResultSummary {
     readonly contractVersion: string;
     readonly moduleVersions: readonly Ref[];
   };
+  /** E2: advisory trial count + Deflated Sharpe. NOT covered by any result hash. */
+  readonly trialContext?: TrialContext;
 }
 
 export type GatewayErrorCategory =

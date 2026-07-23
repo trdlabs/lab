@@ -1,0 +1,1 @@
+ALTER TABLE "experiment_evaluation" ADD COLUMN "trial_context" jsonb;
