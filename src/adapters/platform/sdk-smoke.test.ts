@@ -8,7 +8,7 @@ describe('@trdlabs/sdk standalone package', () => {
   it('exposes the root contract + version surface', () => {
     expect(typeof CONTRACT_VERSION).toBe('string');
     expect(CONTRACT_VERSION.length).toBeGreaterThan(0);
-    expect(SDK_VERSION).toBe('0.10.0');
+    expect(SDK_VERSION).toBe('0.13.0');
   });
 
   it('declares all capabilities absent by construction', () => {
