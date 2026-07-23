@@ -16,7 +16,11 @@ import type { StrategyProfile } from '../domain/strategy-profile.ts';
 import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import { resolveHoldoutBoundary } from './holdout-boundary-resolver.ts';
 import { evaluateExperiment, EXPERIMENT_EVALUATOR_VERSION } from '../validation/experiment-evaluator.ts';
-import { evaluateStrategyBaseline, STRATEGY_BASELINE_EVALUATOR_VERSION } from '../validation/strategy-baseline-evaluator.ts';
+import { evaluateStrategyBaseline, computeOosDegradation, STRATEGY_BASELINE_EVALUATOR_VERSION } from '../validation/strategy-baseline-evaluator.ts';
+import {
+  runBreakBattery, buildBreakBatteryRetryFeedback,
+  type BreakBatteryMode, type BreakBatteryReport, type PlateauSignal,
+} from './break-battery.ts';
 import { computeExperimentKey } from './experiment-identity.ts';
 import { computeStrategyExperimentKey, computeStrategyParamsHash } from './strategy-run-identity.ts';
 import { computeWfoExperimentKey } from './wfo-experiment-identity.ts';
@@ -66,6 +70,9 @@ export interface ExperimentServiceDeps {
   researchTaskTokenBudget?: number;
   /** Optional — absent means the strategy_revision v1 bootstrap tail is a no-op (task-8 wiring). */
   revisions?: StrategyRevisionRepository;
+  /** R11 break_battery@1 stage between the WFO verdict and paper.start. Default 'off' — the
+   *  battery is never invoked; 'log' runs it, persists + logs, and NEVER changes any verdict. */
+  breakBatteryMode?: BreakBatteryMode;
 }
 
 /** Merges a newly-designed round grid into the running union (dedupes values per key by stable-stringify identity). */
@@ -605,7 +612,9 @@ export class ExperimentService {
     let unionGrid: ParameterGrid = existing?.parameterGrid ? { ...existing.parameterGrid } : {};
     // trainMetrics: the SAME point's train-window run metrics (from this round's grid sweep) —
     // the R2 IS→OOS degradation baseline for the eventual holdout evaluation below.
-    let selected: { point: GridPoint; foldId: number; trainMetrics: BacktestMetricBlock } | undefined;
+    // plateau: the SAME point's R3 lone-peak/plateau evidence, captured at ranking time — the
+    // break-battery (R11) plateau input for the champion.
+    let selected: { point: GridPoint; foldId: number; trainMetrics: BacktestMetricBlock; plateau: PlateauSignal } | undefined;
     let budgetExhaustedMidLoop = false;
 
     for (let r = 1; r <= budget.maxRounds; r += 1) {
@@ -671,7 +680,15 @@ export class ExperimentService {
       if (interpretation.decision === 'select') {
         const chosen = ranked.find((res) => res.paramsHash === interpretation.chosenParamsHash);
         if (!chosen) return finalize('INCONCLUSIVE', 'sweep_failed');
-        selected = { point: chosen.point, foldId: r - 1, trainMetrics: chosen.metrics };
+        selected = {
+          point: chosen.point, foldId: r - 1, trainMetrics: chosen.metrics,
+          plateau: {
+            lonePeak: chosen.lonePeak,
+            ...(chosen.neighborSharpeMedian !== undefined ? { neighborSharpeMedian: chosen.neighborSharpeMedian } : {}),
+            ...(chosen.neighborCount !== undefined ? { neighborCount: chosen.neighborCount } : {}),
+            ...(chosen.plateauEvidence !== undefined ? { plateauEvidence: chosen.plateauEvidence } : {}),
+          },
+        };
         break;
       }
       if (interpretation.decision === 'stop') return finalize('INCONCLUSIVE', 'stop');
@@ -718,9 +735,32 @@ export class ExperimentService {
       : result.verdict === 'FAIL' ? 'holdout_failed'
       : 'inconclusive';
 
+    // --- R11 break_battery@1 (log-mode): the deterministic "break the result" stage between
+    // this WFO verdict and the paper.start enqueue (strategy-wfo.handler acts on the returned
+    // verdict AFTER this method). Mode 'off' (default) never invokes the battery. LOG-MODE
+    // INVARIANT: computed fail-soft from the same persisted inputs the evaluation used —
+    // it never changes verdict/terminalReason/status, adds no runs, no retries. ---
+    let breakBattery: BreakBatteryReport | undefined;
+    if ((this.d.breakBatteryMode ?? 'off') === 'log') {
+      try {
+        breakBattery = runBreakBattery({
+          ...(holdoutOutcome.trialContext !== undefined ? { trialContext: holdoutOutcome.trialContext } : {}),
+          // Same IS/OOS inputs as evaluateStrategyBaseline above — computeOosDegradation is pure,
+          // so this is byte-identical to the persisted rawScores.oosDegradation.
+          oosDegradation: computeOosDegradation(selected.trainMetrics, holdoutOutcome.metrics),
+          plateau: selected.plateau,
+        });
+      } catch { breakBattery = undefined; /* fail-soft: a battery bug must never fail the task */ }
+    }
+
     await this.d.experiments.updateExperiment(experimentId, {
       status: 'completed', verdict: result.verdict, verdictReason: terminalReason,
-      aggregateMetrics: { trainTrades: boundary.trainTrades, holdoutTrades: boundary.holdoutTrades, flags: result.flags },
+      aggregateMetrics: {
+        trainTrades: boundary.trainTrades, holdoutTrades: boundary.holdoutTrades, flags: result.flags,
+        // Persistence lane (full report incl. observed values) — Outcome Embargo does not scrub
+        // deterministic persistence; only generation-lane egress is sanitized.
+        ...(breakBattery !== undefined ? { breakBattery } : {}),
+      },
       completedAt: this.d.now(), updatedAt: this.d.now(),
     });
     await this.d.events.append({
@@ -728,6 +768,25 @@ export class ExperimentService {
       payload: { experimentId, verdict: result.verdict, verdictReason: terminalReason, experimentType: 'walk_forward_optimization' },
       createdAt: this.d.now(),
     });
+    if (breakBattery !== undefined) {
+      try {
+        // Event log entry is STRUCTURAL only (check/status/reasonCode/severity — no observed
+        // magnitudes); the retry-cycle feedback shape is pre-sanitized through the Outcome-Embargo
+        // allowlist here, so any future consumer picks up the sanitized form, never the raw report.
+        const sanitized = buildBreakBatteryRetryFeedback(breakBattery, experimentId);
+        await this.d.events.append({
+          id: this.d.newId('evt'), taskId: input.taskId, type: 'break_battery.completed',
+          payload: {
+            experimentId, experimentType: 'walk_forward_optimization',
+            batteryVersion: breakBattery.batteryVersion, policyVersion: breakBattery.policyVersion,
+            mode: 'log', outcome: breakBattery.outcome, verdict: result.verdict,
+            checks: breakBattery.checks.map(({ check, status, reasonCode, severity }) => ({ check, status, reasonCode, severity })),
+            sanitizedRetryFeedback: sanitized.feedback, feedbackRemovedKeys: sanitized.removedKeys,
+          },
+          createdAt: this.d.now(),
+        });
+      } catch { /* fail-soft: log-mode must never affect the pipeline */ }
+    }
     return { experimentId, verdict: result.verdict, terminalReason };
   }
 

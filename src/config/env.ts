@@ -1,6 +1,7 @@
 import { DEFAULT_EVALUATOR_THRESHOLDS, type EvaluatorThresholds } from '../validation/evaluator.ts';
 import { MODEL_PROVIDERS, type ModelProvider } from '../adapters/llm/model-provider.ts';
 import { DEFAULT_PRESERVATION_THRESHOLDS, type PreservationThresholds } from '../validation/trade-preservation.ts';
+import { resolveBreakBatteryMode, type BreakBatteryMode } from '../research/break-battery.ts';
 
 export interface Env {
   DATABASE_URL?: string;
@@ -152,6 +153,9 @@ export interface Env {
   LAB_CONSOLIDATION_TOL_REL: number;
   /** Consolidation parity-gate absolute tolerance (slice G3b Task 8; default 0.01). */
   LAB_CONSOLIDATION_TOL_ABS: number;
+  /** R11 break_battery@1 rollout mode: 'off' (default — battery never runs) | 'log' (runs,
+   *  persists + logs, NEVER changes any verdict). 'enforce' rejected until item 7 pins thresholds. */
+  LAB_BREAK_BATTERY_MODE: BreakBatteryMode;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -326,6 +330,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     LAB_CONSOLIDATION_DEPTH_THRESHOLD: parseNonNegativeInt(source.LAB_CONSOLIDATION_DEPTH_THRESHOLD, 2),
     LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001),
     LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01),
+    LAB_BREAK_BATTERY_MODE: resolveBreakBatteryMode(source.LAB_BREAK_BATTERY_MODE),
     ...loadRagEnv(source),
   };
 }

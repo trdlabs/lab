@@ -60,6 +60,24 @@ Principle for every item: the verdict stays with deterministic versioned code
   a deterministic neighbour-cell stability metric per grid point; lone peak →
   `lone_peak` flag, rank lowered; flag surfaced to the result-interpreter as
   a fact.
+- **R11 (log-mode) — done.** `break_battery@1`
+  (`src/research/break-battery.ts`) now runs as a deterministic stage inside
+  `runWalkForwardOptimization`, after the holdout evaluation and before
+  `strategy-wfo.handler` enqueues `paper.start`: three versioned checks over
+  the champion — DSR floor from the R1 `trialContext`, IS→OOS degradation
+  over the same inputs as the R2 metric, and the R3 lone-peak/plateau
+  evidence of the selected grid point — each with a `break_battery.*` reason
+  code and severity. Flag `LAB_BREAK_BATTERY_MODE`: `off` (default — the
+  battery is never invoked) → `log` (report persisted to
+  `aggregateMetrics.breakBattery` + structural `break_battery.completed`
+  event; verdict/status/timings are NEVER touched). `enforce` is rejected at
+  boot until item 7 pins SSOT thresholds — the current floors are
+  preliminary constants in one place (`BREAK_BATTERY_POLICY`, versioned).
+  Battery feedback toward the retry cycle exists only pre-sanitized through
+  the Outcome-Embargo allowlist (`buildBreakBatteryRetryFeedback` →
+  `sanitizeRetryFeedback`; the three failure codes are allowlisted in
+  `outcome-embargo.ts`). Staging runs on the T2 fixture are a separate
+  operator tail (needs mock-platform on staging).
 - **R11 — break-the-result battery**: a new pipeline stage between the WFO
   verdict and `paper.start` — versioned deterministic checks over the
   champion (DSR/PSR floor → OOS degradation → plateau; later bootstrap-CI and

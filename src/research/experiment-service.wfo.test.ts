@@ -31,6 +31,7 @@ import { STRATEGY_RUN_KIND } from '../domain/strategy-backtest-run.ts';
 import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import { computeStrategyParamsHash } from './strategy-run-identity.ts';
 import { encodeTrainPeriod } from './period-encoding.ts';
+import { BREAK_BATTERY_VERSION, type BreakBatteryMode } from './break-battery.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -262,6 +263,7 @@ function buildSvc(opts: {
   tokenUsage?: Pick<TokenUsageRepository, 'get'>;
   researchTaskTokenBudget?: number;
   events?: { append: (e: unknown) => Promise<void>; listByTask: () => Promise<never[]> };
+  breakBatteryMode?: BreakBatteryMode;
 }): { svc: ExperimentService; experiments: InMemoryResearchExperimentRepository; strategyBacktests: InMemoryStrategyBacktestRunRepository } {
   const experiments = new InMemoryResearchExperimentRepository();
   const strategyBacktests = new InMemoryStrategyBacktestRunRepository();
@@ -287,6 +289,7 @@ function buildSvc(opts: {
     wfoBudget: { ...DEFAULT_WFO_BUDGET, ...opts.wfoBudget },
     tokenUsage: opts.tokenUsage,
     researchTaskTokenBudget: opts.researchTaskTokenBudget,
+    breakBatteryMode: opts.breakBatteryMode,
   });
   return { svc, experiments, strategyBacktests };
 }
@@ -775,5 +778,134 @@ describe('outcome embargo (S1)', () => {
 
       expect(gate1.calls.length).toBeGreaterThan(0); // proves fail-fast let it through
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R11 (research-validation-hardening): break_battery@1 — log-mode stage between
+// the WFO verdict and the paper.start enqueue. LOG-MODE INVARIANT: the battery
+// NEVER changes verdict / terminalReason / status; 'off' never even runs it.
+// ---------------------------------------------------------------------------
+describe('break battery (R11, log-mode)', () => {
+  const OK_BOUNDARY: HoldoutBoundary = {
+    mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok',
+  };
+  // deflatedSharpe far below the preliminary floor → dsr_floor check breaks.
+  const BREAKING_TRIAL_CONTEXT = {
+    familyKey: 'fam-wfo', trialCount: 9, deflatedSharpe: 0.01,
+    sr0: 0.05, vSR: 0.02, vSRBasis: 'asymptotic' as const, tCount: 9,
+  };
+
+  function collectingEvents() {
+    const appended: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    return {
+      appended,
+      events: {
+        append: async (e: unknown) => { appended.push(e as { type: string; payload: Record<string, unknown> }); },
+        listByTask: async () => [],
+      },
+    };
+  }
+
+  it("default 'off': the battery is never invoked — no break_battery events, nothing persisted", async () => {
+    const { appended, events } = collectingEvents();
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5, trialContext: BREAKING_TRIAL_CONTEXT }),
+      events,
+    });
+    const baselineExperimentId = await seedBaseline({ experiments, strategyBacktests, totalTrades: 5, boundary: OK_BOUNDARY });
+
+    const { experimentId, verdict, terminalReason } = await svc.runWalkForwardOptimization(baseInput(baselineExperimentId, [ENTRY_PARAM]));
+
+    expect(verdict).toBe('PAPER_CANDIDATE');
+    expect(terminalReason).toBe('paper_candidate');
+    expect(appended.filter((e) => e.type.startsWith('break_battery')).length).toBe(0);
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.aggregateMetrics?.['breakBattery']).toBeUndefined();
+  });
+
+  it("'log' + breaking signals: verdict/terminalReason UNCHANGED; report persisted; event emitted with sanitized feedback", async () => {
+    const { appended, events } = collectingEvents();
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({ totalTrades: 5, trialContext: BREAKING_TRIAL_CONTEXT }),
+      events, breakBatteryMode: 'log',
+    });
+    const baselineExperimentId = await seedBaseline({ experiments, strategyBacktests, totalTrades: 5, boundary: OK_BOUNDARY });
+
+    const { experimentId, verdict, terminalReason } = await svc.runWalkForwardOptimization(baseInput(baselineExperimentId, [ENTRY_PARAM]));
+
+    // Log-mode invariant: identical outcome to the 'off' run above.
+    expect(verdict).toBe('PAPER_CANDIDATE');
+    expect(terminalReason).toBe('paper_candidate');
+    const exp = await experiments.findById(experimentId);
+    expect(exp?.status).toBe('completed');
+    expect(exp?.verdict).toBe('PAPER_CANDIDATE');
+
+    // Report persisted on aggregateMetrics (deterministic persistence lane).
+    const report = exp?.aggregateMetrics?.['breakBattery'] as {
+      batteryVersion: string; outcome: string; failedReasonCodes: string[];
+    } | undefined;
+    expect(report).toBeDefined();
+    expect(report!.batteryVersion).toBe(BREAK_BATTERY_VERSION);
+    expect(report!.outcome).toBe('break');
+    expect(report!.failedReasonCodes).toContain('break_battery.dsr_below_floor');
+
+    // Event emitted, AFTER experiment.completed (verdict first, battery after).
+    const batteryEvents = appended.filter((e) => e.type === 'break_battery.completed');
+    expect(batteryEvents.length).toBe(1);
+    const completedIdx = appended.findIndex((e) => e.type === 'experiment.completed');
+    const batteryIdx = appended.findIndex((e) => e.type === 'break_battery.completed');
+    expect(batteryIdx).toBeGreaterThan(completedIdx);
+    const payload = batteryEvents[0]!.payload;
+    expect(payload['batteryVersion']).toBe(BREAK_BATTERY_VERSION);
+    expect(payload['mode']).toBe('log');
+    expect(payload['outcome']).toBe('break');
+    const checks = payload['checks'] as Array<{ check: string; status: string; reasonCode: string }>;
+    expect(checks.find((c) => c.check === 'dsr_floor')?.status).toBe('failed');
+    // Retry feedback in the event went through sanitizeRetryFeedback (allowlist, nothing dropped).
+    const feedback = payload['sanitizedRetryFeedback'] as { decision: string; reasons: string[] };
+    expect(feedback.decision).toBe('MODIFY');
+    expect(feedback.reasons).toContain('break_battery.dsr_below_floor');
+    expect(payload['feedbackRemovedKeys']).toEqual([]);
+    // Structural-only event payload: no observed magnitudes ride out on the event log.
+    expect(JSON.stringify(payload)).not.toContain('deflatedSharpe');
+  });
+
+  it("'log' + healthy signals: outcome 'pass', verdict unchanged", async () => {
+    const { appended, events } = collectingEvents();
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      resultFor: () => ({
+        totalTrades: 5,
+        trialContext: { ...BREAKING_TRIAL_CONTEXT, deflatedSharpe: 0.95 },
+      }),
+      events, breakBatteryMode: 'log',
+    });
+    const baselineExperimentId = await seedBaseline({ experiments, strategyBacktests, totalTrades: 5, boundary: OK_BOUNDARY });
+
+    const { verdict, terminalReason } = await svc.runWalkForwardOptimization(baseInput(baselineExperimentId, [ENTRY_PARAM]));
+
+    expect(verdict).toBe('PAPER_CANDIDATE');
+    expect(terminalReason).toBe('paper_candidate');
+    const batteryEvents = appended.filter((e) => e.type === 'break_battery.completed');
+    expect(batteryEvents.length).toBe(1);
+    expect(batteryEvents[0]!.payload['outcome']).toBe('pass');
+    const feedback = batteryEvents[0]!.payload['sanitizedRetryFeedback'] as { reasons: string[] };
+    expect(feedback.reasons).toEqual([]);
+  });
+
+  it("'log' on a non-candidate verdict still records the battery (calibration data), verdict untouched", async () => {
+    const { appended, events } = collectingEvents();
+    const { svc, experiments, strategyBacktests } = buildSvc({
+      // holdout sharpe 0 → FAIL floor; battery still runs in log mode.
+      resultFor: () => ({ totalTrades: 5, sharpe: 0, trialContext: BREAKING_TRIAL_CONTEXT }),
+      events, breakBatteryMode: 'log',
+    });
+    const baselineExperimentId = await seedBaseline({ experiments, strategyBacktests, totalTrades: 5, boundary: OK_BOUNDARY });
+
+    const { verdict, terminalReason } = await svc.runWalkForwardOptimization(baseInput(baselineExperimentId, [ENTRY_PARAM]));
+
+    expect(verdict).toBe('FAIL');
+    expect(terminalReason).toBe('holdout_failed');
+    expect(appended.filter((e) => e.type === 'break_battery.completed').length).toBe(1);
   });
 });

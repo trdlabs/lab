@@ -118,9 +118,13 @@ const EVALUATOR_REASONS = [
 ] as const;
 /** Preservation-veto codes — src/validation/trade-preservation.ts (R2 gate). */
 const PRESERVATION_REASONS = ['end_of_data_position', 'abstention_gaming', 'winner_degradation'] as const;
+/** R11 break-battery failure codes — src/research/break-battery.ts (BREAK_BATTERY_REASON_CODES).
+ *  Fixed categorical tokens (no magnitudes/windows/dates), mirroring how EVALUATOR_REASONS are
+ *  re-declared here: the allowlist owner pins the closed set, a drift test guards the mirror. */
+const BREAK_BATTERY_REASONS = ['break_battery.dsr_below_floor', 'break_battery.oos_degradation', 'break_battery.lone_peak'] as const;
 
 /** Fail-closed allowlist for retry-feedback reasons (I-E5). */
-export const SAFE_RETRY_REASONS: ReadonlySet<string> = new Set([...EVALUATOR_REASONS, ...PRESERVATION_REASONS]);
+export const SAFE_RETRY_REASONS: ReadonlySet<string> = new Set([...EVALUATOR_REASONS, ...PRESERVATION_REASONS, ...BREAK_BATTERY_REASONS]);
 
 /** Proxy-lane evaluation decisions (BacktestCompletedPayloadSchema enum). */
 const SAFE_RETRY_DECISIONS = new Set(['PASS', 'FAIL', 'MODIFY', 'INCONCLUSIVE', 'PAPER_CANDIDATE']);
