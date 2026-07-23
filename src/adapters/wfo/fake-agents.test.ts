@@ -113,6 +113,7 @@ describe('FakeResultInterpreter', () => {
         strategyBacktestRunId: 'run-1',
         metrics: mk({ totalTrades: 4 }),
         lowConfidence: false,
+        lonePeak: false,
       },
     ];
     const out = await new FakeResultInterpreter().interpret({ topN, roundsSoFar: 1, maxRounds: 2 });

@@ -1,5 +1,5 @@
 // src/research/experiment-service.wfo.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { ExperimentService, DEFAULT_WFO_BUDGET } from './experiment-service.ts';
 import type { RunWfoInput, WfoBudget } from './experiment-service.ts';
@@ -609,6 +609,31 @@ describe('runWalkForwardOptimization', () => {
 
     // gate1.decide + sweepDesigner.design + resultInterpreter.interpret each report usage.
     expect(seen.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // R2 (research-validation-hardening item 2, report-13 gap G2): the WFO holdout evaluation must
+  // thread the SELECTED point's own train-window metrics through as the IS block — proves the
+  // wiring (not the ratio math, which is unit-tested in strategy-baseline-evaluator.test.ts).
+  it('persists evaluation.rawScores.oosDegradation using the selected point\'s TRAIN metrics as IS (R2)', async () => {
+    const { svc, experiments, strategyBacktests } = buildSvc({ resultFor: () => ({ totalTrades: 5, sharpe: 3 }) });
+    const baselineExperimentId = await seedBaseline({
+      experiments, strategyBacktests, totalTrades: 5,
+      boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+    });
+    const input = baseInput(baselineExperimentId, [ENTRY_PARAM]);
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    await svc.runWalkForwardOptimization(input);
+
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    const deg = (persisted.rawScores as { oosDegradation: { oosIsSharpeRatio: number | null; isSharpe?: number; oosSharpe: number } }).oosDegradation;
+    // Before R2 wiring, `train` was never passed here → ratio would be stuck at null regardless
+    // of the fake platform's sharpe. A non-null ratio proves the selected point's train metrics
+    // reached evaluateStrategyBaseline as the IS block.
+    expect(deg.oosIsSharpeRatio).not.toBeNull();
+    expect(deg.isSharpe).toBe(3);
+    expect(deg.oosSharpe).toBe(3);
   });
 });
 

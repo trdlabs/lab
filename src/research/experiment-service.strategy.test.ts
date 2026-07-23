@@ -1,6 +1,7 @@
 // src/research/experiment-service.strategy.test.ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ExperimentService } from './experiment-service.ts';
+import { STRATEGY_BASELINE_EVALUATOR_VERSION } from '../validation/strategy-baseline-evaluator.ts';
 import type { RunStrategyBaselineValidationInput } from './experiment-service.ts';
 import type {
   StrategyExperimentRunExecutor, StrategyExperimentRunRequest, StrategyExperimentRunResult,
@@ -449,6 +450,32 @@ describe('runStrategyBaselineValidation', () => {
 
       expect(executor.calls).toContain('sanity'); // proves fail-fast let it through
     });
+  });
+
+  // R2 (research-validation-hardening item 2, report-13 gap G2): the persisted evaluation row
+  // must carry the IS→OOS degradation metric — log-mode only, verdict stays exactly as before.
+  it('persists evaluation.rawScores.oosDegradation computed from train vs holdout metrics (R2, log-only)', async () => {
+    const trainMetrics = { ...viableHoldoutMetrics(), sharpe: 2.0, profitFactor: 1.6 };
+    const degradedHoldoutMetrics = { ...viableHoldoutMetrics(), sharpe: 0.4 }; // still clears the floor
+    const resultFor = (role: MemberRole): StrategyExperimentRunResult => {
+      if (role === 'holdout') return { status: 'completed', runId: 'r-holdout', platformRunId: 'plat-holdout', totalTrades: 30, metrics: degradedHoldoutMetrics };
+      if (role === 'train') return { status: 'completed', runId: 'r-train', platformRunId: 'plat-train', totalTrades: 60, metrics: trainMetrics };
+      return { status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 };
+    };
+    const { svc, experiments } = buildSvc(resultFor, { 'plat-sanity': trades(90) });
+    const addEvaluationSpy = vi.spyOn(experiments, 'addEvaluation');
+
+    const { verdict } = await svc.runStrategyBaselineValidation(baseInput());
+
+    expect(verdict).toBe('PAPER_CANDIDATE'); // degradation is informational only — verdict unaffected
+    expect(addEvaluationSpy).toHaveBeenCalledTimes(1);
+    const persisted = addEvaluationSpy.mock.calls[0]![0];
+    expect(persisted.evaluatorVersion).toBe(STRATEGY_BASELINE_EVALUATOR_VERSION);
+    const deg = (persisted.rawScores as { oosDegradation: Record<string, unknown> }).oosDegradation;
+    expect(deg.isSharpe).toBe(2.0);
+    expect(deg.oosSharpe).toBe(0.4);
+    expect(deg.oosIsSharpeRatio as number).toBeCloseTo(0.2, 5);
+    expect(persisted.flags.fragility).toContain('oos_degradation');
   });
 });
 

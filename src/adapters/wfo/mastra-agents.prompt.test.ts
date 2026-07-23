@@ -76,4 +76,28 @@ describe('WFO Mastra prompt builders — outcome embargo', () => {
     assertClean(prompts[0]!);
     expect(prompts[0]!).toContain('ph1');
   });
+
+  // R3 (research-validation-hardening item 3, report-13 gap G3): the interpreter must be told,
+  // as an explicit fact (not just buried in the topN JSON dump), which points are lone peaks.
+  it('result-interpreter prompt surfaces an explicit lone_peak fact when a ranked point is flagged', async () => {
+    const { agent, prompts } = capturingAgent({ decision: 'stop' });
+    const topN = [
+      { paramsHash: 'lone1', point: { x: 1 }, status: 'completed', metrics: dirtyMetrics, lowConfidence: false, lonePeak: true },
+      { paramsHash: 'ok1', point: { x: 2 }, status: 'completed', metrics: dirtyMetrics, lowConfidence: false, lonePeak: false },
+    ] as unknown as RankedPoint[];
+    const input: InterpretInput = { topN, roundsSoFar: 1, maxRounds: 3 };
+    await new MastraResultInterpreter(agent, 'test').interpret(input);
+    expect(prompts[0]!).toMatch(/lone peak/i);
+    expect(prompts[0]!).toContain('lone1');
+  });
+
+  it('result-interpreter prompt reports no lone peaks when none are flagged', async () => {
+    const { agent, prompts } = capturingAgent({ decision: 'stop' });
+    const topN = [
+      { paramsHash: 'ok1', point: { x: 2 }, status: 'completed', metrics: dirtyMetrics, lowConfidence: false, lonePeak: false },
+    ] as unknown as RankedPoint[];
+    const input: InterpretInput = { topN, roundsSoFar: 1, maxRounds: 3 };
+    await new MastraResultInterpreter(agent, 'test').interpret(input);
+    expect(prompts[0]!).toMatch(/lone peak.*none/i);
+  });
 });
