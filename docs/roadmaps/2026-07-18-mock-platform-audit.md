@@ -13,6 +13,14 @@ Full audit: control-center
 
 ## Lab's part — `proposed`
 
+- **wfo-extended-fixture item 4 (lab side) — done.** Up-front tier-aware
+  fail-fast now runs in all three `ExperimentService` lanes
+  (`runNewStrategyValidation`, `runStrategyBaselineValidation`,
+  `runWalkForwardOptimization`), before the sanity/GATE1 step, naming tier T2
+  instead of surfacing `insufficient_history` deep inside
+  `resolveHoldoutBoundary`. Reads the committed `snapshot-tiers.json` via
+  `src/research/snapshot-tier-catalog.ts`. See the
+  [wfo-extended-fixture card, item 4](../../../control-center/docs/delivery/initiatives/wfo-extended-fixture.md).
 - **wfo-extended-fixture**: tier-aware fixture selection + fail-fast in the
   WFO/holdout experiment path. Today `DEFAULT_HOLDOUT_POLICY`
   (`minHistoryDays: 30`, `minTradesTrain: 50`, `minTradesHoldout: 30` —
