@@ -15,6 +15,15 @@ Full analysis: control-center
 Principle for every item: the verdict stays with deterministic versioned code
 (the existing ladder culture); the LLM proposes and diagnoses, never judges.
 
+- **R2 (lab side) — done.** `evaluateStrategyBaseline`
+  (`src/validation/strategy-baseline-evaluator.ts`) now computes
+  `oosSharpe/isSharpe` and `oosPF/isPF` into `rawScores.oosDegradation` on
+  every evaluation row (both the baseline and WFO-holdout lanes), and sets an
+  informational `oos_degradation` fragility flag below a preliminary 0.5
+  ratio. Log-mode only — the verdict ladder itself is unchanged; enforcement
+  is deferred to a calibrated wave after item 7's SSOT threshold pinning. See
+  the
+  [research-validation-hardening card](../../../control-center/docs/delivery/initiatives/research-validation-hardening.md).
 - **R1 (consumer side)**: persist `RunResultSummary.trialContext`
   (trialCount, deflatedSharpe — already in the backtester SDK contract,
   advisory) into `experiment_evaluation`, so DSR becomes available to the

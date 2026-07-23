@@ -13,6 +13,7 @@ import type { StrategyExperimentRunExecutor, StrategyExperimentRunResult } from 
 import type { AgentEventRepository } from '../ports/agent-event.repository.ts';
 import type { AssembledStrategyBundle } from '../domain/strategy-bundle.ts';
 import type { StrategyProfile } from '../domain/strategy-profile.ts';
+import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 import { resolveHoldoutBoundary } from './holdout-boundary-resolver.ts';
 import { evaluateExperiment, EXPERIMENT_EVALUATOR_VERSION } from '../validation/experiment-evaluator.ts';
 import { evaluateStrategyBaseline, STRATEGY_BASELINE_EVALUATOR_VERSION } from '../validation/strategy-baseline-evaluator.ts';
@@ -366,8 +367,9 @@ export class ExperimentService {
     if (holdout.status === 'pending') return fail('INCONCLUSIVE', 'run_pending');
     if (holdout.status !== 'completed' || !holdout.metrics) return fail('INCONCLUSIVE', 'holdout_not_run');
 
-    // --- EVALUATE (holdout only; sanity/train are gates, not the verdict source) ---
-    const result = evaluateStrategyBaseline({ holdout: holdout.metrics, boundary });
+    // --- EVALUATE (holdout is the verdict source; train is passed ONLY as the R2 IS→OOS
+    // degradation baseline — sanity/train remain gates, never the verdict) ---
+    const result = evaluateStrategyBaseline({ holdout: holdout.metrics, boundary, train: train.metrics });
     const evaluation: ExperimentEvaluation = {
       id: this.d.newId('expeval'), experimentId, evaluatorVersion: STRATEGY_BASELINE_EVALUATOR_VERSION,
       rawScores: result.rawScores, flags: result.flags, verdict: result.verdict,
@@ -598,7 +600,9 @@ export class ExperimentService {
 
     // --- Round loop ---
     let unionGrid: ParameterGrid = existing?.parameterGrid ? { ...existing.parameterGrid } : {};
-    let selected: { point: GridPoint; foldId: number } | undefined;
+    // trainMetrics: the SAME point's train-window run metrics (from this round's grid sweep) —
+    // the R2 IS→OOS degradation baseline for the eventual holdout evaluation below.
+    let selected: { point: GridPoint; foldId: number; trainMetrics: BacktestMetricBlock } | undefined;
     let budgetExhaustedMidLoop = false;
 
     for (let r = 1; r <= budget.maxRounds; r += 1) {
@@ -664,7 +668,7 @@ export class ExperimentService {
       if (interpretation.decision === 'select') {
         const chosen = ranked.find((res) => res.paramsHash === interpretation.chosenParamsHash);
         if (!chosen) return finalize('INCONCLUSIVE', 'sweep_failed');
-        selected = { point: chosen.point, foldId: r - 1 };
+        selected = { point: chosen.point, foldId: r - 1, trainMetrics: chosen.metrics };
         break;
       }
       if (interpretation.decision === 'stop') return finalize('INCONCLUSIVE', 'stop');
@@ -693,7 +697,10 @@ export class ExperimentService {
       return finalize('INCONCLUSIVE', 'inconclusive');
     }
 
-    const result = evaluateStrategyBaseline({ holdout: holdoutOutcome.metrics, boundary });
+    // R2: train is the SELECTED point's own train-window metrics (chosen.metrics captured
+    // above as selected.trainMetrics) — the correct IS baseline for THIS specific point, not
+    // the original (pre-optimization) baseline experiment's train metrics.
+    const result = evaluateStrategyBaseline({ holdout: holdoutOutcome.metrics, boundary, train: selected.trainMetrics });
     const evaluation: ExperimentEvaluation = {
       id: this.d.newId('expeval'), experimentId, evaluatorVersion: STRATEGY_BASELINE_EVALUATOR_VERSION,
       rawScores: result.rawScores, flags: result.flags, verdict: result.verdict,
