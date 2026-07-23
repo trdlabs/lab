@@ -635,3 +635,20 @@ describe('[P1-17] fail-closed adapter/integration parsing', () => {
     expect(env.RESEARCHER_ADAPTER).toBe('mastra');
   });
 });
+
+describe('loadEnv — LAB_BREAK_BATTERY_MODE (R11 break battery)', () => {
+  it("defaults to 'off' (battery never invoked)", () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).LAB_BREAK_BATTERY_MODE).toBe('off');
+    expect(loadEnv({ LAB_BREAK_BATTERY_MODE: '' } as NodeJS.ProcessEnv).LAB_BREAK_BATTERY_MODE).toBe('off');
+  });
+
+  it("accepts 'off' and 'log'", () => {
+    expect(loadEnv({ LAB_BREAK_BATTERY_MODE: 'off' } as NodeJS.ProcessEnv).LAB_BREAK_BATTERY_MODE).toBe('off');
+    expect(loadEnv({ LAB_BREAK_BATTERY_MODE: 'log' } as NodeJS.ProcessEnv).LAB_BREAK_BATTERY_MODE).toBe('log');
+  });
+
+  it("fail-closed: 'enforce' (item 7 pending) and unknown values throw", () => {
+    expect(() => loadEnv({ LAB_BREAK_BATTERY_MODE: 'enforce' } as NodeJS.ProcessEnv)).toThrow(/item 7/);
+    expect(() => loadEnv({ LAB_BREAK_BATTERY_MODE: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/off\|log/);
+  });
+});

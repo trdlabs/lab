@@ -411,6 +411,7 @@ export function composeRuntime() {
     tokenUsage,
     researchTaskTokenBudget: env.RESEARCH_TASK_TOKEN_BUDGET,
     revisions,
+    breakBatteryMode: env.LAB_BREAK_BATTERY_MODE,
   });
 
   const services: AppServices = {
