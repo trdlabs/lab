@@ -168,7 +168,10 @@ async function buildSvcWithRevisions(
 // Tests
 // ---------------------------------------------------------------------------
 describe('runStrategyBaselineValidation', () => {
-  it('few trades over a short slice → INCONCLUSIVE, no train/holdout runs (demo path)', async () => {
+  // wfo-extended-fixture item 4: a period shorter than DEFAULT_HOLDOUT_POLICY.minHistoryDays (30d)
+  // now fails fast BEFORE the sanity run — previously this slice ran a real sanity backtest and
+  // only discovered `insufficient_history` afterward, deep inside resolveHoldoutBoundary.
+  it('short slice (< minHistoryDays) → fail-fast INCONCLUSIVE, no sanity run at all (demo path)', async () => {
     const { svc, experiments, executor } = buildSvc(
       () => ({ status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 4 }),
       { 'plat-sanity': trades(4) },
@@ -180,15 +183,13 @@ describe('runStrategyBaselineValidation', () => {
     const { experimentId, verdict } = await svc.runStrategyBaselineValidation(input);
 
     expect(verdict).toBe('INCONCLUSIVE');
-    expect(executor.calls).toEqual(['sanity']);
+    expect(executor.calls).toEqual([]); // fail-fast pre-empts the sanity run entirely
 
     const members = await experiments.listMembers(experimentId);
-    expect(members).toHaveLength(1);
-    expect(members[0]!.role).toBe('sanity');
-    expect(members[0]!.strategyBacktestRunId).toBe('r-sanity');
-    expect(members[0]!.backtestRunId).toBeUndefined();
+    expect(members).toHaveLength(0);
 
     const exp = await experiments.findById(experimentId);
+    expect(exp?.verdictReason).toBe('insufficient_history');
     expect(exp?.experimentType).toBe('strategy_baseline_validation');
     expect(exp?.hypothesisId).toBeUndefined();
     expect(exp?.buildId).toBeUndefined();
@@ -220,11 +221,13 @@ describe('runStrategyBaselineValidation', () => {
       datasetScope: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-01-07' } },
     });
 
-    // First run: no bundleArtifactRef supplied (simulates a row created before ref persistence landed).
+    // First run: no bundleArtifactRef supplied (simulates a row created before ref persistence
+    // landed). The period is < minHistoryDays, so this now completes via the item-4 fail-fast
+    // path — no sanity run — but the dedup/backfill behavior under test is unaffected either way.
     const first = await svc.runStrategyBaselineValidation(shortInput);
     expect(first.verdict).toBe('INCONCLUSIVE');
     expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toBeUndefined();
-    expect(executor.calls).toEqual(['sanity']);
+    expect(executor.calls).toEqual([]);
 
     // Second run: same key, now WITH a ref — dedup early-return must backfill it onto the existing row.
     const refA = testArtifactRef();
@@ -234,15 +237,15 @@ describe('runStrategyBaselineValidation', () => {
     expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toEqual(refA);
 
     // No new member/run was created by the dedup path.
-    expect(executor.calls).toEqual(['sanity']);
-    expect(await experiments.listMembers(first.experimentId)).toHaveLength(1);
+    expect(executor.calls).toEqual([]);
+    expect(await experiments.listMembers(first.experimentId)).toHaveLength(0);
 
     // Third run: a DIFFERENT ref must NOT overwrite the already-backfilled one (first ref wins).
     const refB: typeof refA = { ...refA, artifact_id: 'art-2', uri: 'file:///tmp/b.json' };
     const third = await svc.runStrategyBaselineValidation({ ...shortInput, bundleArtifactRef: refB });
     expect(third.experimentId).toBe(first.experimentId);
     expect((await experiments.findById(first.experimentId))?.bundleArtifactRef).toEqual(refA);
-    expect(executor.calls).toEqual(['sanity']);
+    expect(executor.calls).toEqual([]);
   });
 
   it('synthetic ≥30-trade path with a surviving holdout → PAPER_CANDIDATE', async () => {
@@ -414,6 +417,38 @@ describe('runStrategyBaselineValidation', () => {
     expect(verdict).toBe('INCONCLUSIVE');
     const exp = await experiments.findById(experimentId);
     expect(exp?.verdictReason).toBe('train_not_run');
+  });
+
+  // --- wfo-extended-fixture item 4: up-front tier-aware fail-fast, before the sanity run ---
+  describe('tier-aware fail-fast (wfo-extended-fixture item 4)', () => {
+    it('default weekly window (6d) → INCONCLUSIVE/insufficient_history naming tier T2, sanity never invoked', async () => {
+      const { svc, experiments, executor } = buildSvc(() => ({ status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 90 }), {});
+      const weeklyInput = baseInput({
+        datasetScope: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2026-06-22T00:00:00.000Z', to: '2026-06-28T00:00:00.000Z' } },
+      });
+
+      const { experimentId, verdict } = await svc.runStrategyBaselineValidation(weeklyInput);
+
+      expect(verdict).toBe('INCONCLUSIVE');
+      expect(executor.calls).toEqual([]); // fail-fast pre-empts the sanity run entirely
+      const exp = await experiments.findById(experimentId);
+      expect(exp?.verdictReason).toBe('insufficient_history'); // reason-code pin (unchanged)
+      const message = (exp?.aggregateMetrics?.flags as { coverageWarnings?: string[] } | undefined)?.coverageWarnings?.[0];
+      expect(message).toContain('T2');
+      expect(message).toContain('wfo/2026-06-09-to-2026-07-20-vps-wfo42d');
+      expect(message).toMatch(/6\.0d < 30d required/);
+    });
+
+    it('T2-sized window (42d) → fail-fast does NOT trigger, sanity still runs', async () => {
+      const { svc, executor } = buildSvc(() => ({ status: 'completed', runId: 'r-sanity', platformRunId: 'plat-sanity', totalTrades: 5 }), { 'plat-sanity': trades(5) });
+      const t2Input = baseInput({
+        datasetScope: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2026-06-09T00:00:00.000Z', to: '2026-07-21T00:00:00.000Z' } },
+      });
+
+      await svc.runStrategyBaselineValidation(t2Input);
+
+      expect(executor.calls).toContain('sanity'); // proves fail-fast let it through
+    });
   });
 });
 
