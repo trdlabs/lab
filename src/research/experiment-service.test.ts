@@ -117,4 +117,32 @@ describe('ExperimentService.runNewStrategyValidation', () => {
     expect(b.experimentId).toBe(a.experimentId);
     expect(executor.calls.length).toBe(before);
   });
+
+  // --- wfo-extended-fixture item 4: up-front tier-aware fail-fast, before the sanity run ---
+  describe('tier-aware fail-fast (wfo-extended-fixture item 4)', () => {
+    it('default weekly window (6d) → INCONCLUSIVE/insufficient_history naming tier T2, sanity never invoked', async () => {
+      const { service, experiments, executor } = svc(() => ok('sanity', 'strong', 90), {});
+      const weeklyInput = { ...input, datasetScope: { ...input.datasetScope, period: { from: '2026-06-22T00:00:00.000Z', to: '2026-06-28T00:00:00.000Z' } } };
+
+      const res = await service.runNewStrategyValidation(weeklyInput);
+
+      expect(res.verdict).toBe('INCONCLUSIVE');
+      expect(executor.calls.length).toBe(0); // fail-fast pre-empts the sanity run entirely
+      const exp = await experiments.findById(res.experimentId);
+      expect(exp?.verdictReason).toBe('insufficient_history'); // reason-code pin (unchanged)
+      const message = (exp?.aggregateMetrics?.flags as { coverageWarnings?: string[] } | undefined)?.coverageWarnings?.[0];
+      expect(message).toContain('T2');
+      expect(message).toContain('wfo/2026-06-09-to-2026-07-20-vps-wfo42d');
+      expect(message).toMatch(/6\.0d < 30d required/);
+    });
+
+    it('T2-sized window (42d) → fail-fast does NOT trigger, sanity still runs', async () => {
+      const { service, executor } = svc(() => ok('sanity', 'strong', 5), { 'plat-sanity': trades(5) });
+      const t2Input = { ...input, datasetScope: { ...input.datasetScope, period: { from: '2026-06-09T00:00:00.000Z', to: '2026-07-21T00:00:00.000Z' } } };
+
+      await service.runNewStrategyValidation(t2Input);
+
+      expect(executor.calls.some((c) => c.role === 'sanity')).toBe(true); // proves fail-fast let it through
+    });
+  });
 });

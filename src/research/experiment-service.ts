@@ -2,9 +2,10 @@ import type { Ref, PlatformRunConfig } from '../ports/research-platform.port.ts'
 import type { ModuleBundle } from '../domain/module-bundle.ts';
 import type {
   ResearchExperiment, ExperimentRunMember, ExperimentEvaluation, ExperimentVerdict,
-  MemberRole, DatasetScope, HoldoutPolicy, ParameterGrid,
+  MemberRole, DatasetScope, HoldoutPolicy, ParameterGrid, ExperimentFlags,
 } from '../domain/research-experiment.ts';
 import { DEFAULT_HOLDOUT_POLICY } from '../domain/research-experiment.ts';
+import { requiredTierForDays } from './snapshot-tier-catalog.ts';
 import type { ResearchExperimentRepository } from '../ports/research-experiment.repository.ts';
 import type { RunTradesPort } from '../ports/run-trades.port.ts';
 import type { ExperimentRunExecutor, ExperimentRunResult } from './experiment-run-executor.ts';
@@ -43,6 +44,8 @@ export interface WfoBudget {
 }
 
 export const DEFAULT_WFO_BUDGET: WfoBudget = { maxRounds: 2, maxPointsPerRound: 8, minTradesTrain: 3, topN: 3 };
+
+const DAY_MS = 86_400_000; // mirrors holdout-boundary-resolver.ts's own span math — must never disagree
 
 export interface ExperimentServiceDeps {
   experiments: ResearchExperimentRepository;
@@ -124,6 +127,32 @@ export class ExperimentService {
   private readonly d: ExperimentServiceDeps;
   constructor(deps: ExperimentServiceDeps) { this.d = deps; }
 
+  /**
+   * Up-front span check (wfo-extended-fixture item 4). `resolveHoldoutBoundary` already rejects
+   * any period < `policy.minHistoryDays` — but only AFTER an expensive sanity/GATE1 step has
+   * already paid for it, and without saying what depth WOULD have worked. This mirrors that same
+   * span math exactly (`(to - from) / DAY_MS`) so the two checks can never disagree, and — when
+   * the period is too short — names the minimal `snapshot-tiers.json` tier that clears the floor.
+   * Returns undefined when the period already clears `policy.minHistoryDays` (resolveHoldoutBoundary
+   * remains the deep, authoritative gate either way — this is purely an earlier short-circuit).
+   */
+  private tierFailFastMessage(period: { from: string; to: string }, policy: HoldoutPolicy): string | undefined {
+    const spanDays = (Date.parse(period.to) - Date.parse(period.from)) / DAY_MS;
+    if (spanDays >= policy.minHistoryDays) return undefined;
+    const required = requiredTierForDays(policy.minHistoryDays);
+    const tierNote = required
+      ? `use tier ${required.tierId} (${required.ref})`
+      : `no snapshot-tiers.json tier clears ${policy.minHistoryDays}d`;
+    return `insufficient_history: period spans ${spanDays.toFixed(1)}d < ${policy.minHistoryDays}d required; ${tierNote}`;
+  }
+
+  /** Builds the ExperimentFlags patch a fail-fast path stores on `aggregateMetrics.flags` — the
+   * same slot the happy-path evaluators use for `flags.coverageWarnings`, just reached without
+   * ever creating an ExperimentEvaluation row. */
+  private tierFailFastFlags(message: string): ExperimentFlags {
+    return { lowConfidenceHoldout: false, overfit: false, fragility: [], coverageWarnings: [message] };
+  }
+
   async runNewStrategyValidation(input: RunNewStrategyValidationInput): Promise<{ experimentId: string; verdict: ExperimentVerdict }> {
     const policy = input.holdoutPolicy ?? DEFAULT_HOLDOUT_POLICY;
     const experimentKey = computeExperimentKey({
@@ -152,10 +181,13 @@ export class ExperimentService {
     }
 
     const fullPeriod = input.datasetScope.period;
-    const fail = async (verdict: ExperimentVerdict, reason: string): Promise<{ experimentId: string; verdict: ExperimentVerdict }> => {
+    const fail = async (
+      verdict: ExperimentVerdict, reason: string, flags?: ExperimentFlags,
+    ): Promise<{ experimentId: string; verdict: ExperimentVerdict }> => {
       await this.d.experiments.updateExperiment(experimentId, {
         status: 'completed', verdict, verdictReason: reason,
         completedAt: this.d.now(), updatedAt: this.d.now(),
+        ...(flags ? { aggregateMetrics: { flags } } : {}),
       });
       await this.d.events.append({
         id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.completed',
@@ -164,6 +196,12 @@ export class ExperimentService {
       });
       return { experimentId, verdict };
     };
+
+    // --- FAIL-FAST (wfo-extended-fixture item 4): before the sanity run pays for it, reject any
+    // period too short for holdoutPolicy.minHistoryDays and name the required snapshot-tiers tier.
+    // resolveHoldoutBoundary below remains the deep, unmodified safety net. ---
+    const tierMessage = this.tierFailFastMessage(fullPeriod, policy);
+    if (tierMessage) return fail('INCONCLUSIVE', 'insufficient_history', this.tierFailFastFlags(tierMessage));
 
     // --- SANITY (gate + trade-distribution source; never the edge verdict) ---
     const sanity = await this.runMember(experimentId, 'sanity', input, { ...input.runConfig, period: fullPeriod });
@@ -273,10 +311,13 @@ export class ExperimentService {
     }
 
     const fullPeriod = input.datasetScope.period;
-    const fail = async (verdict: ExperimentVerdict, reason: string): Promise<{ experimentId: string; verdict: ExperimentVerdict }> => {
+    const fail = async (
+      verdict: ExperimentVerdict, reason: string, flags?: ExperimentFlags,
+    ): Promise<{ experimentId: string; verdict: ExperimentVerdict }> => {
       await this.d.experiments.updateExperiment(experimentId, {
         status: 'completed', verdict, verdictReason: reason,
         completedAt: this.d.now(), updatedAt: this.d.now(),
+        ...(flags ? { aggregateMetrics: { flags } } : {}),
       });
       await this.d.events.append({
         id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.completed',
@@ -286,6 +327,12 @@ export class ExperimentService {
       await this.bootstrapRevisionV1(input, experimentId);
       return { experimentId, verdict };
     };
+
+    // --- FAIL-FAST (wfo-extended-fixture item 4): before the sanity run pays for it, reject any
+    // period too short for holdoutPolicy.minHistoryDays and name the required snapshot-tiers tier.
+    // resolveHoldoutBoundary below remains the deep, unmodified safety net. ---
+    const tierMessage = this.tierFailFastMessage(fullPeriod, policy);
+    if (tierMessage) return fail('INCONCLUSIVE', 'insufficient_history', this.tierFailFastFlags(tierMessage));
 
     // --- SANITY (gate + trade-distribution source; never the edge verdict) ---
     const sanity = await this.runStrategyMember(experimentId, 'sanity', input, { ...input.runConfig, period: fullPeriod });
@@ -493,10 +540,11 @@ export class ExperimentService {
     }
 
     const finalize = async (
-      verdict: ExperimentVerdict, terminalReason: string,
+      verdict: ExperimentVerdict, terminalReason: string, flags?: ExperimentFlags,
     ): Promise<{ experimentId: string; verdict: ExperimentVerdict; terminalReason: string }> => {
       await this.d.experiments.updateExperiment(experimentId, {
         status: 'completed', verdict, verdictReason: terminalReason, completedAt: this.d.now(), updatedAt: this.d.now(),
+        ...(flags ? { aggregateMetrics: { flags } } : {}),
       });
       await this.d.events.append({
         id: this.d.newId('evt'), taskId: input.taskId, type: 'experiment.completed',
@@ -505,6 +553,13 @@ export class ExperimentService {
       });
       return { experimentId, verdict, terminalReason };
     };
+
+    // --- FAIL-FAST (wfo-extended-fixture item 4): before GATE1 / sweep / paramGridRunner pay for
+    // it, reject any period too short for the baseline's holdoutPolicy.minHistoryDays and name the
+    // required snapshot-tiers tier. The mode:'none' cap further below (after GATE1) remains as-is —
+    // this is purely an earlier short-circuit for the span case specifically. ---
+    const tierMessage = this.tierFailFastMessage(input.datasetScope.period, baseline.holdoutPolicy);
+    if (tierMessage) return finalize('INCONCLUSIVE', 'insufficient_history', this.tierFailFastFlags(tierMessage));
 
     // --- Budget gate (BEFORE GATE1 — a spent correlation never even reaches the first LLM call) ---
     if (await this.budgetExhausted(input.correlationId)) {

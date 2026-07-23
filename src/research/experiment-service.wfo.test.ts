@@ -660,4 +660,46 @@ describe('outcome embargo (S1)', () => {
       expect.arrayContaining(['<holdout>', '<promotion>', '<out_of_sample>', '<evaluation_window>']),
     );
   });
+
+  // --- wfo-extended-fixture item 4: up-front tier-aware fail-fast, before GATE1 ---
+  describe('tier-aware fail-fast (wfo-extended-fixture item 4)', () => {
+    it('default weekly window (6d) → INCONCLUSIVE/insufficient_history naming tier T2, GATE1 never invoked', async () => {
+      const gate1 = new FakeGate1();
+      const { svc, experiments, strategyBacktests } = buildSvc({ resultFor: () => ({ totalTrades: 5 }), gate1 });
+      const baselineExperimentId = await seedBaseline({
+        experiments, strategyBacktests, totalTrades: 5,
+        boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+      });
+      const input = baseInput(baselineExperimentId, [ENTRY_PARAM], {
+        datasetScope: { ...DATASET_SCOPE, period: { from: '2026-06-22T00:00:00.000Z', to: '2026-06-28T00:00:00.000Z' } },
+      });
+
+      const { experimentId, verdict, terminalReason } = await svc.runWalkForwardOptimization(input);
+
+      expect(verdict).toBe('INCONCLUSIVE');
+      expect(terminalReason).toBe('insufficient_history'); // reason-code pin (unchanged)
+      expect(gate1.calls.length).toBe(0); // fail-fast pre-empts GATE1 (and the round loop) entirely
+      const exp = await experiments.findById(experimentId);
+      const message = (exp?.aggregateMetrics?.flags as { coverageWarnings?: string[] } | undefined)?.coverageWarnings?.[0];
+      expect(message).toContain('T2');
+      expect(message).toContain('wfo/2026-06-09-to-2026-07-20-vps-wfo42d');
+      expect(message).toMatch(/6\.0d < 30d required/);
+    });
+
+    it('T2-sized window (42d) → fail-fast does NOT trigger, GATE1 still runs', async () => {
+      const gate1 = new FakeGate1();
+      const { svc, strategyBacktests, experiments } = buildSvc({ resultFor: () => ({ totalTrades: 5 }), gate1 });
+      const baselineExperimentId = await seedBaseline({
+        experiments, strategyBacktests, totalTrades: 5,
+        boundary: { mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok' },
+      });
+      const input = baseInput(baselineExperimentId, [ENTRY_PARAM], {
+        datasetScope: { ...DATASET_SCOPE, period: { from: '2026-06-09T00:00:00.000Z', to: '2026-07-21T00:00:00.000Z' } },
+      });
+
+      await svc.runWalkForwardOptimization(input);
+
+      expect(gate1.calls.length).toBeGreaterThan(0); // proves fail-fast let it through
+    });
+  });
 });
