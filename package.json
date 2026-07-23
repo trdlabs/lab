@@ -24,7 +24,10 @@
     "critic:eval": "node --experimental-strip-types --env-file-if-exists=.env scripts/strategy-critic-eval.ts",
     "operator-rag:reindex": "node --experimental-strip-types --env-file-if-exists=.env scripts/operator-rag-reindex.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "env:schema": "node --experimental-strip-types scripts/env-schema-export.ts",
+    "env:docs": "node --experimental-strip-types scripts/env-docs.ts",
+    "env:reads": "node --experimental-strip-types scripts/env-reads-advisory.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.82",
