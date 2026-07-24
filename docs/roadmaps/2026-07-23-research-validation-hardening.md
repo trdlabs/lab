@@ -147,6 +147,36 @@ Principle for every item: the verdict stays with deterministic versioned code
   (b) register every hypothesis as a family trial in the backtester trial
   ledger so FAIL/MODIFY retries and many-hypotheses selection get discounted
   via DSR automatically.
+- **R13 (2026-07-24) — done.** Typed axis catalog `SWEEP_AXIS_CATALOG`
+  (`hold_time`, `entry_thresholds`, `stops_takes`, `cooldown`, `sizing`,
+  `regime_as_axis`, plus `leverage` denylisted) with a prompt export; the "wide
+  plateau, not peak" and "include the expected degradation point" rules plus
+  the leverage denylist are wired into the sweep-designer prompts
+  (`SWEEP_DESIGNER_INSTRUCTIONS`) and researcher-capabilities. A deterministic
+  `denylisted_axis:*` gate lands in `validateSweepGrid` (the denylist check
+  runs first, the four pre-existing reason codes are untouched). Onboarding
+  battery: flag `LAB_ONBOARD_BATTERY_MODE` (`off` default → `log`, fail-closed)
+  hooks into `strategy-baseline.handler` right before `strategy.wfo` is
+  enqueued — a deterministic ±50% grid around the baseline values, built from
+  the axis catalog (no LLM, capped at 12 points, axes picked greedily by name),
+  runs through `ParamGridRunner`; every point lands server-side in the trial
+  ledger, and a `strategy.onboard_battery.completed` event (counts +
+  `lonePeak`, no magnitudes) plus an artifact summary close the run. Fail-soft:
+  the baseline→wfo chain never breaks on battery failure. The
+  `hold_time`/`sizing` matchers were narrowed to remove threshold/resize
+  collisions.
+
+  Decisions: the grid is built without an LLM (determinism over creativity at
+  this stage); at most 2 axes combine (3×3 ≤ 12 cap); the result surfaces via
+  event + artifact rather than a new migration; `enforce` is not implemented —
+  this is a log-only stage.
+
+  Tail: `trialFamilyHint` is absent from the strategy lane —
+  `StrategyExperimentRunRequest` carries no such field (the wire contract was
+  left untouched), so onboarding-battery points land in the trial ledger
+  without a profile hint and are grouped by `moduleRef.id` + window instead — a
+  separate task if that grouping turns out to matter. Merging the battery's
+  plateau points into the first WFO round is deferred as YAGNI.
 - **R13 — sweep axis catalog + onboarding battery**: extend
   `src/mastra/agents/sweep-designer.agent.ts` (and researcher-capabilities)
   with a deterministically-checkable axis catalog (hold time, entry
