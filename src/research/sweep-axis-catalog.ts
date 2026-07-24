@@ -48,7 +48,7 @@ export const SWEEP_AXIS_CATALOG: readonly SweepAxis[] = [
       'Hold time — sweep the max/target holding duration (e.g. maxHoldMin) around the baseline. '
       + 'A strategy whose edge only survives at one exact hold time is fragile; look for a wide '
       + 'plateau, not a peak, and include a point past the point where performance starts to degrade.',
-    matchesParam: nameMatcher(['hold.'], ['hold']),
+    matchesParam: nameMatcher(['hold.'], ['maxhold', 'holdtime', 'holdmin', 'holdbar']),
   },
   {
     axis: 'entry_thresholds',
@@ -81,7 +81,7 @@ export const SWEEP_AXIS_CATALOG: readonly SweepAxis[] = [
       'Sizing — sweep position-sizing / DCA step params (e.g. dca.stepPct, positionSizePct). Sizing '
       + 'interacts with drawdown and the risk/reward tradeoff is the researcher\'s job to surface, not '
       + 'to pick a winner by Sharpe alone; report the plateau, not just the top point.',
-    matchesParam: nameMatcher(['dca.'], ['size', 'sizing']),
+    matchesParam: nameMatcher(['dca.'], ['positionsize', 'sizepct']),
   },
   {
     axis: 'regime_as_axis',

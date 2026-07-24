@@ -54,6 +54,8 @@ describe('SWEEP_AXIS_CATALOG', () => {
     const byAxis = Object.fromEntries(SWEEP_AXIS_CATALOG.map((a) => [a.axis, a]));
 
     expect(byAxis.hold_time!.matchesParam('maxHoldMin')).toBe(true);
+    expect(byAxis.hold_time!.matchesParam('holdTimeMin')).toBe(true);
+    expect(byAxis.hold_time!.matchesParam('hold.maxBars')).toBe(true);
     expect(byAxis.hold_time!.matchesParam('entry.fastBouncePct')).toBe(false);
 
     expect(byAxis.entry_thresholds!.matchesParam('dump.minDropPct')).toBe(true);
@@ -80,6 +82,29 @@ describe('SWEEP_AXIS_CATALOG', () => {
     expect(byAxis.leverage!.matchesParam('leverage.multiplier')).toBe(true);
     expect(byAxis.leverage!.matchesParam('marginMode')).toBe(true);
     expect(byAxis.leverage!.matchesParam('hardStopPct')).toBe(false);
+  });
+});
+
+describe('SWEEP_AXIS_CATALOG — substring-collision regressions (R13 Task 4)', () => {
+  const byAxis = Object.fromEntries(SWEEP_AXIS_CATALOG.map((a) => [a.axis, a]));
+
+  it('threshold-named entry params never match hold_time (the "…thresHOLD" trap)', () => {
+    for (const name of ['entry.thresholdPct', 'dump.dropThreshold', 'oiFilter.oiThreshold']) {
+      expect(byAxis.hold_time!.matchesParam(name)).toBe(false);
+    }
+    // …and they DO land on entry_thresholds where they belong.
+    expect(byAxis.entry_thresholds!.matchesParam('entry.thresholdPct')).toBe(true);
+    expect(byAxis.entry_thresholds!.matchesParam('dump.dropThreshold')).toBe(true);
+    expect(byAxis.entry_thresholds!.matchesParam('oiFilter.oiThreshold')).toBe(true);
+  });
+
+  it('resize-named params never match sizing (the "reSIZE" trap)', () => {
+    for (const name of ['resizeWindow', 'gridResizeEnabled']) {
+      expect(byAxis.sizing!.matchesParam(name)).toBe(false);
+    }
+    // real sizing params still match.
+    expect(byAxis.sizing!.matchesParam('positionSizePct')).toBe(true);
+    expect(byAxis.sizing!.matchesParam('dca.stepPct')).toBe(true);
   });
 });
 
