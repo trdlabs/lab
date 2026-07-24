@@ -71,8 +71,13 @@ Principle for every item: the verdict stays with deterministic versioned code
   battery is never invoked) → `log` (report persisted to
   `aggregateMetrics.breakBattery` + structural `break_battery.completed`
   event; verdict/status/timings are NEVER touched). `enforce` is rejected at
-  boot until item 7 pins SSOT thresholds — the current floors are
-  preliminary constants in one place (`BREAK_BATTERY_POLICY`, versioned).
+  boot until calibration completes — the floors are pinned by owner decision
+  2026-07-24 as `battery-policy@1` (SSOT: control-center
+  `docs/architecture/battery-policy.md`): DSR floor 0.95 (Bailey/López de
+  Prado canonical confidence; `deflatedSharpe` is the DSR probability),
+  IS→OOS ratio floor 0.5 (Pardo walk-forward efficiency), plateau =
+  neighbor-median ≥ 0.5×peak (R3 semantics). Log-run calibration precedes
+  any enforce flip (item 7 tail).
   Battery feedback toward the retry cycle exists only pre-sanitized through
   the Outcome-Embargo allowlist (`buildBreakBatteryRetryFeedback` →
   `sanitizeRetryFeedback`; the three failure codes are allowlisted in
