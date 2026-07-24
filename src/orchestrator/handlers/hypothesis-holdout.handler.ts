@@ -35,9 +35,12 @@ export const HypothesisHoldoutPayloadSchema = z.object({
   hypothesisId: z.string().min(1),
   strategyProfileId: z.string().min(1),
   backtestRunId: z.string().min(1),
-  /** Optional IS-Sharpe hint. Advisory recoverability signal only: its PRESENCE (together with, or
-   *  instead of, the run's stored metrics) decides whether an IS baseline exists at all. The actual
-   *  `computeOosDegradation` still reads the stored full-period metric block when available. */
+  /** Advisory recoverability signal only — its PRESENCE (together with, or instead of, the run's
+   *  stored metrics) decides whether an IS baseline exists at all (the recoverability gate below).
+   *  It is NEVER itself fed into the degradation ratio: `computeOosDegradation` always reads the
+   *  stored full-period metric block (`run.metrics`), never this field. Consequently the
+   *  isSharpe-only path (hint present, `run.metrics` absent) still runs the battery, but with the
+   *  OOS-degradation check reporting `skipped` (non-breaking) rather than an evaluated ratio. */
   isSharpe: z.number().optional(),
   /** The window the PAPER_CANDIDATE run executed on; the holdout-window fallback when the persisted
    *  run row has no `platformRun`. */
