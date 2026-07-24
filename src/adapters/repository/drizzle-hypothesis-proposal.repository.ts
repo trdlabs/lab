@@ -4,6 +4,7 @@ import { hypothesisProposal } from '../../db/schema.ts';
 import type {
   HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics, RuleAction, ExpectedEffect, HypothesisProposalDraft,
 } from '../../domain/hypothesis.ts';
+import type { BreakBatteryReport } from '../../research/break-battery.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
 import type { HypothesisProposalRepository } from '../../ports/hypothesis-proposal.repository.ts';
 
@@ -28,6 +29,9 @@ function toDomain(row: Row): HypothesisProposal {
     contractVersion: row.contractVersion,
     ...(row.proxyMetrics !== null && row.proxyMetrics !== undefined
       ? { proxyMetrics: row.proxyMetrics as HypothesisProxyMetrics }
+      : {}),
+    ...(row.holdoutBattery !== null && row.holdoutBattery !== undefined
+      ? { holdoutBattery: row.holdoutBattery as BreakBatteryReport }
       : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -89,6 +93,15 @@ export class DrizzleHypothesisProposalRepository implements HypothesisProposalRe
     if (proxyMetrics !== undefined) set.proxyMetrics = proxyMetrics;
 
     const result = await this.db.update(hypothesisProposal).set(set)
+      .where(eq(hypothesisProposal.id, id))
+      .returning({ id: hypothesisProposal.id });
+    if (result.length === 0) throw new Error(`hypothesis_proposal not found for id: ${id}`);
+  }
+
+  async recordHoldoutBattery(id: string, report: BreakBatteryReport): Promise<void> {
+    // Status is intentionally NOT in the SET clause — the holdout confirmation is log-only.
+    const result = await this.db.update(hypothesisProposal)
+      .set({ holdoutBattery: report, updatedAt: new Date() })
       .where(eq(hypothesisProposal.id, id))
       .returning({ id: hypothesisProposal.id });
     if (result.length === 0) throw new Error(`hypothesis_proposal not found for id: ${id}`);

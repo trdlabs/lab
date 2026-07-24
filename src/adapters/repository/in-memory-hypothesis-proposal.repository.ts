@@ -1,5 +1,6 @@
 import type { HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics } from '../../domain/hypothesis.ts';
 import type { HypothesisProposalRepository } from '../../ports/hypothesis-proposal.repository.ts';
+import type { BreakBatteryReport } from '../../research/break-battery.ts';
 
 export class InMemoryHypothesisProposalRepository implements HypothesisProposalRepository {
   private readonly byId = new Map<string, HypothesisProposal>();
@@ -54,6 +55,19 @@ export class InMemoryHypothesisProposalRepository implements HypothesisProposalR
       ...existing,
       status,
       ...(proxyMetrics !== undefined ? { proxyMetrics } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async recordHoldoutBattery(id: string, report: BreakBatteryReport): Promise<void> {
+    const existing = this.byId.get(id);
+    if (!existing) {
+      throw new Error(`hypothesis_proposal not found for id: ${id}`);
+    }
+    // Status is intentionally left untouched — the holdout confirmation is log-only.
+    this.byId.set(id, {
+      ...existing,
+      holdoutBattery: report,
       updatedAt: new Date().toISOString(),
     });
   }

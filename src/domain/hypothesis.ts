@@ -6,6 +6,7 @@ import { DIRECTIONS } from './strategy-profile.ts';
 import { canonicalizeContent } from './fingerprint.ts';
 import type { ValidationIssue } from './schemas.ts';
 import type { ResearcherFocus } from '../ports/researcher.port.ts';
+import type { BreakBatteryReport } from '../research/break-battery.ts';
 
 export const HypothesisRuleSchema = z.object({
   when: z.string().min(1),
@@ -81,6 +82,10 @@ export interface HypothesisProposal {
   contractVersion: string;
   origin?: ResearcherFocus; // which research pass produced this; undefined for legacy single-pass
   proxyMetrics?: HypothesisProxyMetrics; // set by backtestCompletedHandler's proxy status update
+  /** R12a (research-validation-hardening item 5a): full log-only `break_battery@1` report from the
+   *  hypothesis-level holdout confirmation (`hypothesis.holdout` task). Advisory persistence lane
+   *  only — never gates status/verdict. Absent until a holdout run completes for this hypothesis. */
+  holdoutBattery?: BreakBatteryReport;
   createdAt: string;
   updatedAt: string;
 }

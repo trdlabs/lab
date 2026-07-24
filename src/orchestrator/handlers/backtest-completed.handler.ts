@@ -96,6 +96,50 @@ async function enqueueResearchRetry(
   });
 }
 
+/**
+ * R12a: enqueue the log-only `hypothesis.holdout` confirmation task. Fail-soft — a throwing
+ * researchTasks/taskQueue must NEVER fail the enclosing backtest.completed task (log-only, item 5a);
+ * on failure it appends `hypothesis.holdout.enqueue_failed` and returns. dedupeKey collapses repeats
+ * of the same (hypothesis, backtestRun) into exactly one holdout run.
+ */
+async function enqueueHypothesisHoldout(
+  task: ResearchTask,
+  services: Parameters<WorkflowHandler>[1],
+  args: { hypothesisId: string; strategyProfileId: string; backtestRunId: string; evalPlatformRun?: PlatformRunConfig },
+): Promise<void> {
+  try {
+    const holdoutTaskId = randomUUID();
+    const holdoutTask: ResearchTask = {
+      id: holdoutTaskId,
+      taskType: 'hypothesis.holdout',
+      source: task.source,
+      correlationId: task.correlationId,
+      status: 'queued',
+      payload: {
+        hypothesisId: args.hypothesisId,
+        strategyProfileId: args.strategyProfileId,
+        backtestRunId: args.backtestRunId,
+        ...(args.evalPlatformRun ? { evalPlatformRun: args.evalPlatformRun } : {}),
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await services.researchTasks.create(holdoutTask);
+    await services.taskQueue.enqueue({
+      taskId: holdoutTaskId,
+      taskType: 'hypothesis.holdout',
+      correlationId: task.correlationId,
+      source: task.source,
+      attempt: 1,
+      dedupeKey: `hypothesis.holdout:${args.hypothesisId}:${args.backtestRunId}`,
+    });
+  } catch (err) {
+    await services.events.append(event(task.id, 'hypothesis.holdout.enqueue_failed', {
+      hypothesisId: args.hypothesisId, backtestRunId: args.backtestRunId, error: errMsg(err),
+    }));
+  }
+}
+
 export const backtestCompletedHandler: WorkflowHandler = async (task, services) => {
   const parsed = validateWithSchema(BacktestCompletedPayloadSchema, task.payload);
   if (parsed.status === 'invalid') {
@@ -114,6 +158,14 @@ export const backtestCompletedHandler: WorkflowHandler = async (task, services) 
       await services.events.append(event(task.id, 'hypothesis.paper_candidate', {
         backtestRunId, hypothesisId, reasons,
       }));
+      // R12a (research-validation-hardening item 5a): behind LAB_HYPOTHESIS_HOLDOUT=log, enqueue a
+      // lightweight, LOG-ONLY holdout confirmation of this proxy PAPER_CANDIDATE. Mode 'off'
+      // (default) enqueues nothing — the branch stays byte-identical to today. Never gates status.
+      if (services.hypothesisHoldoutMode === 'log') {
+        await enqueueHypothesisHoldout(task, services, {
+          hypothesisId, strategyProfileId, backtestRunId, evalPlatformRun,
+        });
+      }
       break;
     }
 
