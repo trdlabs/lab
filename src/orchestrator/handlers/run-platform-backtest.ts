@@ -24,6 +24,9 @@ export interface RunPlatformBacktestInput {
   resumeToken: string;
   /** Depth in the research→build→backtest cycle chain (0 = first run). */
   cycleDepth: number;
+  /** R12b (research-validation-hardening item 5): family-identity L1 — `hypothesisFamilyHint(hypothesis)`
+   *  computed by the caller (hypothesis-build.handler.ts), threaded onto the trial ledger. */
+  trialFamilyHint?: string;
 }
 
 /**
@@ -32,7 +35,7 @@ export interface RunPlatformBacktestInput {
  * platform rejection + MetricMappingError are recorded business/data failures (no throw).
  */
 export async function runPlatformBacktest(input: RunPlatformBacktestInput): Promise<void> {
-  const { services, task, buildId, bundle, profile, hypothesisId, params, platformRun, paramsHash, baselineRef, resumeToken, cycleDepth } = input;
+  const { services, task, buildId, bundle, profile, hypothesisId, params, platformRun, paramsHash, baselineRef, resumeToken, cycleDepth, trialFamilyHint } = input;
   const now = () => new Date().toISOString();
 
   // 1. Pre-submit platform validation gate (fail-closed into the build-failure path; no submit).
@@ -58,6 +61,7 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
     correlationId: task.correlationId,
     resumeToken,
     ...(services.backtestCallbackUrl !== undefined ? { callbackUrl: services.backtestCallbackUrl } : {}),
+    ...(trialFamilyHint !== undefined ? { trialFamilyHint } : {}),
   };
   const handle = await services.researchPlatform.submitOverlayRun(bundle, opts);
 

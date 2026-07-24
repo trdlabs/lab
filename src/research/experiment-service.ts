@@ -115,6 +115,9 @@ export interface RunNewStrategyValidationInput {
   runConfig: Omit<PlatformRunConfig, 'period'>; // datasetId, symbols, timeframe, seed
   params: Record<string, unknown>;              // request.params overlay ({} if none)
   taskId: string;
+  /** R12b (research-validation-hardening item 5): family-identity L1 — `hypothesisFamilyHint(hypothesis)`
+   *  computed by the caller, threaded onto every member's submission (sanity/train/holdout). */
+  trialFamilyHint?: string;
 }
 
 export interface RunWfoInput {
@@ -268,6 +271,7 @@ export class ExperimentService {
       experimentId, role, bundle: input.bundle, baselineRef: input.baselineRef,
       strategyProfileId: input.strategyProfileId, hypothesisId: input.hypothesisId, buildId: input.buildId,
       run, params: input.params,
+      ...(input.trialFamilyHint !== undefined ? { trialFamilyHint: input.trialFamilyHint } : {}),
     });
     await this.d.experiments.updateMember(memberId, {
       backtestRunId: outcome.runId, tradeCount: outcome.totalTrades,

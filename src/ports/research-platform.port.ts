@@ -52,6 +52,12 @@ export interface SubmitOverlayRunOptions {
   readonly workflowId?: string;
   /** When set, backtester/platform POST a CompletionEvent here on terminal transition. */
   readonly callbackUrl?: string;
+  /** R12b (research-validation-hardening item 5): family-identity L1 — groups this run's trial
+   *  ledger entry with every other trial of the same hypothesis (`hypothesisFamilyHint`), instead
+   *  of collapsing under the preset's baseline moduleRef. Advisory; passthrough to the backtester
+   *  wire's `trialFamilyHint` when the integration supports it (backtester only — the mock ignores
+   *  it, same as trialContext on the read side). */
+  readonly trialFamilyHint?: string;
 }
 
 export interface ValidateModuleOptions {
@@ -76,6 +82,9 @@ export interface SubmitStrategyResearchRunOptions {
   readonly workflowId?: string;
   /** When set, backtester/platform POST a CompletionEvent here on terminal transition. */
   readonly callbackUrl?: string;
+  /** R12b (research-validation-hardening item 5): family-identity L1 — see
+   *  `SubmitOverlayRunOptions.trialFamilyHint`; same semantics on the standalone strategy lane. */
+  readonly trialFamilyHint?: string;
 }
 
 /**

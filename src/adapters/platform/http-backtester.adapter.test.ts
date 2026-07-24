@@ -330,4 +330,28 @@ describe('HttpBacktesterAdapter', () => {
     if (res.kind !== 'summary') throw new Error('expected summary');
     expect(res.summary.trialContext).toBeUndefined();
   });
+
+  // R12b (research-validation-hardening item 5): thread the lab-supplied hypothesis-family hint
+  // onto the wire request so the backtester's trial ledger groups every trial of a hypothesis
+  // into one family (computeFamilyKey: hint ?? moduleRef.id) instead of collapsing all hypotheses
+  // of a preset into the preset's baseline moduleRef.
+  it('submitOverlayRun puts opts.trialFamilyHint into request.trialFamilyHint (and omits the key entirely when unset)', async () => {
+    const fake = new FakeClient();
+    await new HttpBacktesterAdapter(fake).submitOverlayRun(labBundle, { ...opts, trialFamilyHint: 'hypothesis:h1' });
+    expect(fake.submitted?.trialFamilyHint).toBe('hypothesis:h1');
+
+    const fake2 = new FakeClient();
+    await new HttpBacktesterAdapter(fake2).submitOverlayRun(labBundle, opts);
+    expect(fake2.submitted && 'trialFamilyHint' in fake2.submitted).toBe(false);
+  });
+
+  it('submitStrategyResearchRun puts opts.trialFamilyHint into request.trialFamilyHint (and omits the key entirely when unset)', async () => {
+    const fake = new FakeClient();
+    await new HttpBacktesterAdapter(fake).submitStrategyResearchRun(strategyBundle, { ...strategyOpts, trialFamilyHint: 'hypothesis:h1' });
+    expect(fake.submitted?.trialFamilyHint).toBe('hypothesis:h1');
+
+    const fake2 = new FakeClient();
+    await new HttpBacktesterAdapter(fake2).submitStrategyResearchRun(strategyBundle, strategyOpts);
+    expect(fake2.submitted && 'trialFamilyHint' in fake2.submitted).toBe(false);
+  });
 });

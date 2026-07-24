@@ -11,6 +11,7 @@ import { normalizeFeature, LAB_FEATURE_CATALOG } from '../../domain/hypothesis-r
 import type { HypothesisBuild } from '../../domain/hypothesis-build.ts';
 import type { ValidationIssue } from '../../domain/schemas.ts';
 import { event, errMsg, computeParamsHash, sha256, stableStringify } from './backtest-support.ts';
+import { hypothesisFamilyHint } from '../../research/hypothesis-family.ts';
 import { BUILDER_SDK_DOC } from '../../adapters/builder/builder-sdk-doc.ts';
 import { runPlatformBacktest } from './run-platform-backtest.ts';
 import { makeOnUsage } from '../make-on-usage.ts';
@@ -39,6 +40,11 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
 
   const profile = await services.strategyProfiles.findById(hypothesis.strategyProfileId);
   if (!profile) throw new Error(`strategy profile not found: ${hypothesis.strategyProfileId}`);
+
+  // R12b (research-validation-hardening item 5): family-identity L1 — computed once, threaded
+  // through both submit paths below so every trial of this hypothesis lands in one trial-ledger
+  // family instead of collapsing under the preset's baseline moduleRef.
+  const trialFamilyHint = hypothesisFamilyHint(hypothesis);
 
   const now = () => new Date().toISOString();
   const buildId = randomUUID();
@@ -135,6 +141,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
         seed: payload.platformRun!.seed,
       },
       params,
+      trialFamilyHint,
     });
   } else {
     const resumeToken = sha256(stableStringify({ v: 1, hypothesisId: hypothesis.id, paramsHash, bundleHash: bundle.bundleHash }));
@@ -142,6 +149,7 @@ export const hypothesisBuildHandler: WorkflowHandler = async (task, services) =>
       services, task, buildId, bundle, profile, hypothesisId: hypothesis.id,
       params, platformRun: payload.platformRun!, paramsHash, baselineRef, resumeToken,
       cycleDepth: payload.cycleDepth,
+      trialFamilyHint,
     });
   }
 };
