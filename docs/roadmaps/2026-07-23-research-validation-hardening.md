@@ -90,6 +90,55 @@ Principle for every item: the verdict stays with deterministic versioned code
   feedback routed through the existing Outcome-Embargo sanitizer
   (`sanitizeRetryFeedback`). Mode flag `LAB_BREAK_BATTERY_MODE`
   (`off → log → enforce`, E4b-style rollout).
+- **R12 (2026-07-24) — done.** Ships in two parts. R12b:
+  `hypothesisFamilyHint` (`src/research/hypothesis-family.ts`) derives a
+  stable `hypothesis:<rootId>` family key (self id, or the domain's
+  `derivedFrom` when present) and is threaded as the SDK's existing advisory
+  `trialFamilyHint` field through both hypothesis submit paths —
+  `HttpBacktesterAdapter.submitOverlayRun` / `submitStrategyResearchRun` — so
+  every hypothesis run, both the cycleDepth-0 `runNewStrategyValidation` lane
+  and every FAIL/MODIFY retry's overlay lane, registers into the backtester
+  trial ledger under its own family instead of collapsing into the preset's
+  `moduleRef` family. R12a: flag `LAB_HYPOTHESIS_HOLDOUT` (`off` default →
+  `log`; `enforce` rejected at boot until battery calibration closes — same
+  fail-closed shape as `LAB_BREAK_BATTERY_MODE`) gates a new orchestrator
+  task `hypothesis.holdout`, enqueued from the `PAPER_CANDIDATE` branch of
+  `backtest-completed.handler.ts`. The task runs exactly one single-fold
+  holdout backtest of the same bundle — window resolved via the same
+  `resolveHoldoutBoundary` / `encodeHoldoutPeriod` path
+  `runNewStrategyValidation` uses, no WFO ladder, no grid — and feeds it into
+  `runBreakBattery` (R11) with `plateau` omitted (no grid at the hypothesis
+  level → the plateau check reports `skipped`, non-breaking). The full
+  report persists to a new nullable `hypothesis_proposal.holdout_battery`
+  jsonb column (migration 0028, no backfill, mirrors
+  `trial_context`/migration 0027); events
+  `hypothesis.holdout.started/completed/skipped/failed` are structural only
+  (outcome + `break_battery.*` codes, never observed magnitudes). Neither
+  part ever touches `HypothesisStatus` or the `PAPER_CANDIDATE` decision —
+  log-only, exactly like R11.
+
+  Decisions: **L1-only family identity** — `HypothesisProposal` has no
+  `derivedFrom`/lineage field today, so a FAIL/MODIFY retry's rebuilt
+  hypothesis gets its OWN family key; retries of the same underlying idea do
+  NOT yet discount each other in the trial ledger. This is a deliberate scope
+  cut, not an oversight — closing it needs a `derivedFrom` contract on the
+  bundle manifest (L2, out of scope here; see the tail below). Plateau
+  analysis at the hypothesis level is intentionally absent — there is no
+  grid to compute neighbor-stability over. The IS baseline fed into
+  `computeOosDegradation` is the PAPER_CANDIDATE run's stored full-period
+  metric block — a proxy-run baseline, slightly optimistic versus a true
+  IS/OOS split; the DSR floor (via the run's `trialContext`, now discoverable
+  through the `trialFamilyHint` ledger membership) is the sharper signal,
+  not this ratio. Skip ≠ fail: four reason codes
+  (`is_baseline_unavailable`, `holdout_window_unavailable`,
+  `bundle_unavailable`, `backtest_run_unavailable`) resolve successfully as
+  `skipped`; only unexpected throws or a non-completed holdout run are
+  `failed`.
+
+  Tail: `enforce` awaits `battery-policy@1` calibration, same gate as R11
+  (item 7). Family-merge of FAIL/MODIFY retries needs a `derivedFrom`
+  contract wired through the bundle manifest — deferred to a follow-up R12
+  slice.
 - **R12 — hypothesis-cycle hardening**: today a hypothesis verdict is one
   in-sample overlay run with delta thresholds and `PAPER_CANDIDATE` at the
   hypothesis level is explicitly a proxy
