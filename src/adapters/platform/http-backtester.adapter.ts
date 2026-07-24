@@ -285,6 +285,8 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterSt
       ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
       ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),
       ...(opts.callbackUrl !== undefined ? { callbackUrl: opts.callbackUrl } : {}),
+      // R12b: family-identity L1 — advisory, excluded from requestFingerprint server-side.
+      ...(opts.trialFamilyHint !== undefined ? { trialFamilyHint: opts.trialFamilyHint } : {}),
     };
     try {
       return await this.client.submitRun(req);
@@ -330,6 +332,8 @@ export class HttpBacktesterAdapter implements ResearchPlatformPort, BacktesterSt
       ...(opts.resumeToken !== undefined ? { resumeToken: opts.resumeToken } : {}),
       ...(opts.workflowId !== undefined ? { workflowId: opts.workflowId } : {}),
       ...(opts.callbackUrl !== undefined ? { callbackUrl: opts.callbackUrl } : {}),
+      // R12b: family-identity L1 — advisory, excluded from requestFingerprint server-side.
+      ...(opts.trialFamilyHint !== undefined ? { trialFamilyHint: opts.trialFamilyHint } : {}),
     };
     try {
       return await this.client.submitRun(req);

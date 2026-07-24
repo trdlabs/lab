@@ -60,6 +60,62 @@ describe('backtestCompletedHandler', () => {
     });
   });
 
+  describe('R12a hypothesis.holdout enqueue (LAB_HYPOTHESIS_HOLDOUT)', () => {
+    const HOLDOUT_PAYLOAD = { ...BASE_PAYLOAD, decision: 'PAPER_CANDIDATE' };
+
+    it('mode=log + PAPER_CANDIDATE enqueues exactly one hypothesis.holdout task with the canonical dedupeKey', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue, hypothesisHoldoutMode: 'log' });
+      await backtestCompletedHandler(task(HOLDOUT_PAYLOAD), s);
+
+      const holdout = queue.queued.filter((q) => q.taskType === 'hypothesis.holdout');
+      expect(holdout).toHaveLength(1);
+      expect(holdout[0]!.dedupeKey).toBe('hypothesis.holdout:hyp-1:bt-run-1');
+      const created = await s.researchTasks.findById(holdout[0]!.taskId);
+      expect(created!.payload).toMatchObject({
+        hypothesisId: 'hyp-1', strategyProfileId: 'profile-1', backtestRunId: 'bt-run-1',
+      });
+    });
+
+    it('threads evalPlatformRun into the holdout payload when present', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue, hypothesisHoldoutMode: 'log' });
+      const evalPlatformRun = {
+        datasetId: 'ds-1', symbols: ['BTCUSDT'], timeframe: '1m', seed: 42,
+        period: { from: '2026-06-22T00:00:00.000Z', to: '2026-06-28T00:00:00.000Z' },
+      };
+      await backtestCompletedHandler(task({ ...HOLDOUT_PAYLOAD, evalPlatformRun }), s);
+      const holdout = queue.queued.filter((q) => q.taskType === 'hypothesis.holdout');
+      const created = await s.researchTasks.findById(holdout[0]!.taskId);
+      expect((created!.payload as { evalPlatformRun: unknown }).evalPlatformRun).toEqual(evalPlatformRun);
+    });
+
+    it('mode=off (default) enqueues nothing — byte-identical to today', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue }); // default 'off'
+      await backtestCompletedHandler(task(HOLDOUT_PAYLOAD), s);
+      expect(queue.queued.filter((q) => q.taskType === 'hypothesis.holdout')).toHaveLength(0);
+    });
+
+    it('mode=log but a non-PAPER_CANDIDATE decision enqueues no holdout', async () => {
+      const queue = new InMemoryQueueAdapter();
+      const s = makeServices({ taskQueue: queue, hypothesisHoldoutMode: 'log' });
+      await backtestCompletedHandler(task({ ...BASE_PAYLOAD, decision: 'PASS' }), s);
+      expect(queue.queued.filter((q) => q.taskType === 'hypothesis.holdout')).toHaveLength(0);
+    });
+
+    it('is fail-soft: a throwing enqueue appends hypothesis.holdout.enqueue_failed and does not fail the task', async () => {
+      const queue = new InMemoryQueueAdapter();
+      queue.enqueue = async () => { throw new Error('queue down'); };
+      const s = makeServices({ taskQueue: queue, hypothesisHoldoutMode: 'log' });
+      await expect(backtestCompletedHandler(task(HOLDOUT_PAYLOAD), s)).resolves.toBeUndefined();
+      const types = (await s.events.listByTask('task-bt-completed')).map((e) => e.type);
+      expect(types).toContain('hypothesis.holdout.enqueue_failed');
+      // The task's own outcome tail is unaffected.
+      expect(types).toContain('backtest.result_ready');
+    });
+  });
+
   describe('PASS', () => {
     it('emits hypothesis.passed event and does NOT enqueue new task', async () => {
       const queue = new InMemoryQueueAdapter();

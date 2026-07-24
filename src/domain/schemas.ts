@@ -4,6 +4,7 @@ export const AGENT_TASK_TYPES = [
   'strategy.onboard', 'strategy.analyze_source', 'research.generate_hypotheses',
   'research.run_cycle', 'hypothesis.build', 'backtest.submit', 'backtest.resume', 'backtest.completed',
   'sweep.run', 'paper.start', 'paper.monitor', 'performance.review',
+  'hypothesis.holdout',
   'research.pause', 'research.wake_check',
   'strategy.baseline', 'strategy.wfo',
   'revision.build', 'revision.consolidate', 'cycle.scorecard',

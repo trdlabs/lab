@@ -13,6 +13,9 @@ export interface ExperimentRunRequest {
   buildId: string;        // REQUIRED — persisted as BacktestRun.hypothesisBuildId
   run: PlatformRunConfig;            // includes the already-encoded period
   params: Record<string, unknown>;
+  /** R12b (research-validation-hardening item 5): family-identity L1 — `hypothesisFamilyHint(hypothesis)`
+   *  computed by the caller, threaded onto the trial ledger via the submitted SubmitOverlayRunOptions. */
+  trialFamilyHint?: string;
 }
 
 export interface ExperimentRunResult {

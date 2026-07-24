@@ -1,0 +1,1 @@
+ALTER TABLE "hypothesis_proposal" ADD COLUMN "holdout_battery" jsonb;

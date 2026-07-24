@@ -15,6 +15,7 @@ import { strategyOnboardHandler } from './orchestrator/handlers/strategy-onboard
 import { researchRunCycleHandler } from './orchestrator/handlers/research-run-cycle.handler.ts';
 import { hypothesisBuildHandler } from './orchestrator/handlers/hypothesis-build.handler.ts';
 import { backtestCompletedHandler } from './orchestrator/handlers/backtest-completed.handler.ts';
+import { hypothesisHoldoutHandler } from './orchestrator/handlers/hypothesis-holdout.handler.ts';
 import { strategyBaselineHandler } from './orchestrator/handlers/strategy-baseline.handler.ts';
 import { strategyWfoHandler } from './orchestrator/handlers/strategy-wfo.handler.ts';
 import { paperStartHandler } from './orchestrator/handlers/paper-start.handler.ts';
@@ -477,6 +478,7 @@ export function composeRuntime() {
     trustedSigners: { ...(signedEvidence.trustedSigners ?? {}), ...env.LAB_TRUSTED_SIGNERS_JSON },
     paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
     cycleScorecards,
+    hypothesisHoldoutMode: env.LAB_HYPOTHESIS_HOLDOUT,
   };
 
   const router = new WorkflowRouter();
@@ -485,6 +487,7 @@ export function composeRuntime() {
   router.register('hypothesis.build', hypothesisBuildHandler);
   router.register('backtest.resume', backtestResumeHandler());
   router.register('backtest.completed', backtestCompletedHandler);
+  router.register('hypothesis.holdout', hypothesisHoldoutHandler);
   router.register('strategy.baseline', strategyBaselineHandler);
   router.register('strategy.wfo', strategyWfoHandler);
   router.register('paper.start', paperStartHandler);

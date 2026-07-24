@@ -8,7 +8,7 @@
 Значения секретов здесь не появляются никогда — только имя и форма;
 живые значения — в `.env.vps` на хостах и SOPS/age-контуре.
 
-Переменных: 121. Точка чтения — `src/config/env.ts` (loadEnv) и явно перечисленные consumers.
+Переменных: 122. Точка чтения — `src/config/env.ts` (loadEnv) и явно перечисленные consumers.
 
 | Имя | Тип | Обяз. | Default | Secret | Flag | Описание |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -45,6 +45,7 @@
 | `LAB_CONSOLIDATION_DEPTH_THRESHOLD` | int | — | `2` | — | — | Порог глубины вложенности, запускающий revision.consolidate; 0 = kill-switch |
 | `LAB_CONSOLIDATION_TOL_ABS` | float | — | `0.01` | — | — | Абсолютный допуск parity-гейта консолидации |
 | `LAB_CONSOLIDATION_TOL_REL` | float | — | `0.001` | — | — | Относительный допуск parity-гейта консолидации |
+| `LAB_HYPOTHESIS_HOLDOUT` | enum(off, log) | — | `off` | — | off/log → off | Флаг E4b-паттерна (R12a, research-validation-hardening item 5): режим раскатки лёгкого holdout-подтверждения проксистатуса PAPER_CANDIDATE (task hypothesis.holdout), запускающего break_battery@1 (R11) на уровне гипотезы. off — holdout не enqueue-ится; log — enqueue-ится, персистит и логирует, вердикты не меняет. Состояние enforce намеренно отклоняется резолвером до калибровки порогов battery-policy@1 |
 | `LAB_MARKET_HISTORY_URL` | url | — | — | — | — | URL market-history-поверхности; при отсутствии — LAB_OPS_READ_URL, затем http://mock-platform:8839 |
 | `LAB_OPS_READ_FIXTURE_DIR` | string | — | — | — | — | Каталог фикстур для fixture-режима bot-results/trade-evidence; дефолт — встроенный каталог фикстур |
 | `LAB_OPS_READ_TOKEN` | string | — | — | да | — | Bearer-токен ops-read-поверхности |

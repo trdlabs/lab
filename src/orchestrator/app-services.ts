@@ -42,6 +42,7 @@ import type { SignedEvidenceProviderPort } from '../ports/signed-evidence-provid
 import type { StrategyConsolidatorPort } from '../ports/strategy-consolidator.port.ts';
 import type { ConsolidationTolerances } from '../validation/consolidation-evaluator.ts';
 import type { CycleScorecardRepository } from '../ports/cycle-scorecard.repository.ts';
+import type { HypothesisHoldoutMode } from '../research/hypothesis-holdout.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -134,4 +135,8 @@ export interface AppServices {
   paperEvidenceRequired: boolean;
   /** Cycle scorecards ledger (R5b) — consumed by cycleScorecardHandler ('cycle.scorecard'). */
   cycleScorecards: CycleScorecardRepository;
+  /** R12a rollout mode for the hypothesis-holdout log-only confirmation (env
+   *  LAB_HYPOTHESIS_HOLDOUT); consumed by backtestCompletedHandler's PAPER_CANDIDATE branch to
+   *  decide whether to enqueue 'hypothesis.holdout' (Task 3). 'off' (default) enqueues nothing. */
+  hypothesisHoldoutMode: HypothesisHoldoutMode;
 }

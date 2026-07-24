@@ -1,4 +1,5 @@
 import type { HypothesisProposal, HypothesisStatus, HypothesisProxyMetrics } from '../domain/hypothesis.ts';
+import type { BreakBatteryReport } from '../research/break-battery.ts';
 
 export interface HypothesisProposalRepository {
   create(proposal: HypothesisProposal): Promise<void>;
@@ -13,4 +14,10 @@ export interface HypothesisProposalRepository {
   findLatestValidatedByProfile(strategyProfileId: string): Promise<HypothesisProposal | null>;
   /** Updates status (+ optional proxyMetrics). Throws, naming the id, when it doesn't exist. */
   updateStatus(id: string, status: HypothesisStatus, proxyMetrics?: HypothesisProxyMetrics): Promise<void>;
+  /**
+   * R12a: persists the log-only holdout `break_battery@1` report onto the proposal WITHOUT touching
+   * `status` — the hypothesis-holdout confirmation never mutates any verdict/status. Throws, naming
+   * the id, when the proposal doesn't exist.
+   */
+  recordHoldoutBattery(id: string, report: BreakBatteryReport): Promise<void>;
 }

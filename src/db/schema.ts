@@ -4,6 +4,7 @@ import type { AnalystProfileOutput } from '../domain/strategy-profile.ts';
 import type { BacktestRunStatus } from '../domain/backtest-run.ts';
 import type { ArtifactRef, TaskSource } from '../domain/types.ts';
 import type { RuleAction, ExpectedEffect, HypothesisProposalDraft, HypothesisProxyMetrics } from '../domain/hypothesis.ts';
+import type { BreakBatteryReport } from '../research/break-battery.ts';
 import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
 import type { ModuleManifest } from '../domain/module-bundle.ts';
@@ -104,6 +105,10 @@ export const hypothesisProposal = pgTable('hypothesis_proposal', {
   issues: jsonb('issues').notNull().$type<ValidationIssue[]>(),
   contractVersion: text('contract_version').notNull(),
   proxyMetrics: jsonb('proxy_metrics').$type<HypothesisProxyMetrics>(),
+  // R12a (research-validation-hardening item 5a): advisory log-only break_battery@1 report from the
+  // hypothesis-level holdout confirmation, nullable, no backfill — absent on every pre-R12a row and
+  // on any hypothesis whose holdout run has not (yet) completed. Mirrors trial_context (migration 0027).
+  holdoutBattery: jsonb('holdout_battery').$type<BreakBatteryReport>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({

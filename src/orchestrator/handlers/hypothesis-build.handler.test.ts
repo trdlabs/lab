@@ -11,6 +11,8 @@ import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { BuilderInput, BuilderOutput, BuilderPort } from '../../ports/builder.port.ts';
 import { deriveOverlayManifestMeta } from '../../domain/overlay-manifest-meta.ts';
 import type { ModuleBundle } from '../../domain/module-bundle.ts';
+import type { SubmitOverlayRunOptions } from '../../ports/research-platform.port.ts';
+import { hypothesisFamilyHint } from '../../research/hypothesis-family.ts';
 
 const PLATFORM_RUN = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 };
 
@@ -96,6 +98,29 @@ describe('hypothesisBuildHandler', () => {
     expect(await s.backtests.listByHypothesis('h1')).toHaveLength(1);
     const evTypes = (await s.events.listByTask('t1')).map((e) => e.type);
     expect(evTypes).toContain('backtest.reused');
+  });
+
+  // R12b (research-validation-hardening item 5): family-identity L1 — every submission for a
+  // hypothesis must carry trialFamilyHint so the backtester trial ledger groups all its trials
+  // into one family instead of collapsing under the preset's baseline moduleRef.
+  it('R12b: cycleDepth>0 overlay-retry submission carries trialFamilyHint = hypothesisFamilyHint(hypothesis)', async () => {
+    const base = new MockResearchPlatformAdapter();
+    let capturedOpts: SubmitOverlayRunOptions | undefined;
+    const researchPlatform = {
+      discover: base.discover.bind(base),
+      listDatasets: base.listDatasets.bind(base),
+      validateModule: base.validateModule.bind(base),
+      getRunStatus: base.getRunStatus.bind(base),
+      getRunResult: base.getRunResult.bind(base),
+      submitStrategyResearchRun: base.submitStrategyResearchRun.bind(base),
+      submitOverlayRun: async (bundle: ModuleBundle, opts: SubmitOverlayRunOptions) => {
+        capturedOpts = opts;
+        return base.submitOverlayRun(bundle, opts);
+      },
+    };
+    const s = await seeded({ researchPlatform });
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN, cycleDepth: 1 }), s);
+    expect(capturedOpts?.trialFamilyHint).toBe(hypothesisFamilyHint(hypothesis()));
   });
 
   it('throws when hypothesis is not validated', async () => {

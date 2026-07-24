@@ -26,6 +26,7 @@ import { FakeSweepDesigner } from '../../adapters/wfo/fake-sweep-designer.ts';
 import { FakeResultInterpreter } from '../../adapters/wfo/fake-result-interpreter.ts';
 import { InMemoryStrategyBacktestRunRepository } from '../../adapters/repository/in-memory-strategy-backtest-run.repository.ts';
 import { InMemoryCycleScorecardRepository } from '../../adapters/repository/in-memory-cycle-scorecard.repository.ts';
+import { hypothesisFamilyHint } from '../../research/hypothesis-family.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -89,8 +90,10 @@ async function seeded(over: Parameters<typeof makeServices>[0] = {}) {
 // Test doubles
 // ---------------------------------------------------------------------------
 class FakeExecutor implements ExperimentRunExecutor {
+  public readonly requests: ExperimentRunRequest[] = [];
   constructor(private readonly resultFor: (role: MemberRole) => ExperimentRunResult) {}
   async execute(req: ExperimentRunRequest): Promise<ExperimentRunResult> {
+    this.requests.push(req);
     return this.resultFor(req.role);
   }
 }
@@ -123,15 +126,16 @@ function ok(role: MemberRole): ExperimentRunResult {
 function buildSvc(
   resultFor: (role: MemberRole) => ExperimentRunResult,
   tradesByRun: Record<string, TradeRecord[]>,
-): { svc: CapturingExperimentService; experiments: InMemoryResearchExperimentRepository } {
+): { svc: CapturingExperimentService; experiments: InMemoryResearchExperimentRepository; executor: FakeExecutor } {
   const experiments = new InMemoryResearchExperimentRepository();
   const runTrades = new FakeRunTradesAdapter(tradesByRun);
   let counter = 0;
   const strategyRunExecutor = { execute: async () => { throw new Error('strategyRunExecutor must not be called from runNewStrategyValidation'); } };
+  const executor = new FakeExecutor(resultFor);
   const svc = new CapturingExperimentService({
     experiments,
     runTrades,
-    runExecutor: new FakeExecutor(resultFor),
+    runExecutor: executor,
     strategyRunExecutor,
     newId: (p) => `${p}-${++counter}`,
     now: () => '2026-01-01T00:00:00.000Z',
@@ -142,7 +146,7 @@ function buildSvc(
     paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
     strategyBacktests: new InMemoryStrategyBacktestRunRepository(),
   });
-  return { svc, experiments };
+  return { svc, experiments, executor };
 }
 
 const TOKEN = 'test-token';
@@ -222,6 +226,21 @@ describe('new-strategy holdout reroute (cycleDepth === 0)', () => {
     const body = (await res.json()) as { data: Array<{ role: string }> };
     expect(body.data).toHaveLength(3);
     expect(body.data.map((r) => r.role)).toEqual(['sanity', 'train', 'holdout']);
+  });
+
+  // R12b (research-validation-hardening item 5): family-identity L1 — every member run
+  // (sanity/train/holdout) submitted by the cycleDepth-0 validation path must carry
+  // trialFamilyHint = hypothesisFamilyHint(hypothesis), so the backtester trial ledger groups
+  // all of a hypothesis's trials into one family instead of collapsing under the baseline moduleRef.
+  it('R12b: cycleDepth=0 members all carry trialFamilyHint = hypothesisFamilyHint(hypothesis)', async () => {
+    const { svc, experiments, executor } = buildSvc(ok, { 'plat-sanity': trades(90) });
+    const s = await seeded({ experiments, experimentService: svc });
+    await hypothesisBuildHandler(task({ hypothesisId: 'h1', platformRun: PLATFORM_RUN, cycleDepth: 0 }), s);
+
+    expect(executor.requests.length).toBeGreaterThan(0);
+    for (const req of executor.requests) {
+      expect(req.trialFamilyHint).toBe(hypothesisFamilyHint(hypothesis()));
+    }
   });
 
   it('omitted cycleDepth → schema .default(0) still routes to the holdout flow', async () => {

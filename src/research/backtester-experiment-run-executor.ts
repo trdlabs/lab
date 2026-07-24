@@ -38,6 +38,7 @@ export class BacktesterExperimentRunExecutor implements ExperimentRunExecutor {
       resumeToken,
       workflowId: req.experimentId,
       ...(this.d.callbackUrl !== undefined ? { callbackUrl: this.d.callbackUrl } : {}),
+      ...(req.trialFamilyHint !== undefined ? { trialFamilyHint: req.trialFamilyHint } : {}),
     };
 
     // 1. Submit — transport / GatewayRunError propagate → caller retries; resumeToken makes replay idempotent.
