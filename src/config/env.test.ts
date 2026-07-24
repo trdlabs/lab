@@ -652,3 +652,20 @@ describe('loadEnv — LAB_BREAK_BATTERY_MODE (R11 break battery)', () => {
     expect(() => loadEnv({ LAB_BREAK_BATTERY_MODE: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/off\|log/);
   });
 });
+
+describe('loadEnv — LAB_HYPOTHESIS_HOLDOUT (R12a hypothesis holdout)', () => {
+  it("defaults to 'off' (holdout never enqueued)", () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).LAB_HYPOTHESIS_HOLDOUT).toBe('off');
+    expect(loadEnv({ LAB_HYPOTHESIS_HOLDOUT: '' } as NodeJS.ProcessEnv).LAB_HYPOTHESIS_HOLDOUT).toBe('off');
+  });
+
+  it("accepts 'off' and 'log'", () => {
+    expect(loadEnv({ LAB_HYPOTHESIS_HOLDOUT: 'off' } as NodeJS.ProcessEnv).LAB_HYPOTHESIS_HOLDOUT).toBe('off');
+    expect(loadEnv({ LAB_HYPOTHESIS_HOLDOUT: 'log' } as NodeJS.ProcessEnv).LAB_HYPOTHESIS_HOLDOUT).toBe('log');
+  });
+
+  it("fail-closed: 'enforce' (calibration pending) and unknown values throw", () => {
+    expect(() => loadEnv({ LAB_HYPOTHESIS_HOLDOUT: 'enforce' } as NodeJS.ProcessEnv)).toThrow(/battery-policy/);
+    expect(() => loadEnv({ LAB_HYPOTHESIS_HOLDOUT: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/off\|log/);
+  });
+});

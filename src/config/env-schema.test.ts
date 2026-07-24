@@ -181,6 +181,20 @@ describe('env-schema: доменные инварианты lab', () => {
     expect(v!.description).toMatch(/item 7/);
   });
 
+  it('LAB_HYPOTHESIS_HOLDOUT — флаг off|log, default off, enforce отклонён до калибровки батареи', () => {
+    const v = byName(doc, 'LAB_HYPOTHESIS_HOLDOUT');
+    expect(v).toBeDefined();
+    expect(v!.flag).toBe(true);
+    expect(v!.type).toBe('enum');
+    expect(v!.enum_values).toEqual(['off', 'log']);
+    expect(v!.flag_states).toEqual(['off', 'log']);
+    expect(v!.default_state).toBe('off');
+    expect(v!.default).toBe('off');
+    // enforce намеренно отклоняется до калибровки порогов (battery-policy@1)
+    expect(v!.description).toMatch(/enforce/);
+    expect(v!.description).toMatch(/калибр/);
+  });
+
   it('все токены/ключи — secret с default null', () => {
     const secretByPattern = doc.variables.filter((v) => /_(TOKEN|KEY)$/.test(v.name));
     expect(secretByPattern.length).toBeGreaterThanOrEqual(10);

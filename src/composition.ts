@@ -477,6 +477,7 @@ export function composeRuntime() {
     trustedSigners: { ...(signedEvidence.trustedSigners ?? {}), ...env.LAB_TRUSTED_SIGNERS_JSON },
     paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
     cycleScorecards,
+    hypothesisHoldoutMode: env.LAB_HYPOTHESIS_HOLDOUT,
   };
 
   const router = new WorkflowRouter();

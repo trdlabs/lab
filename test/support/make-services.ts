@@ -149,6 +149,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     preservationGateEnabled: overrides.preservationGateEnabled ?? true,
     preservationThresholds: overrides.preservationThresholds ?? DEFAULT_PRESERVATION_THRESHOLDS,
     cycleScorecards: new InMemoryCycleScorecardRepository(),
+    hypothesisHoldoutMode: overrides.hypothesisHoldoutMode ?? 'off',
     ...overrides,
   };
 }

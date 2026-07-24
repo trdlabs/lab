@@ -2,6 +2,7 @@ import { DEFAULT_EVALUATOR_THRESHOLDS, type EvaluatorThresholds } from '../valid
 import { MODEL_PROVIDERS, type ModelProvider } from '../adapters/llm/model-provider.ts';
 import { DEFAULT_PRESERVATION_THRESHOLDS, type PreservationThresholds } from '../validation/trade-preservation.ts';
 import { resolveBreakBatteryMode, type BreakBatteryMode } from '../research/break-battery.ts';
+import { resolveHypothesisHoldoutMode, type HypothesisHoldoutMode } from '../research/hypothesis-holdout.ts';
 
 export interface Env {
   DATABASE_URL?: string;
@@ -156,6 +157,10 @@ export interface Env {
   /** R11 break_battery@1 rollout mode: 'off' (default — battery never runs) | 'log' (runs,
    *  persists + logs, NEVER changes any verdict). 'enforce' rejected until item 7 pins thresholds. */
   LAB_BREAK_BATTERY_MODE: BreakBatteryMode;
+  /** R12a hypothesis-holdout rollout mode: 'off' (default — hypothesis.holdout never enqueued) |
+   *  'log' (enqueues the lightweight holdout + break battery, log-only, NEVER changes verdict).
+   *  'enforce' rejected until battery calibration closes (battery-policy@1). */
+  LAB_HYPOTHESIS_HOLDOUT: HypothesisHoldoutMode;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -331,6 +336,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     LAB_CONSOLIDATION_TOL_REL: parseFloatOr(source.LAB_CONSOLIDATION_TOL_REL, 0.001),
     LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01),
     LAB_BREAK_BATTERY_MODE: resolveBreakBatteryMode(source.LAB_BREAK_BATTERY_MODE),
+    LAB_HYPOTHESIS_HOLDOUT: resolveHypothesisHoldoutMode(source.LAB_HYPOTHESIS_HOLDOUT),
     ...loadRagEnv(source),
   };
 }
