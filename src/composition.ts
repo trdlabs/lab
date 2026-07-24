@@ -479,6 +479,8 @@ export function composeRuntime() {
     paperEvidenceRequired: env.LAB_PAPER_EVIDENCE_REQUIRED,
     cycleScorecards,
     hypothesisHoldoutMode: env.LAB_HYPOTHESIS_HOLDOUT,
+    paramGridRunner,
+    onboardBatteryMode: env.LAB_ONBOARD_BATTERY_MODE,
   };
 
   const router = new WorkflowRouter();

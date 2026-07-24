@@ -669,3 +669,20 @@ describe('loadEnv — LAB_HYPOTHESIS_HOLDOUT (R12a hypothesis holdout)', () => {
     expect(() => loadEnv({ LAB_HYPOTHESIS_HOLDOUT: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/off\|log/);
   });
 });
+
+describe('loadEnv — LAB_ONBOARD_BATTERY_MODE (R13 onboarding battery)', () => {
+  it("defaults to 'off' (battery never runs)", () => {
+    expect(loadEnv({} as NodeJS.ProcessEnv).LAB_ONBOARD_BATTERY_MODE).toBe('off');
+    expect(loadEnv({ LAB_ONBOARD_BATTERY_MODE: '' } as NodeJS.ProcessEnv).LAB_ONBOARD_BATTERY_MODE).toBe('off');
+  });
+
+  it("accepts 'off' and 'log'", () => {
+    expect(loadEnv({ LAB_ONBOARD_BATTERY_MODE: 'off' } as NodeJS.ProcessEnv).LAB_ONBOARD_BATTERY_MODE).toBe('off');
+    expect(loadEnv({ LAB_ONBOARD_BATTERY_MODE: 'log' } as NodeJS.ProcessEnv).LAB_ONBOARD_BATTERY_MODE).toBe('log');
+  });
+
+  it("fail-closed: 'enforce' (log-only stage) and unknown values throw", () => {
+    expect(() => loadEnv({ LAB_ONBOARD_BATTERY_MODE: 'enforce' } as NodeJS.ProcessEnv)).toThrow(/enforce/);
+    expect(() => loadEnv({ LAB_ONBOARD_BATTERY_MODE: 'bogus' } as NodeJS.ProcessEnv)).toThrow(/off\|log/);
+  });
+});

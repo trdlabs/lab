@@ -3,6 +3,7 @@ import { MODEL_PROVIDERS, type ModelProvider } from '../adapters/llm/model-provi
 import { DEFAULT_PRESERVATION_THRESHOLDS, type PreservationThresholds } from '../validation/trade-preservation.ts';
 import { resolveBreakBatteryMode, type BreakBatteryMode } from '../research/break-battery.ts';
 import { resolveHypothesisHoldoutMode, type HypothesisHoldoutMode } from '../research/hypothesis-holdout.ts';
+import { resolveOnboardBatteryMode, type OnboardBatteryMode } from '../research/onboard-battery.ts';
 
 export interface Env {
   DATABASE_URL?: string;
@@ -161,6 +162,10 @@ export interface Env {
    *  'log' (enqueues the lightweight holdout + break battery, log-only, NEVER changes verdict).
    *  'enforce' rejected until battery calibration closes (battery-policy@1). */
   LAB_HYPOTHESIS_HOLDOUT: HypothesisHoldoutMode;
+  /** R13 onboarding-battery rollout mode: 'off' (default — battery never runs) | 'log' (runs the
+   *  deterministic onboarding grid before the first WFO, seeds the trial ledger + logs lone-peak
+   *  evidence, NEVER changes any verdict/chain). 'enforce' rejected — the stage is log-only. */
+  LAB_ONBOARD_BATTERY_MODE: OnboardBatteryMode;
 }
 
 function parseModelProvider(value: string | undefined): ModelProvider {
@@ -337,6 +342,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     LAB_CONSOLIDATION_TOL_ABS: parseFloatOr(source.LAB_CONSOLIDATION_TOL_ABS, 0.01),
     LAB_BREAK_BATTERY_MODE: resolveBreakBatteryMode(source.LAB_BREAK_BATTERY_MODE),
     LAB_HYPOTHESIS_HOLDOUT: resolveHypothesisHoldoutMode(source.LAB_HYPOTHESIS_HOLDOUT),
+    LAB_ONBOARD_BATTERY_MODE: resolveOnboardBatteryMode(source.LAB_ONBOARD_BATTERY_MODE),
     ...loadRagEnv(source),
   };
 }

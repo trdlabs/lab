@@ -68,6 +68,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
       platformRunId: 'plat-revision-fake',
     }),
   };
+  const paramGridRunner = new ParamGridRunner({ strategyRunExecutor });
   const experimentService = new ExperimentService({
     experiments: overrides.experiments ?? experiments,
     runTrades: overrides.runTrades ?? runTrades,
@@ -87,7 +88,7 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     gate1: new FakeGate1(),
     sweepDesigner: new FakeSweepDesigner(),
     resultInterpreter: new FakeResultInterpreter(),
-    paramGridRunner: new ParamGridRunner({ strategyRunExecutor }),
+    paramGridRunner,
     strategyBacktests,
     revisions,
   });
@@ -150,6 +151,8 @@ export function makeServices(overrides: Partial<AppServices> = {}): AppServices 
     preservationThresholds: overrides.preservationThresholds ?? DEFAULT_PRESERVATION_THRESHOLDS,
     cycleScorecards: new InMemoryCycleScorecardRepository(),
     hypothesisHoldoutMode: overrides.hypothesisHoldoutMode ?? 'off',
+    paramGridRunner,
+    onboardBatteryMode: overrides.onboardBatteryMode ?? 'off',
     ...overrides,
   };
 }

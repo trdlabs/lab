@@ -60,3 +60,25 @@ describe('researcher capability framings', () => {
     expect(RESEARCHER_CAPABILITIES).toMatch(/runner-owned/);
   });
 });
+
+// R13 (research-validation-hardening item 6, report-13 G13): the researcher's proposed
+// thresholds feed sweep grids downstream — it must be told to reason in terms of a wide
+// plateau (not a fragile peak), to expect a degradation point, and that leverage/margin are
+// denylisted from any sweep, not just runner-owned.
+describe('RESEARCHER_CAPABILITIES axis/plateau awareness', () => {
+  it('names the sweep axes hypotheses feed into', () => {
+    for (const marker of ['hold time', 'entry threshold', 'stop', 'take', 'cooldown', 'sizing', 'regime']) {
+      expect(RESEARCHER_CAPABILITIES.toLowerCase()).toContain(marker);
+    }
+  });
+
+  it('carries the plateau-not-peak and degradation-point rules', () => {
+    expect(RESEARCHER_CAPABILITIES).toMatch(/wide plateau, not (a )?peak/i);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/degradation point/i);
+  });
+
+  it('denylists a leverage axis in hypothesis proposals', () => {
+    expect(RESEARCHER_CAPABILITIES).toMatch(/leverage/i);
+    expect(RESEARCHER_CAPABILITIES).toMatch(/denylist/i);
+  });
+});

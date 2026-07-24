@@ -237,6 +237,16 @@ const VARIABLES: EnvVariableSpec[] = [
     default: 'off',
     description: 'Флаг E4b-паттерна (R12a, research-validation-hardening item 5): режим раскатки лёгкого holdout-подтверждения проксистатуса PAPER_CANDIDATE (task hypothesis.holdout), запускающего break_battery@1 (R11) на уровне гипотезы. off — holdout не enqueue-ится; log — enqueue-ится, персистит и логирует, вердикты не меняет. Состояние enforce намеренно отклоняется резолвером до калибровки порогов battery-policy@1',
   }),
+  v({
+    name: 'LAB_ONBOARD_BATTERY_MODE',
+    type: 'enum',
+    enum_values: ['off', 'log'],
+    flag: true,
+    flag_states: ['off', 'log'],
+    default_state: 'off',
+    default: 'off',
+    description: 'Флаг E4b-паттерна (R13, research-validation-hardening item 6): режим детерминированной onboarding-батареи сеток вокруг baseline-значений перед первым WFO. off — батарея не запускается; log — прогоняет маленькую сетку через ParamGridRunner (все точки в trial ledger сервер-сайд), эмитит strategy.onboard_battery.completed/skipped со счётчиками и lonePeak-эвиденс, вердикты и цепочку baseline→wfo не меняет. Состояние enforce намеренно отклоняется резолвером: стадия log-only, калибровки порогов у неё нет (battery-policy@1)',
+  }),
   // --- селекторные оси (boot-safe селекторы читают свой env из composition.ts) ---
   v({ name: 'LAB_SIGNED_EVIDENCE_SOURCE', type: 'enum', enum_values: ['none', 'fixture', 'http'], default: 'none', description: 'Источник подписанной backtest-evidence; fixture вне NODE_ENV=test требует LAB_ALLOW_FIXTURE_EVIDENCE=true (fail-closed)', consumers: ['src/adapters/platform/select-signed-evidence.ts'] }),
   v({ name: 'LAB_ALLOW_FIXTURE_EVIDENCE', type: 'bool', default: 'false', description: 'Явное разрешение fixture-evidence вне NODE_ENV=test (self-signed, никогда для прод-гейтов)', consumers: ['src/adapters/platform/select-signed-evidence.ts'] }),

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { StrategyParameter } from './strategy-profile.ts';
+import { isDenylistedParam } from '../research/sweep-axis-catalog.ts';
 
 /** Alias for the `StrategyProfile.profile.parameters[]` element type. */
 export type ProfileParam = StrategyParameter;
@@ -72,6 +73,11 @@ export type SweepGridValidation = { ok: true } | { ok: false; reason: string };
  * upstream confirms its keys are actual tunable params of the profile, nor that a 0-trade
  * exploratory sweep stayed restricted to entry-affecting params. The Fake designer used in
  * tests happens to respect both constraints; a real LLM is not guaranteed to.
+ *
+ * R13 (research-validation-hardening item 6, report-13 G13/§3.5): also rejects any key on a
+ * denylisted axis (today: leverage/margin — no liquidation model in the engine). Checked BEFORE
+ * the tunable-param check: the denylist is an absolute gate, independent of whether the profile
+ * happens to mark the param `tunable`.
  */
 export function validateSweepGrid(
   grid: Record<string, unknown[]>,
@@ -80,6 +86,9 @@ export function validateSweepGrid(
   const keys = Object.keys(grid);
   if (keys.length === 0) return { ok: false, reason: 'empty_grid' };
   for (const key of keys) {
+    if (isDenylistedParam(key)) {
+      return { ok: false, reason: `denylisted_axis:${key}` };
+    }
     if (!opts.tunableParamNames.includes(key)) {
       return { ok: false, reason: `non_tunable_param:${key}` };
     }
