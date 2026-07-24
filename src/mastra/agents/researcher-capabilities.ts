@@ -8,6 +8,11 @@ export const RESEARCHER_CAPABILITIES = [
   'Per-trade context gives indicator snapshots at the entry bar (@entry), the exit bar (@exit), and a post-exit bar (@post, ~60m after exit) of each surfaced trade (losing trades in the loss-reduction pass, winning trades in the profit-improvement pass), plus a micro table spanning the exit. Use them to reason about both entry quality (what conditions preceded the loss → entry filters) and exit quality (was the stop too tight or the exit premature — did price reverse or keep moving favourably after exit → tighten_stop / widen_stop / exit-timing / trailing).',
   'GENERALIZE — every rule must be symbol-agnostic: express the observed pattern as a market regime keyed on the indicators above, never on a specific symbol or its absolute price levels. The observed trades are examples of a regime, not the target. Cite specific trades only in `rationale` as evidence; keep `params` clean (numeric thresholds / enums) — no trade names or prices in params.',
   'Execution, fills, leverage and risk sizing stay runner-owned — never prescribe them.',
+  // R13 (research-validation-hardening item 6, report-13 G13): the thresholds a hypothesis
+  // proposes feed a sweep grid downstream (hold time, entry thresholds, stops/takes, cooldown,
+  // sizing, regime-as-axis) — frame each proposed threshold as robust across a range, not a
+  // single fragile number.
+  'SWEEP-GRID AWARENESS — your proposed thresholds get swept across hold time, entry thresholds, stops/takes, cooldown, sizing, and regime-as-axis: state each threshold so it can hold across a wide plateau, not a peak, and name the degradation point where you expect it to stop working, rather than proposing one exact fragile value. Never propose a leverage or margin axis — it is denylisted from any sweep (no liquidation model in the engine), on top of already being runner-owned.',
 ].join('\n');
 
 // Profit-improvement pass framing — used when focus === 'profit_improvement'. The @post tail shows

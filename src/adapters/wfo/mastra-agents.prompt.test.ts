@@ -65,6 +65,19 @@ describe('WFO Mastra prompt builders — outcome embargo', () => {
     expect(prompts[0]!).toContain('"sharpe":1.1');
   });
 
+  // R13 (research-validation-hardening item 6): the axis catalog + plateau/degradation rules
+  // live in the agent's static instructions (sweep-designer.agent.ts), not the per-call prompt
+  // built here — asserts the two stay separate so the catalog isn't duplicated into every call.
+  it('sweep-designer per-call prompt does not duplicate the static axis-catalog instructions', async () => {
+    const { agent, prompts } = capturingAgent({ grid: {}, rationale: 'r' });
+    const input: SweepInput = {
+      profile, baselineTrainSummary: dirtyMetrics,
+      tunableParams: [], restrictToEntryParams: false, maxPoints: 4,
+    };
+    await new MastraSweepDesigner(agent, 'test').design(input);
+    expect(prompts[0]!).not.toMatch(/wide plateau, not (a )?peak/i);
+  });
+
   it('result-interpreter prompt scrubs embargo keys nested inside topN', async () => {
     const { agent, prompts } = capturingAgent({ decision: 'stop' });
     const topN = [{
