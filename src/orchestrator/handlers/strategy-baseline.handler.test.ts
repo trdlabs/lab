@@ -11,6 +11,8 @@ import type { ResearchTask } from '../../domain/types.ts';
 import type { StrategyProfile } from '../../domain/strategy-profile.ts';
 import type { StrategyRevision } from '../../domain/strategy-revision.ts';
 import type { RunStrategyBaselineValidationInput } from '../../research/experiment-service.ts';
+import type { GridRunOutput } from '../../research/param-grid-runner.ts';
+import type { StrategyParameter } from '../../domain/strategy-profile.ts';
 
 function profile(): StrategyProfile {
   const now = '2026-01-01T00:00:00Z';
@@ -19,6 +21,19 @@ function profile(): StrategyProfile {
     coreIdea: 'oi-based entry filter', requiredMarketFeatures: ['oi', 'funding'], confidence: 0.6, unknowns: [],
     profile: {} as never, sourceArtifactRef: {} as never, contractVersion: 'strategy-profile-v1', createdAt: now, updatedAt: now,
   };
+}
+
+/** Profile carrying real tunable params so the R13 onboarding battery has axes to sweep. The base
+ *  `profile()` uses `profile: {} as never`, which yields zero eligible axes (skip path). */
+function param(over: Partial<StrategyParameter> & { name: string }): StrategyParameter {
+  return { value: 10, unit: null, description: '', tunable: true, ...over };
+}
+function profileWithParams(params: StrategyParameter[]): StrategyProfile {
+  return { ...profile(), profile: { parameters: params } as never };
+}
+
+function fakeGridOutput(over: Partial<GridRunOutput> = {}): GridRunOutput {
+  return { allResults: [], ranked: [], submitted: 6, rejected: 0, ...over };
 }
 
 function taskOf(payload: Record<string, unknown>): ResearchTask {
@@ -31,6 +46,8 @@ async function makeFakeServices(opts: {
   strategyBuilder?: AppServices['strategyBuilder'];
   revisions?: AppServices['revisions'];
   verdict?: 'PASS' | 'FAIL' | 'MODIFY' | 'INCONCLUSIVE' | 'PAPER_CANDIDATE';
+  onboardBatteryMode?: 'off' | 'log';
+  profileParams?: StrategyParameter[];
 } = {}): Promise<{
   services: AppServices;
   queued: AppServices['taskQueue'] extends { queued: infer Q } ? Q : never;
@@ -41,6 +58,7 @@ async function makeFakeServices(opts: {
   const services = makeServices({
     ...(opts.strategyBuilder ? { strategyBuilder: opts.strategyBuilder } : {}),
     ...(opts.revisions ? { revisions: opts.revisions } : {}),
+    ...(opts.onboardBatteryMode ? { onboardBatteryMode: opts.onboardBatteryMode } : {}),
   });
   const originalPut = services.artifacts.put.bind(services.artifacts);
   services.artifacts.put = async (content, meta) => {
@@ -48,7 +66,7 @@ async function makeFakeServices(opts: {
     return originalPut(content, meta);
   };
 
-  await services.strategyProfiles.create(profile());
+  await services.strategyProfiles.create(opts.profileParams ? profileWithParams(opts.profileParams) : profile());
 
   const experimentCalls: (RunStrategyBaselineValidationInput & { returnedExperimentId?: string })[] = [];
   let counter = 0;
@@ -225,6 +243,89 @@ describe('strategyBaselineHandler', () => {
   it('fresh-profile INCONCLUSIVE baseline (no revisionId) still enqueues wfo (rescue hatch)', async () => {
     const { services, queued } = await makeFakeServices({ verdict: 'INCONCLUSIVE' });
     await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
+});
+
+describe('strategyBaselineHandler — R13 onboarding battery', () => {
+  it('off (default): never touches ParamGridRunner and emits no onboard_battery event', async () => {
+    const { services } = await makeFakeServices({ profileParams: [param({ name: 'maxHoldMin', value: 60 })] });
+    const runGridSpy = vi.spyOn(services.paramGridRunner, 'runGrid');
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+
+    expect(runGridSpy).not.toHaveBeenCalled();
+    expect(appendSpy.mock.calls.map((c) => (c[0] as { type: string }).type))
+      .not.toContain('strategy.onboard_battery.completed');
+  });
+
+  it('log: sweeps a deterministic grid (denylisted params excluded), emits completed with counts, still enqueues wfo', async () => {
+    const { services, queued } = await makeFakeServices({
+      onboardBatteryMode: 'log',
+      profileParams: [
+        param({ name: 'maxHoldMin', value: 60 }),
+        param({ name: 'dump.minDropPct', value: 4 }),
+        param({ name: 'leverage.multiplier', value: 3 }),
+      ],
+    });
+    const runGridSpy = vi.spyOn(services.paramGridRunner, 'runGrid').mockResolvedValue(
+      fakeGridOutput({
+        submitted: 9, rejected: 1,
+        ranked: [
+          { point: {}, paramsHash: 'a', status: 'completed', strategyBacktestRunId: 'a', metrics: {} as never, lowConfidence: false, lonePeak: true, neighborCount: 2 },
+          { point: {}, paramsHash: 'b', status: 'completed', strategyBacktestRunId: 'b', metrics: {} as never, lowConfidence: false, lonePeak: false, neighborCount: 2 },
+        ],
+        allResults: [{ point: {}, paramsHash: 'a', status: 'completed', strategyBacktestRunId: 'a' }],
+      }),
+    );
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+
+    // grid built off matchesParam, leverage EXCLUDED
+    expect(runGridSpy).toHaveBeenCalledTimes(1);
+    const grid = runGridSpy.mock.calls[0]![0].grid;
+    expect(Object.keys(grid).sort()).toEqual(['dump.minDropPct', 'maxHoldMin']);
+    expect(Object.keys(grid)).not.toContain('leverage.multiplier');
+
+    const completed = appendSpy.mock.calls.map((c) => c[0] as { type: string; payload: Record<string, unknown> })
+      .find((e) => e.type === 'strategy.onboard_battery.completed');
+    expect(completed).toBeDefined();
+    expect(completed!.payload).toMatchObject({ points: 9, rejected: 1, ranked: 2, lonePeak: 1, plateau: 1 });
+
+    // chain intact: strategy.wfo still enqueued
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
+
+  it('log with no eligible axes: emits skipped(no_eligible_axes), never calls runGrid, still enqueues wfo', async () => {
+    // base profile() carries profile: {} as never -> zero params -> zero axes
+    const { services, queued } = await makeFakeServices({ onboardBatteryMode: 'log' });
+    const runGridSpy = vi.spyOn(services.paramGridRunner, 'runGrid');
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+
+    expect(runGridSpy).not.toHaveBeenCalled();
+    const skipped = appendSpy.mock.calls.map((c) => c[0] as { type: string; payload: Record<string, unknown> })
+      .find((e) => e.type === 'strategy.onboard_battery.skipped');
+    expect(skipped?.payload.reason).toBe('no_eligible_axes');
+    expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
+  });
+
+  it('log: a runner throw degrades to skipped and NEVER breaks the baseline->wfo chain', async () => {
+    const { services, queued } = await makeFakeServices({
+      onboardBatteryMode: 'log',
+      profileParams: [param({ name: 'maxHoldMin', value: 60 })],
+    });
+    vi.spyOn(services.paramGridRunner, 'runGrid').mockRejectedValue(new Error('runner boom'));
+    const appendSpy = vi.spyOn(services.events, 'append');
+
+    await strategyBaselineHandler(taskOf({ strategyProfileId: 'prof-1' }), services);
+
+    const skipped = appendSpy.mock.calls.map((c) => c[0] as { type: string; payload: Record<string, unknown> })
+      .find((e) => e.type === 'strategy.onboard_battery.skipped');
+    expect(skipped?.payload.reason).toMatch(/runner boom/);
     expect((queued as unknown[]).filter((t) => (t as { taskType: string }).taskType === 'strategy.wfo')).toHaveLength(1);
   });
 });

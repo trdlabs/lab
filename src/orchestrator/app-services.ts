@@ -43,6 +43,8 @@ import type { StrategyConsolidatorPort } from '../ports/strategy-consolidator.po
 import type { ConsolidationTolerances } from '../validation/consolidation-evaluator.ts';
 import type { CycleScorecardRepository } from '../ports/cycle-scorecard.repository.ts';
 import type { HypothesisHoldoutMode } from '../research/hypothesis-holdout.ts';
+import type { OnboardBatteryMode } from '../research/onboard-battery.ts';
+import type { ParamGridRunner } from '../research/param-grid-runner.ts';
 
 /**
  * Fail-soft retrieval indexer seam. The concrete StrategyRetrievalIndexer satisfies it;
@@ -139,4 +141,11 @@ export interface AppServices {
    *  LAB_HYPOTHESIS_HOLDOUT); consumed by backtestCompletedHandler's PAPER_CANDIDATE branch to
    *  decide whether to enqueue 'hypothesis.holdout' (Task 3). 'off' (default) enqueues nothing. */
   hypothesisHoldoutMode: HypothesisHoldoutMode;
+  /** Deterministic onboarding grid runner (R13); the strategy-baseline handler drives it directly
+   *  for the log-only onboarding battery. Same instance the ExperimentService uses for WFO. */
+  paramGridRunner: ParamGridRunner;
+  /** R13 rollout mode for the log-only onboarding battery (env LAB_ONBOARD_BATTERY_MODE);
+   *  consumed by strategyBaselineHandler between a passing baseline and the strategy.wfo enqueue.
+   *  'off' (default) runs nothing — byte-identical to pre-R13 behavior. */
+  onboardBatteryMode: OnboardBatteryMode;
 }

@@ -195,6 +195,19 @@ describe('env-schema: доменные инварианты lab', () => {
     expect(v!.description).toMatch(/калибр/);
   });
 
+  it('LAB_ONBOARD_BATTERY_MODE — флаг off|log, default off, enforce отклонён (стадия log-only)', () => {
+    const v = byName(doc, 'LAB_ONBOARD_BATTERY_MODE');
+    expect(v).toBeDefined();
+    expect(v!.flag).toBe(true);
+    expect(v!.type).toBe('enum');
+    expect(v!.enum_values).toEqual(['off', 'log']);
+    expect(v!.flag_states).toEqual(['off', 'log']);
+    expect(v!.default_state).toBe('off');
+    expect(v!.default).toBe('off');
+    expect(v!.description).toMatch(/enforce/);
+    expect(v!.description).toMatch(/log-only/);
+  });
+
   it('все токены/ключи — secret с default null', () => {
     const secretByPattern = doc.variables.filter((v) => /_(TOKEN|KEY)$/.test(v.name));
     expect(secretByPattern.length).toBeGreaterThanOrEqual(10);
@@ -308,6 +321,9 @@ describe('env-schema: полнота относительно loadEnv (един�
 describe('env-schema: fail-fast loadEnv сохранён (негативы)', () => {
   it('enforce для LAB_BREAK_BATTERY_MODE отклоняется', () => {
     expect(() => loadEnv({ LAB_BREAK_BATTERY_MODE: 'enforce' } as NodeJS.ProcessEnv)).toThrow(/enforce/);
+  });
+  it('enforce для LAB_ONBOARD_BATTERY_MODE отклоняется', () => {
+    expect(() => loadEnv({ LAB_ONBOARD_BATTERY_MODE: 'enforce' } as NodeJS.ProcessEnv)).toThrow(/enforce/);
   });
   it('неизвестные значения fail-closed осей бросают', () => {
     expect(() => loadEnv({ TRADING_PLATFORM_INTEGRATION: 'backtestr' } as NodeJS.ProcessEnv)).toThrow();
