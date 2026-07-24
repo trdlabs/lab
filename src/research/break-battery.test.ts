@@ -16,7 +16,7 @@ import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
 
 function trialContext(over: Partial<TrialContext> = {}): TrialContext {
   return {
-    familyKey: 'fam-1', trialCount: 12, deflatedSharpe: 0.9,
+    familyKey: 'fam-1', trialCount: 12, deflatedSharpe: 0.97,
     sr0: 0.4, vSR: 0.01, vSRBasis: 'asymptotic', tCount: 42,
     ...over,
   };

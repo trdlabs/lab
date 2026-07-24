@@ -790,7 +790,7 @@ describe('break battery (R11, log-mode)', () => {
   const OK_BOUNDARY: HoldoutBoundary = {
     mode: 'trade_based', t: T, lowConfidence: false, trainTrades: 60, holdoutTrades: 30, reason: 'ok',
   };
-  // deflatedSharpe far below the preliminary floor → dsr_floor check breaks.
+  // deflatedSharpe far below the pinned battery-policy@1 floor → dsr_floor check breaks.
   const BREAKING_TRIAL_CONTEXT = {
     familyKey: 'fam-wfo', trialCount: 9, deflatedSharpe: 0.01,
     sr0: 0.05, vSR: 0.02, vSRBasis: 'asymptotic' as const, tCount: 9,

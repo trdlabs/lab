@@ -28,16 +28,23 @@ export const BREAK_BATTERY_VERSION = 'break_battery@1';
 export type BreakBatteryMode = 'off' | 'log';
 
 /**
- * PRELIMINARY floors — pending SSOT threshold pinning (research-validation-hardening item 7,
- * owner decision). Log-mode only: these constants never change any verdict. Kept in ONE place
- * with an explicit policy version so a repin is a single, versioned change.
+ * Floors pinned by owner decision 2026-07-24 as `battery-policy@1` (research-validation
+ * item 7; SSOT: control-center `docs/architecture/battery-policy.md`). Literature-anchored
+ * starting values: Bailey & López de Prado's canonical DSR confidence 0.95 (deflatedSharpe
+ * here IS the DSR probability — backtester `engine/deflated-sharpe.ts` returns normalCdf(z))
+ * and Pardo's walk-forward-efficiency floor 0.5. Log-mode only: these constants never change
+ * any verdict; calibration over real log-run distributions precedes enforce. Kept in ONE
+ * place with an explicit policy version so a repin is a single, versioned change.
  */
 export const BREAK_BATTERY_POLICY = {
-  version: 'break-battery-policy@1-preliminary',
-  /** Check (a): fail when trialContext.deflatedSharpe < this floor (strict <). */
-  dsrFloor: 0.5,
+  version: 'break-battery-policy@1',
+  /** Check (a): fail when trialContext.deflatedSharpe < this floor (strict <). DSR is the
+   *  probability that the true SR > 0 after multiple-testing deflation; 0.95 = the canonical
+   *  95%-confidence threshold (Bailey & López de Prado 2014). */
+  dsrFloor: 0.95,
   /** Check (b): fail when oosIsSharpeRatio < this floor (strict <) — mirrors the R2
-   *  OOS_DEGRADATION_FRAGILITY_RATIO in strategy-baseline-evaluator.ts. */
+   *  OOS_DEGRADATION_FRAGILITY_RATIO in strategy-baseline-evaluator.ts; matches Pardo's
+   *  walk-forward-efficiency rule (OOS retains ≥ 50% of IS performance). */
   oosIsSharpeRatioFloor: 0.5,
 } as const;
 
