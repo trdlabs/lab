@@ -97,4 +97,52 @@ describe('validateSweepGrid', () => {
     const r = validateSweepGrid({}, { tunableParamNames, restrictToEntryParams: false, entryAffecting });
     expect(r).toEqual({ ok: false, reason: 'empty_grid' });
   });
+
+  // R13 (research-validation-hardening item 6, report-13 G13/§3.5): leverage is denylisted from
+  // any sweep grid until the engine has a liquidation model — a systematic gate, independent of
+  // whether the profile happens to mark the param tunable.
+  it('a leverage-named key → denylisted_axis, even when it is a declared tunable param', () => {
+    const r = validateSweepGrid(
+      { 'leverage.multiplier': [1, 2] },
+      { tunableParamNames: ['leverage.multiplier'], restrictToEntryParams: false, entryAffecting: [] },
+    );
+    expect(r).toEqual({ ok: false, reason: 'denylisted_axis:leverage.multiplier' });
+  });
+
+  it('a margin-named key → denylisted_axis', () => {
+    const r = validateSweepGrid(
+      { marginMode: [1, 2] },
+      { tunableParamNames: ['marginMode'], restrictToEntryParams: false, entryAffecting: [] },
+    );
+    expect(r).toEqual({ ok: false, reason: 'denylisted_axis:marginMode' });
+  });
+
+  it('a leverage-named key that is NOT a declared tunable param → denylisted_axis takes priority over non_tunable_param', () => {
+    const r = validateSweepGrid(
+      { 'leverage.multiplier': [1, 2] },
+      { tunableParamNames, restrictToEntryParams: false, entryAffecting },
+    );
+    expect(r).toEqual({ ok: false, reason: 'denylisted_axis:leverage.multiplier' });
+  });
+
+  it('existing reasons are unaffected by the denylist check', () => {
+    expect(validateSweepGrid(
+      { 'entry.fastBouncePct': [1, 2], 'tpLadder.tp1Pct': [3, 4] },
+      { tunableParamNames, restrictToEntryParams: false, entryAffecting },
+    )).toEqual({ ok: true });
+    expect(validateSweepGrid(
+      { 'entry.fastBouncePct': [1, 2], 'unknown.param': [1] },
+      { tunableParamNames, restrictToEntryParams: false, entryAffecting },
+    )).toEqual({ ok: false, reason: 'non_tunable_param:unknown.param' });
+    expect(validateSweepGrid(
+      { 'tpLadder.tp1Pct': [1, 2] },
+      { tunableParamNames, restrictToEntryParams: true, entryAffecting },
+    )).toEqual({ ok: false, reason: 'non_entry_param_in_exploratory:tpLadder.tp1Pct' });
+    expect(validateSweepGrid(
+      { 'entry.fastBouncePct': [] },
+      { tunableParamNames, restrictToEntryParams: false, entryAffecting },
+    )).toEqual({ ok: false, reason: 'empty_values:entry.fastBouncePct' });
+    expect(validateSweepGrid({}, { tunableParamNames, restrictToEntryParams: false, entryAffecting }))
+      .toEqual({ ok: false, reason: 'empty_grid' });
+  });
 });
