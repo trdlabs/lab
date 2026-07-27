@@ -127,6 +127,9 @@ function oosDegradationCheck(deg: OosDegradation): BreakCheckResult {
   }
   const observed = {
     oosIsSharpeRatio: deg.oosIsSharpeRatio, oosIsPfRatio: deg.oosIsPfRatio,
+    // Surfaced so a null PF ratio is legible in the report — a bare null is indistinguishable
+    // from "never computed", and calibration reads these observed blocks directly.
+    ...(deg.pfRatioReason ? { pfRatioReason: deg.pfRatioReason } : {}),
     ratioFloor: BREAK_BATTERY_POLICY.oosIsSharpeRatioFloor, thresholdVersion: deg.thresholdVersion,
   };
   if (deg.oosIsSharpeRatio < BREAK_BATTERY_POLICY.oosIsSharpeRatioFloor) {
