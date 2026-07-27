@@ -83,6 +83,7 @@ import { RESEARCH_RUN_METRICS } from '../src/domain/platform-comparison.ts';
 import { MODEL_PROVIDERS } from '../src/adapters/llm/model-provider.ts';
 import { getAuthoringDoc } from '@trdlabs/backtester-sdk/builder';
 import type { DatasetScope } from '../src/domain/research-experiment.ts';
+import { holdoutPolicyFromEnv } from '../src/research/holdout-policy-env.ts';
 import type { PlatformRunConfig } from '../src/ports/research-platform.port.ts';
 
 // ── env validation ────────────────────────────────────────────────────────────
@@ -209,7 +210,11 @@ try {
     + `period=${datasetScope.period.from}..${datasetScope.period.to} taskId=${taskId}...\n`,
   );
 
+  // Калибровочное окно T2: env-override порогов сплита (HOLDOUT_MIN_TRADES_TRAIN/…); без env — DEFAULT.
+  const holdoutPolicy = holdoutPolicyFromEnv(process.env);
+  if (holdoutPolicy) console.log('[run-baseline] holdoutPolicy override:', JSON.stringify(holdoutPolicy));
   const { experimentId, verdict } = await services.experimentService.runStrategyBaselineValidation({
+    ...(holdoutPolicy ? { holdoutPolicy } : {}),
     strategyProfileId: profile.id,
     strategyBundle,
     datasetScope,
