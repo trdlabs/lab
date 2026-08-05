@@ -295,6 +295,11 @@ public Git history (see research §11).
   → `validateBundle` is a single pass — an invalid/failing bundle errors without self-correction. Add a
   bounded Reflexion loop (validation/sandbox errors → back into the builder context → capped retry) to
   lift codegen yield. Kill-switched on attempt count. (Agent-pattern checkup, 2026-06-19.)
+  **Anchored to the actor-contract initiative (2026-08-05):** this is S4 scope per the control-center
+  shared-execution-engine card (section «S4 / LLM-авторский контур») — see
+  [`docs/roadmaps/2026-08-05-actor-s4-llm-authoring.md`](roadmaps/2026-08-05-actor-s4-llm-authoring.md)
+  for the audit state (the `BuildFeedback` seam and the F2a proof-harness loop already exist) and the
+  companion semantic smoke gate.
 - **Token/cost kill-switch**: we cap *time* (retrieval soft/hard deadlines, reranker timeout) and
   *depth* (`MAX_CYCLE_DEPTH`), but not *tokens/$* per request. Add a cumulative token/cost budget guard
   (mirror `RetrievalBudget`) that aborts over-budget work. Phoenix/Mastra provide the usage *numbers*;
