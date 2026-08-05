@@ -185,3 +185,30 @@ Principle for every item: the verdict stays with deterministic versioned code
   prompt rules, a denylist for the leverage axis until a liquidation model
   exists (engine-side), and an onboarding grid battery at `strategy.onboard`
   before the first full WFO (all points recorded in the trial ledger).
+
+## Wave addition 2026-08-05 (review 28) — battery vs the execution landscape
+
+Source: control-center `docs/analysis/28` (full sweep of ~30 systems executing
+LLM-generated strategies); canonical status in the card's «Дополнение
+2026-08-05». Three new battery steps, all `proposed`:
+
+- **Б1 — adversarial lookahead scan (priority raised to high).** The sweep
+  confirmed freqtrade's `lookahead-analysis` is the only tool of its kind
+  anywhere; our protection is structural (dead stdin, frozen snapshot) and does
+  not catch leakage *inside* the bundle's data/logic (an indicator computed
+  over the full window, a condition fed by leaked features). Shape: re-run the
+  backtest on ledger slices + diff the bundle's decisions; any divergence is a
+  battery reject code. Scheduled after enforce (items 5–7), like the
+  2026-07-28 freqtrade-detectors note.
+- **Б2 — luck baseline.** N random strategies with the same trading profile as
+  the null hypothesis in the battery report (model: llm-strategy-gen's
+  100-random-entries baseline). Cheap; can ride with item-7 calibration.
+- **Б3 — cost stress ×1.5/×2** (fees + funding) as a mandatory battery column
+  (model: QuantaAlpha; FINSABER goes further and counts LLM inference in
+  trading costs — our per-correlationId token budget already exists, surface
+  it next to the battery summary). Cheap; can ride with item-7 calibration.
+
+Б6 of the same review (fill-model check against the FINSABER bar: liquidity
+cap, next-open, slippage) is engine semantics → control-center
+`engine-semantics-hardening` card, SEM-5. Б7 (LLM proxy-gate agreement) lives
+in the research-loop-maturity wave-2 entry.
