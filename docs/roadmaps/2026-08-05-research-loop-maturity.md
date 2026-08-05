@@ -47,6 +47,51 @@ Item numbers mirror the card.
   between create and terminalization still leaves an eternal candidate);
   revisit the W5 `proxy_*`-orphan trade-off as volume grows.
 
+## Wave 2 additions (2026-08-05, reviews 27 + 28) — `proposed`
+
+Source: control-center `docs/analysis/27` (Chain-of-Alpha / QuantAgent / XAlpha read
+first-hand) and `docs/analysis/28` (execution-layer landscape, ~30 systems). Item
+numbers mirror the card's «Дополнение 2026-08-05» table.
+
+- **Р1+ (refines Р1).** Memory format per XAlpha: GOOD summary = transferable
+  mechanism principles + an explicit «do not copy verbatim» constraint; BAD =
+  {failure type, failed assumption, avoidance rule, repair condition}; buffer
+  with diversity limits and post-injection clearing. FAA lesson: attach feedback
+  to the hypothesis's **final** form after a MODIFY chain, not the seed form
+  (synergy with the Р6 `derivedFrom` contract).
+- **Р2+ (refines Р2).** Two-threshold novelty: a soft advisory threshold during
+  search (novelty score into generator feedback) and a hard one at promotion —
+  confirmed independently by XAlpha (0.95 generation / 0.60 library) and
+  Chain-of-Alpha (Diversity feedback axis).
+- **Р3+ (refines Р3).** Perturbation leakage tests made concrete: truncation +
+  future-noise of the input; earlier values must be invariant. Home: the
+  builder eval harness.
+- **Н3 — tri-alignment gate before the backtest.** Three separate verdicts:
+  (1) the code implements the thesis, (2) the mechanism as implemented is
+  financially sound, (3) the thesis itself is sound. Sits between builder and
+  the overlay run; reuse the critic slot (currently off) by changing its role
+  from «critique the idea» to «check idea ↔ code»; repair may fix either the
+  code or the hypothesis text. Mandatory agreement measurement — see Б7.
+- **Н4 — hypothesis complexity discount.** Trivial metric on our closed rule
+  vocabulary (rules × params); advisory discount in scoring or a soft prompt
+  limit for the researcher.
+- **Б4 — static rule audit before any run.** Dead branches, never-true
+  conditions, profile conflicts (model: KryllOS AI Audit); deterministic,
+  merges naturally with Н3.
+- **Б5 — content-hash LLM cache as evidence.** SHA-256(prompt+model) → frozen
+  response: reproducibility + audit trail + cost savings (model:
+  ai-hedge-fund); implemented inside the Р4 client wrapper.
+- **Б7 — agreement measurement for LLM proxy gates.** Smoke gate (lab#207) and
+  the future Н3 gate measured against actual backtest verdicts, with drift
+  alerts — the QuantAgent anti-lesson (judge agreement never measured) and the
+  Auto-Quant oracle-gaming episode (the repair loop became the overfitting
+  engine).
+
+Anti-lessons pinned by the same wave (do not «improve» these away): no observed
+magnitudes into the loop in any compression (our embargo is stricter than all
+three systems); no inheriting the industry's missing multiple-testing
+correction; no weakening the enforced promotion ladder.
+
 Related, tracked elsewhere:
 - Eval cadence (Р5) — control-center
   [`agent-eval-cadence`](../../../control-center/docs/delivery/initiatives/agent-eval-cadence.md)
