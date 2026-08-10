@@ -92,6 +92,41 @@ magnitudes into the loop in any compression (our embargo is stricter than all
 three systems); no inheriting the industry's missing multiple-testing
 correction; no weakening the enforced promotion ladder.
 
+## Wave 3 additions (2026-08-10, review 31 — Vibe-Trading) — `proposed`
+
+Source: control-center `docs/analysis/31` (HKUDS/Vibe-Trading read from
+source, ~327k LOC — the largest live open-source system of our own class B).
+Item numbers mirror the card's «Дополнение 2026-08-10» table.
+
+- **ВТ1 — Research-Goal container.** A long-lived research goal above
+  individual cycles: owner acceptance criteria, evidence rows verified against
+  artifacts (hash / existing run), a fail-closed completion audit (a goal
+  cannot close without verified evidence per required criterion), and budgets.
+  The missing frame for Р7 (the bandit needs both Р1's statistics and a goal
+  to optimize) and for explicit stop criteria. Model: Vibe-Trading `src/goal/`
+  (goals / criteria / evidence / audits). Priority: medium, after Р1.
+- **ВТ4 — methodology fingerprint (refines Р3, pairs with Б5).** Hash(system
+  prompt, model, capability catalog, package versions) recorded in the
+  evidence of every LLM-produced artifact, invariant to run-id/time, plus a
+  diff report «what changed between runs»; model-id + cutoff (Р3) becomes a
+  special case of the fingerprint. Model: `governance/manifest.py`.
+- **ВТ5 — decay lifecycle for admitted strategies.** Rolling paper/live
+  metrics vs the backtest baseline, thresholds + warning counters, automatic
+  monitoring → decayed → retired transitions; retires a strategy when its edge
+  is gone — paper.monitor watches bot health today, not edge decay. Model:
+  `strategy_store/decay.py`.
+
+Confirmations without new items: Р3+ perturbation leakage testing got a second
+independent cost proof — Vibe-Trading runs poison-the-future invariance on
+100 % of a 462-factor catalog in CI (`test_lookahead.py`); their
+generated-code preflight is another (weaker, structure-only) reference for
+Б4/Н3. Anti-lesson, sharpened: Vibe-Trading has DSR / CSCV / purged-CV
+implemented in a library but wired into no decision path, and the verdict
+belongs to the LLM — exactly the «statistics exist, the verdict ignores them»
+gap our break battery closed. Validation-side samples of the same review (Б1
+poison-future pattern, Б2 random control with a no-default-argument rail) are
+tracked by the control-center `research-validation-hardening` card.
+
 Related, tracked elsewhere:
 - Eval cadence (Р5) — control-center
   [`agent-eval-cadence`](../../../control-center/docs/delivery/initiatives/agent-eval-cadence.md)
