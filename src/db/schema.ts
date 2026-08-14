@@ -9,7 +9,7 @@ import type { ValidationIssue } from '../domain/schemas.ts';
 import type { CriticConcern } from '../domain/critic.ts';
 import type { ModuleManifest } from '../domain/module-bundle.ts';
 import type { BacktestMetricBlock, ComparisonSummary } from '../ports/platform-gateway.port.ts';
-import type { PlatformRunConfig, TrialContext } from '../ports/research-platform.port.ts';
+import type { PlatformRunConfig, RunAdmissionEvidence, TrialContext } from '../ports/research-platform.port.ts';
 import type { EvaluatorThresholds } from '../validation/evaluator.ts';
 import type { ActionProposalStatus, ProposedTaskSnapshot, OperatorAction } from '../domain/action-proposal.ts';
 import type { PendingOperatorInteraction } from '../ports/chat-session.repository.ts';
@@ -172,6 +172,9 @@ export const backtestRun = pgTable('backtest_run', {
   taskId: text('task_id'),
   resumeToken: text('resume_token'),
   platformRun: jsonb('platform_run').$type<PlatformRunConfig>(),
+  // Д3 3.3в: чем прогон допущен. Отдельная колонка РЯДОМ с запрошенным `platform_run`,
+  // nullable: NULL = допуска не было (мок/фикстура), а не «пустой допуск».
+  admission: jsonb('admission').$type<RunAdmissionEvidence>(),
   netPnlUsd: doublePrecision('net_pnl_usd'),
   netPnlPct: doublePrecision('net_pnl_pct'),
   totalTrades: integer('total_trades'),
@@ -214,6 +217,8 @@ export const strategyBacktestRun = pgTable('strategy_backtest_run', {
   status: text('status').$type<BacktestRunStatus>().notNull(),
   metrics: jsonb('metrics').$type<BacktestMetricBlock>(),
   platformRun: jsonb('platform_run').$type<PlatformRunConfig>(),
+  /** Д3 3.3в — см. `backtestRun.admission`. */
+  admission: jsonb('admission').$type<RunAdmissionEvidence>(),
   artifactRefs: jsonb('artifact_refs').$type<string[]>().notNull(),
   platformContractVersion: text('platform_contract_version').notNull(),
   sdkContractVersion: text('sdk_contract_version').notNull(),

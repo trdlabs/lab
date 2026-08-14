@@ -38,6 +38,9 @@ export function toBacktestDto(b: BacktestRun): BacktestDto {
     },
     delta: { netPnlUsd: b.deltaNetPnlUsd, maxDrawdownPct: b.deltaMaxDrawdownPct },
     isFragile: b.isFragile,
+    // Сохранённый блок доезжает до читателя. `null` в строке означает «допуска не
+    // было» и проецируется ОТСУТСТВИЕМ поля, а не пустым объектом.
+    ...(b.admission !== null ? { admission: b.admission } : {}),
     submittedAt: b.submittedAt, finishedAt: b.finishedAt, createdAt: b.createdAt, updatedAt: b.updatedAt,
   };
 }

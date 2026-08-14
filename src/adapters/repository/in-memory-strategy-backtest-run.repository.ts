@@ -7,7 +7,8 @@ export class InMemoryStrategyBacktestRunRepository implements StrategyBacktestRu
   async markCompleted(id: string, c: StrategyBacktestCompletion): Promise<void> {
     const r = this.rows.get(id); if (!r) return;
     this.rows.set(id, { ...r, status: 'completed', metrics: c.metrics, artifactRefs: [...c.artifactRefs],
-      platformContractVersion: c.platformContractVersion, finishedAt: c.finishedAt, updatedAt: c.finishedAt });
+      platformContractVersion: c.platformContractVersion, finishedAt: c.finishedAt, updatedAt: c.finishedAt,
+      admission: c.admission ?? null });
   }
   async markRejected(id: string): Promise<void> {
     const r = this.rows.get(id);

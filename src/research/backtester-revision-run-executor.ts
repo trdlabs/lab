@@ -94,6 +94,7 @@ export class BacktesterRevisionRunExecutor implements StrategyRevisionRunExecuto
       platformRun: req.run,
       artifactRefs: [],
       platformContractVersion: 'pending',
+      admission: null,
       sdkContractVersion: SDK_CONTRACT_VERSION,
       backend: 'research_platform',
       submittedAt: this.d.now(),
@@ -168,6 +169,7 @@ export class BacktesterRevisionRunExecutor implements StrategyRevisionRunExecuto
       artifactRefs: [...outcome.artifactIds],
       platformContractVersion: outcome.summary.evidence?.contractVersion ?? 'unknown',
       finishedAt: this.d.now(),
+      ...(outcome.summary.evidence?.admission !== undefined ? { admission: outcome.summary.evidence.admission } : {}),
     });
     return { status: 'completed', runId, platformRunId, metrics, totalTrades: metrics.totalTrades };
   }

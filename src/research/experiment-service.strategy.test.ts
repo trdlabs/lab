@@ -124,6 +124,7 @@ function seededStrategyBacktestRun(id: string, metrics: ReturnType<typeof viable
     id, strategyProfileId: 'p1', strategyBundleId: 'sb-1', bundleHash: 'sha256:bundle', paramsHash: '',
     runKind: 'strategy_baseline', platformRunId: `plat-${id}`, correlationId: 'c1', params: {},
     status: 'completed', metrics, platformRun: null, artifactRefs: [],
+    admission: null,
     platformContractVersion: '1', sdkContractVersion: '1', backend: 'research_platform',
     submittedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T00:00:00.000Z',
     createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',

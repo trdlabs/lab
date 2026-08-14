@@ -7,7 +7,7 @@ import type { AgentEvent } from '../../ports/agent-event.repository.ts';
 import type { ComparisonSummary } from '../../ports/platform-gateway.port.ts';
 import type { BacktestCompletion } from '../../domain/backtest-run.ts';
 import type { Evaluation } from '../../domain/evaluation.ts';
-import type { PlatformRunConfig, Ref } from '../../ports/research-platform.port.ts';
+import type { PlatformRunConfig, Ref, RunAdmissionEvidence } from '../../ports/research-platform.port.ts';
 import { evaluateBacktest } from '../../validation/evaluator.ts';
 import type { EvaluationDecision } from '../../validation/evaluator.ts';
 import { applyBacktestPreservationGate } from '../../validation/apply-preservation-gate.ts';
@@ -64,7 +64,12 @@ export interface BacktestCompletionResult {
 export async function finalizeBacktestCompletion(
   services: AppServices,
   task: ResearchTask,
-  args: { runId: string; hypothesisId: string; platformRunId: string; comparison: ComparisonSummary; artifactRefs: string[] },
+  args: {
+    runId: string; hypothesisId: string; platformRunId: string;
+    comparison: ComparisonSummary; artifactRefs: string[];
+    /** Д3 3.3в: чем прогон допущен. Отсутствие — валидный ответ источника без допуска. */
+    admission?: RunAdmissionEvidence;
+  },
 ): Promise<BacktestCompletionResult> {
   const now = () => new Date().toISOString();
   const c = args.comparison;
@@ -74,6 +79,8 @@ export async function finalizeBacktestCompletion(
     deltaMaxDrawdownPct: c.variant.maxDrawdownPct - c.baseline.maxDrawdownPct,
     isFragile: c.variant.topTradeContributionPct >= services.evaluatorThresholds.fragilityTopTradePct,
     artifactRefs: args.artifactRefs, platformContractVersion: c.platformContractVersion, finishedAt: now(),
+    // Пишется вместе с завершением, а не отдельным шагом.
+    ...(args.admission !== undefined ? { admission: args.admission } : {}),
   };
   await services.backtests.markCompleted(args.runId, completion);
   await services.events.append(event(task.id, 'backtest.completed', { runId: args.runId, deltaNetPnlUsd: completion.deltaNetPnlUsd }));
@@ -200,7 +207,12 @@ export async function applyPlatformTerminalOutcome(
     }
     throw err;
   }
-  const completion = await finalizeBacktestCompletion(services, task, { runId, hypothesisId, platformRunId, comparison, artifactRefs: [...outcome.artifactIds] });
+  const completion = await finalizeBacktestCompletion(services, task, {
+    runId, hypothesisId, platformRunId, comparison, artifactRefs: [...outcome.artifactIds],
+    // Этот путь общий для первичного submit-поллинга и для resume/callback — значит
+    // допуск доезжает по обоим, и отдельной проводки для resume не требуется.
+    ...(outcome.summary.evidence.admission !== undefined ? { admission: outcome.summary.evidence.admission } : {}),
+  });
   return {
     kind: 'completed', decision: completion.decision, reasons: completion.reasons,
     deltaNetPnlUsd: completion.deltaNetPnlUsd, deltaMaxDrawdownPct: completion.deltaMaxDrawdownPct,

@@ -89,6 +89,7 @@ async function seedConsolidatableRevision(
   if (!opts.skipComboRun) {
     const platformRun = opts.platformRun === undefined ? samplePlatformRun() : opts.platformRun;
     const comboRun: StrategyBacktestRun = {
+      admission: null,
       id: 'combo-run-1', strategyProfileId: 'p1', strategyBundleId: STACK_MANIFEST_META.id, bundleHash: bundle.bundleHash,
       paramsHash: 'hash1', runKind: 'revision_combo', platformRunId: 'plat-combo', correlationId: 'corr-1',
       params: {}, status: 'completed', metrics: acceptedMetrics(), platformRun,

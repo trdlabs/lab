@@ -71,6 +71,7 @@ export class BacktesterStrategyExperimentRunExecutor implements StrategyExperime
       platformRun: req.run,
       artifactRefs: [],
       platformContractVersion: 'pending',
+      admission: null,
       sdkContractVersion: SDK_CONTRACT_VERSION,
       backend: 'research_platform',
       submittedAt: this.d.now(),
@@ -108,6 +109,7 @@ export class BacktesterStrategyExperimentRunExecutor implements StrategyExperime
       artifactRefs: [...outcome.artifactIds],
       platformContractVersion: outcome.summary.evidence?.contractVersion ?? 'unknown',
       finishedAt: this.d.now(),
+      ...(outcome.summary.evidence?.admission !== undefined ? { admission: outcome.summary.evidence.admission } : {}),
     });
     return {
       status: 'completed', runId: labRunId, platformRunId: handle.runId, metrics, totalTrades: metrics.totalTrades,

@@ -78,6 +78,7 @@ function backtestRun(over: Partial<StrategyBacktestRun>): StrategyBacktestRun {
       maxDrawdownPct: 2, expectancyUsd: 2, sharpe: 1.1, topTradeContributionPct: 10,
     },
     platformRun: null,
+    admission: null,
     artifactRefs: [],
     platformContractVersion: 'v1',
     sdkContractVersion: 'v1',

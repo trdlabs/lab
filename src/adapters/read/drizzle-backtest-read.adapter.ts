@@ -24,6 +24,10 @@ function toDomain(row: Row): BacktestRun {
     status: row.status as BacktestRunStatus, baselineModuleId: row.baselineModuleId, variantModuleId: row.variantModuleId,
     backend: row.backend as 'sp4_mock' | 'research_platform', resumeToken: row.resumeToken,
     platformRun: (row.platformRun as import('../../ports/research-platform.port.ts').PlatformRunConfig | null) ?? null,
+    // Д3 3.3в: read-проекция НЕ выбрасывает допуск. Своё отображение здесь — не
+    // дублирование: импорт write-адаптера запрещён гейтом границы, поэтому забыть
+    // поле можно ровно в одном месте, и это оно.
+    admission: (row.admission as import('../../ports/research-platform.port.ts').RunAdmissionEvidence | null) ?? null,
     metrics: metricsFromRow(row), baselineMetrics: (row.baselineMetrics as BacktestMetricBlock | null) ?? null,
     deltaNetPnlUsd: row.deltaNetPnlUsd, deltaMaxDrawdownPct: row.deltaMaxDrawdownPct, isFragile: row.isFragile,
     artifactRefs: row.artifactRefs, platformContractVersion: row.platformContractVersion, sdkContractVersion: row.sdkContractVersion,

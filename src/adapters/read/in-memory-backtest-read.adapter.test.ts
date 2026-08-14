@@ -5,6 +5,7 @@ import type { BacktestRun } from '../../domain/backtest-run.ts';
 function run(id: string, over: Partial<BacktestRun> = {}): BacktestRun {
   const now = '2026-01-01T00:00:00.000Z';
   return {
+    admission: null,
     id, hypothesisBuildId: 'b1', hypothesisId: 'h1', strategyProfileId: 'p1',
     platformRunId: 'mock-run', correlationId: 'c1', params: {}, paramsHash: 'sha:p', bundleHash: 'sha:b',
     status: 'completed', baselineModuleId: 'm0', variantModuleId: 'm1',

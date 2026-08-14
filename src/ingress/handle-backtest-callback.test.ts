@@ -15,6 +15,7 @@ function run(over: Partial<BacktestRun> = {}): BacktestRun {
     status: 'submitted', baselineModuleId: 'strategy:p1', variantModuleId: 'overlay-h1',
     backend: 'research_platform', resumeToken: 'tok', taskId: 't1',
     platformRun: { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', period: { from: '2023-01-01', to: '2023-06-30' }, seed: 7 },
+    admission: null,
     metrics: null, baselineMetrics: null, deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null,
     artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: 'builder-sdk-v0',
     submittedAt: NOW, finishedAt: null, createdAt: NOW, updatedAt: NOW, ...over,

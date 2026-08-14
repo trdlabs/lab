@@ -222,6 +222,7 @@ async function setup(opts: {
       bundleHash: baseBundle.bundleHash, paramsHash, runKind: 'revision_combo', platformRunId: 'plat-existing',
       correlationId: 'corr-1', params: {}, status: 'completed', metrics: opts.comparison?.metrics ?? baselineMetrics(),
       platformRun: services.defaultPlatformRun, artifactRefs: [], platformContractVersion: '1', sdkContractVersion: '1',
+      admission: null,
       backend: 'research_platform', submittedAt: '2026-01-01T00:00:00Z', finishedAt: '2026-01-01T00:00:00Z',
       createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     };
@@ -484,6 +485,7 @@ describe('revisionBuildHandler', () => {
       bundleHash: baseBundle.bundleHash, paramsHash: 'ph-1', runKind: 'strategy_baseline', platformRunId: 'plat-holdout',
       correlationId: 'corr-baseline', params: {}, status: 'completed', metrics: baselineMetrics(),
       platformRun: services.defaultPlatformRun, artifactRefs: [], platformContractVersion: '1', sdkContractVersion: '1',
+      admission: null,
       backend: 'research_platform', submittedAt: '2026-01-01T00:00:00Z', finishedAt: '2026-01-01T00:00:00Z',
       createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     };
