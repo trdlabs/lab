@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { AgentId, AgentLifecycle } from './agent-taxonomy.ts';
 import type { ParameterGrid } from '../domain/research-experiment.ts';
 import type { HypothesisStatus } from '../domain/hypothesis.ts';
+import type { RunAdmissionEvidence } from '../ports/research-platform.port.ts';
 
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const BACKTEST_STATUSES = ['queued', 'submitted', 'running', 'completed', 'rejected', 'failed', 'evaluated'] as const;
@@ -59,6 +60,15 @@ export interface BacktestDto {
   metrics: BacktestMetricsDto;
   delta: { netPnlUsd: number | null; maxDrawdownPct: number | null };
   isFragile: boolean | null;
+  /**
+   * Д3 3.3в — чем прогон был допущен. Проекция здесь allow-list'овая: любое новое
+   * поле по умолчанию теряется. Допуск теряться не должен — без него читатель API
+   * видит числа, но не видит, на каком периоде они получены.
+   *
+   * Отсутствует, когда допуска не было. `null` сюда не кладётся: «поля нет» и
+   * «поле есть, но пустое» — разные утверждения.
+   */
+  admission?: RunAdmissionEvidence;
   submittedAt: string; finishedAt: string | null; createdAt: string; updatedAt: string;
 }
 

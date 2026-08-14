@@ -37,6 +37,7 @@ function backtestRun(id: string, hypId: string, correlationId: string, over: Par
     status: 'completed', baselineModuleId: 'base', variantModuleId: 'variant', backend: 'research_platform',
     resumeToken: null, platformRun: null, metrics: null, baselineMetrics: null,
     deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null, artifactRefs: [],
+    admission: null,
     platformContractVersion: 'test.1', sdkContractVersion: 'test.1',
     submittedAt: T(0), finishedAt: T(0), createdAt: T(0), updatedAt: T(0),
     ...over,

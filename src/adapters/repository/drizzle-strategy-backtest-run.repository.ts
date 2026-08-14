@@ -14,6 +14,7 @@ function toDomain(row: Row): StrategyBacktestRun {
     ...(row.taskId !== null ? { taskId: row.taskId } : {}),
     ...(row.resumeToken !== null ? { resumeToken: row.resumeToken } : {}),
     params: row.params, status: row.status, metrics: row.metrics ?? null, platformRun: row.platformRun ?? null,
+    admission: row.admission ?? null,
     artifactRefs: row.artifactRefs, platformContractVersion: row.platformContractVersion, sdkContractVersion: row.sdkContractVersion,
     backend: row.backend, submittedAt: row.submittedAt.toISOString(), finishedAt: row.finishedAt ? row.finishedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
@@ -39,6 +40,8 @@ export class DrizzleStrategyBacktestRunRepository implements StrategyBacktestRun
     await this.db.update(strategyBacktestRun).set({
       status: 'completed', metrics: c.metrics, artifactRefs: c.artifactRefs,
       platformContractVersion: c.platformContractVersion, finishedAt: new Date(c.finishedAt), updatedAt: new Date(c.finishedAt),
+      // Д3 3.3в: тем же UPDATE, что и завершение (см. drizzle-backtest-run).
+      admission: c.admission ?? null,
     }).where(eq(strategyBacktestRun.id, id));
   }
 

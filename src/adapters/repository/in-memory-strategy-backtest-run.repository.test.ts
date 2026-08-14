@@ -6,6 +6,7 @@ const base = (over: Partial<StrategyBacktestRun> = {}): StrategyBacktestRun => (
   id: 'sbr_1', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: 'sha256:h', paramsHash: 'ph',
   runKind: STRATEGY_RUN_KIND, platformRunId: 'run_1', correlationId: 'sanity', params: {}, status: 'submitted',
   metrics: null, platformRun: null, artifactRefs: [], platformContractVersion: 'pending',
+  admission: null,
   sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform', submittedAt: 't', finishedAt: null,
   createdAt: 't', updatedAt: 't', ...over,
 });

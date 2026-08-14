@@ -7,6 +7,18 @@
 // backtester adapters translate their backends into. Shapes are kept byte-identical to the former SDK
 // `/agent` DTOs so the adapters' mapping logic is unchanged.
 
+// ИСКЛЮЧЕНИЕ ИЗ «lab владеет словарём»: форма допуска берётся ТИПОМ из пина
+// `@trdlabs/backtester-sdk@0.8.1`, а не копируется сюда.
+//
+// Остальные шапки скопированы намеренно (см. выше) — они застыли, и копия ничего
+// не стоит. Допуск же продолжает развиваться на стороне бэктестера, и вторая
+// структурно похожая декларация разъехалась бы молча: ровно это сегодня чинили в
+// самом бэктестере, где локальная копия объявляла `code: string` там, где SDK уже
+// сузил его до замкнутого union'а, и знать не знала про `status`.
+import type { RunAdmissionEvidence } from '@trdlabs/backtester-sdk/contracts';
+
+export type { RunAdmissionEvidence };
+
 export type ContentHash = `sha256:${string}`;
 
 export interface Ref {
@@ -169,6 +181,13 @@ export interface RunResultSummary {
     readonly seed: number;
     readonly contractVersion: string;
     readonly moduleVersions: readonly Ref[];
+    /**
+     * Д3 3.3в: чем разрешён период прогона. ОТСУТСТВИЕ — значимо: так выглядит
+     * источник, которому допуск не нужен (мок, фикстура). Синтезировать вместо
+     * этого `effective = requested` нельзя — получилось бы утверждение о
+     * разрешении, которого никто не давал.
+     */
+    readonly admission?: RunAdmissionEvidence;
   };
   /** E2: advisory trial count + Deflated Sharpe. NOT covered by any result hash. */
   readonly trialContext?: TrialContext;

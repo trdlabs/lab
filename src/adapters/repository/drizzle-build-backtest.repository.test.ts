@@ -46,12 +46,26 @@ const block = (o: Partial<BacktestMetricBlock> = {}): BacktestMetricBlock => ({ 
 
   it('backtest_run completes + enforces idempotency', async () => {
     const hid = uid(); const now = new Date().toISOString();
-    const base: BacktestRun = { id: uid(), hypothesisBuildId: 'b1', hypothesisId: hid, strategyProfileId: 'p1', platformRunId: 'mock-run-1', correlationId: 'c1', params: {}, paramsHash: 'sha256:p', bundleHash: 'sha256:bh', status: 'submitted', baselineModuleId: 'strategy:p1', variantModuleId: 'overlay-h1', backend: 'sp4_mock', resumeToken: null, platformRun: null, metrics: null, baselineMetrics: null, deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null, artifactRefs: [], platformContractVersion: 'mock-0', sdkContractVersion: SDK_CONTRACT_VERSION, submittedAt: now, finishedAt: null, createdAt: now, updatedAt: now };
+    const base: BacktestRun = { id: uid(), hypothesisBuildId: 'b1', hypothesisId: hid, strategyProfileId: 'p1', platformRunId: 'mock-run-1', correlationId: 'c1', params: {}, paramsHash: 'sha256:p', bundleHash: 'sha256:bh', status: 'submitted', baselineModuleId: 'strategy:p1', variantModuleId: 'overlay-h1', backend: 'sp4_mock', resumeToken: null, platformRun: null, admission: null, metrics: null, baselineMetrics: null, deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null, artifactRefs: [], platformContractVersion: 'mock-0', sdkContractVersion: SDK_CONTRACT_VERSION, submittedAt: now, finishedAt: null, createdAt: now, updatedAt: now };
     await runs.createSubmitted(base);
-    const completion: BacktestCompletion = { metrics: block(), baselineMetrics: block({ netPnlUsd: 100, winRate: 0.5, maxDrawdownPct: 7 }), deltaNetPnlUsd: 150, deltaMaxDrawdownPct: 1, isFragile: false, artifactRefs: [], platformContractVersion: 'mock-0', finishedAt: new Date().toISOString() };
+    // Д3 3.3в: допуск идёт ТЕМ ЖЕ UPDATE, что и метрики, и обязан пережить настоящий
+    // JSONB round-trip — в памяти это проверяется отдельно, но PG умеет своё: другой
+    // порядок ключей, другое представление чисел, NULL против отсутствия.
+    const admission = {
+      requestedFromMs: 1_672_531_200_000, requestedToMs: 1_688_083_200_000,
+      effectiveFromMs: 1_676_419_200_000, effectiveToMs: 1_684_540_800_000,
+      clamped: true,
+      availabilityId: `sha256:${'a'.repeat(64)}`, asOfMs: 111,
+      admittedAvailabilityId: `sha256:${'b'.repeat(64)}`, admittedAsOfMs: 222,
+      archiveId: 'arch-1', datasetId: 'ds-1',
+    };
+    const completion: BacktestCompletion = { admission, metrics: block(), baselineMetrics: block({ netPnlUsd: 100, winRate: 0.5, maxDrawdownPct: 7 }), deltaNetPnlUsd: 150, deltaMaxDrawdownPct: 1, isFragile: false, artifactRefs: [], platformContractVersion: 'mock-0', finishedAt: new Date().toISOString() };
     await runs.markCompleted(base.id, completion);
     const row = await runs.findById(base.id);
     expect(row?.status).toBe('completed');
+    expect(row?.admission).toEqual(admission);
+    // Запрошенное не переписано допуском (здесь оно null — строка заведена без него).
+    expect(row?.platformRun).toBeNull();
     expect(row?.metrics?.netPnlUsd).toBe(250);
     expect(row?.deltaNetPnlUsd).toBe(150);
     expect((await runs.findByIdentity(hid, 'sha256:p', 'sha256:bh'))?.id).toBe(base.id);

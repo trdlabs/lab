@@ -11,6 +11,7 @@ import type {
   RunResultResult,
   Ref,
   TrialContext,
+  RunAdmissionEvidence,
 } from './research-run-lifecycle.ts';
 import { isTerminal } from './research-run-lifecycle.ts';
 import type { ModuleBundle } from '../domain/module-bundle.ts';
@@ -22,6 +23,7 @@ export type {
   RunResultSummary, ComparisonSummaryDTO,
   RunJobHandle, RunStatusView, RunResultResult, Ref,
   TrialContext,
+  RunAdmissionEvidence,
 };
 export { isTerminal };
 

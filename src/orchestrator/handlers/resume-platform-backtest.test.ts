@@ -13,6 +13,7 @@ const NOW = '2026-01-01T00:00:00Z';
 
 function run(id: string, over: Partial<BacktestRun> = {}): BacktestRun {
   return {
+    admission: null,
     id, hypothesisBuildId: 'b1', hypothesisId: 'h1', strategyProfileId: 'p1',
     platformRunId: 'r-1', correlationId: 'c1', params: {}, paramsHash: 'sha256:p', bundleHash: 'sha256:bh',
     status: 'submitted', baselineModuleId: 'strategy:p1', variantModuleId: 'overlay-h1',

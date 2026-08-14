@@ -123,6 +123,7 @@ async function seed(s: AppServices, over: { metrics?: BacktestMetricBlock | null
     taskId: 't', resumeToken: null, platformRun: PLATFORM_RUN,
     metrics: over.metrics === undefined ? IS_METRICS : over.metrics,
     baselineMetrics: null, deltaNetPnlUsd: 0, deltaMaxDrawdownPct: 0, isFragile: false, artifactRefs: [],
+    admission: null,
     platformContractVersion: 'v', sdkContractVersion: 'v', submittedAt: NOW, finishedAt: NOW, createdAt: NOW, updatedAt: NOW,
   };
   await s.backtests.createSubmitted(run);

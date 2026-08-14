@@ -54,6 +54,7 @@ function run(id: string, over: Partial<StrategyBacktestRun> = {}): StrategyBackt
     runKind: STRATEGY_RUN_KIND, platformRunId: `plat-${id}`, correlationId: 'c', taskId: 't',
     params: {}, status: 'submitted', metrics: null,
     platformRun: null, artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: '1',
+    admission: null,
     backend: 'research_platform', submittedAt: NOW, finishedAt: null, createdAt: NOW, updatedAt: NOW,
     ...over,
   };

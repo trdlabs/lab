@@ -1,6 +1,6 @@
 import type { BacktestRunStatus } from './backtest-run.ts';
 import type { BacktestMetricBlock } from '../ports/platform-gateway.port.ts';
-import type { PlatformRunConfig } from '../ports/research-platform.port.ts';
+import type { PlatformRunConfig, RunAdmissionEvidence } from '../ports/research-platform.port.ts';
 
 export const STRATEGY_RUN_KIND = 'strategy_baseline' as const;
 export const REVISION_COMBO_RUN_KIND = 'revision_combo' as const;
@@ -20,7 +20,9 @@ export interface StrategyBacktestRun {
   params: Record<string, unknown>;
   status: BacktestRunStatus;
   metrics: BacktestMetricBlock | null;   // absolute strategy metrics; null until completed
-  platformRun: PlatformRunConfig | null;
+  platformRun: PlatformRunConfig | null;   // ЗАПРОШЕННОЕ, как отправлено
+  /** Д3 3.3в — чем прогон был допущен; `null` = допуска не было. См. `BacktestRun.admission`. */
+  admission: RunAdmissionEvidence | null;
   artifactRefs: string[];
   platformContractVersion: string;
   sdkContractVersion: string;
@@ -32,6 +34,8 @@ export interface StrategyBacktestRun {
 }
 
 export interface StrategyBacktestCompletion {
+  /** Д3 3.3в: пишется АТОМАРНО с завершением, а не при submit. */
+  admission?: RunAdmissionEvidence;
   metrics: BacktestMetricBlock;
   artifactRefs: string[];
   platformContractVersion: string;

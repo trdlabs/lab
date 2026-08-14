@@ -74,6 +74,10 @@ export async function runPlatformBacktest(input: RunPlatformBacktestInput): Prom
     metrics: null, baselineMetrics: null, deltaNetPnlUsd: null, deltaMaxDrawdownPct: null, isFragile: null,
     artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: SDK_CONTRACT_VERSION,
     backend: 'research_platform', taskId: task.id, resumeToken, platformRun,
+    // Д3 3.3в: при submit допуск ещё НЕ вынесен — платформа решает его на своей
+    // стороне и сообщает в evidence результата. `null` здесь не заглушка, а
+    // состояние момента; поле заполняется атомарно с markCompleted.
+    admission: null,
     submittedAt: now(), finishedAt: null, createdAt: now(), updatedAt: now(),
   };
   await services.backtests.createSubmitted(run);

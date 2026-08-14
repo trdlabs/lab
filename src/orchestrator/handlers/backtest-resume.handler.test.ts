@@ -9,6 +9,7 @@ const PLATFORM_RUN = { datasetId: 'ds', symbols: ['BTCUSDT'], timeframe: '1h', p
 
 function run(id: string, over: Partial<BacktestRun> = {}): BacktestRun {
   return {
+    admission: null,
     id, hypothesisBuildId: 'b1', hypothesisId: 'h1', strategyProfileId: 'p1',
     platformRunId: 'platform-run-1', correlationId: 'c1', params: {}, paramsHash: 'sha256:p', bundleHash: 'sha256:bh',
     status: 'submitted', baselineModuleId: 'strategy:p1', variantModuleId: 'overlay-h1',

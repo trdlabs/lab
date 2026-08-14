@@ -27,6 +27,8 @@ export class InMemoryBacktestRunRepository implements BacktestRunRepository {
       status: 'completed', metrics: c.metrics, baselineMetrics: c.baselineMetrics,
       deltaNetPnlUsd: c.deltaNetPnlUsd, deltaMaxDrawdownPct: c.deltaMaxDrawdownPct, isFragile: c.isFragile,
       artifactRefs: c.artifactRefs, platformContractVersion: c.platformContractVersion, finishedAt: c.finishedAt,
+      // Д3 3.3в: тот же патч, что и завершение — не отдельная запись.
+      admission: c.admission ?? null,
     });
   }
 

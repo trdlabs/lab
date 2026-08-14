@@ -157,6 +157,12 @@ function toSdkSummary(s: BtRunResultSummary): Extract<RunResultView, { kind: 'su
       seed: s.evidence.seed,
       contractVersion: s.evidence.contractVersion,
       moduleVersions: s.evidence.moduleVersions,
+      // Д3 3.3в: блок допуска переносится ЦЕЛИКОМ и без интерпретации. Тот же
+      // идиом, что у trialContext, и по той же причине: отсутствие блока —
+      // валидный, ОСМЫСЛЕННЫЙ ответ (источник допуска не требует), и подмена его
+      // на пустой объект или на `effective = requested` объявила бы разрешение,
+      // которого никто не давал.
+      ...(s.evidence.admission !== undefined ? { admission: s.evidence.admission } : {}),
     },
     // E2 (research-validation-hardening R1): passthrough, no transformation. Absence is valid —
     // the backtester's trial ledger is opt-in (BACKTESTER_TRIAL_LEDGER); NEVER covered by resultHash.

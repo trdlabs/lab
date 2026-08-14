@@ -78,6 +78,7 @@ describe('BacktesterRevisionRunExecutor', () => {
       resumeToken: undefined, params: {}, status: 'completed',
       metrics: { netPnlUsd: 9, netPnlPct: 0, totalTrades: 7, winRate: 0.5, profitFactor: 1.1, maxDrawdownPct: 3, expectancyUsd: 0, sharpe: 0.4, topTradeContributionPct: 10 },
       platformRun: run, artifactRefs: [], platformContractVersion: 'platform-v1', sdkContractVersion: 'builder-sdk-v0',
+      admission: null,
       backend: 'research_platform', submittedAt: 't0', finishedAt: 't0', createdAt: 't0', updatedAt: 't0',
     };
     await repo.createSubmitted(existing);
@@ -109,6 +110,7 @@ describe('BacktesterRevisionRunExecutor', () => {
     const repo = new InMemoryStrategyBacktestRunRepository();
     const paramsHash = computeStrategyParamsHash({ bundleHash: bundle.bundleHash, platformRun: run, params: {} });
     const stuck: StrategyBacktestRun = {
+      admission: null,
       id: 'stuck_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x',
       bundleHash: bundle.bundleHash, paramsHash, runKind: 'revision_combo',
       platformRunId: 'pr_stuck', correlationId: 'corr_prior', taskId: 'rev_0',
@@ -147,6 +149,7 @@ describe('BacktesterRevisionRunExecutor', () => {
       id: 'pending_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: bundle.bundleHash, paramsHash,
       runKind: 'revision_combo', platformRunId: 'pr_pending', correlationId: 'c', taskId: 'rev_0', resumeToken: 'tok',
       params: {}, status: 'submitted', metrics: null, platformRun: run, artifactRefs: [], platformContractVersion: 'pending',
+      admission: null,
       sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform', submittedAt: 't0', finishedAt: null, createdAt: 't0', updatedAt: 't0',
     });
     let submitCalls = 0;
@@ -171,6 +174,7 @@ describe('BacktesterRevisionRunExecutor', () => {
       id: 'rej_run', strategyProfileId: 'p1', strategyBundleId: 'mod_x', bundleHash: bundle.bundleHash, paramsHash,
       runKind: 'revision_combo', platformRunId: 'pr_rej', correlationId: 'c', taskId: 'rev_0', resumeToken: 'tok',
       params: {}, status: 'submitted', metrics: null, platformRun: run, artifactRefs: [], platformContractVersion: 'pending',
+      admission: null,
       sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform', submittedAt: 't0', finishedAt: null, createdAt: 't0', updatedAt: 't0',
     });
     await repo.markRejected('rej_run');
@@ -198,6 +202,7 @@ describe('BacktesterRevisionRunExecutor', () => {
       params: {}, status: 'completed',
       metrics: { netPnlUsd: 3, netPnlPct: 0, totalTrades: 4, winRate: 0.5, profitFactor: 1.2, maxDrawdownPct: 2, expectancyUsd: 0, sharpe: 0.5, topTradeContributionPct: 12 },
       platformRun: run, artifactRefs: [], platformContractVersion: 'platform-v1', sdkContractVersion: 'builder-sdk-v0',
+      admission: null,
       backend: 'research_platform', submittedAt: 't0', finishedAt: 't0', createdAt: 't0', updatedAt: 't0',
     };
     let findCalls = 0;

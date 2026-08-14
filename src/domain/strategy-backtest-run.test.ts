@@ -10,6 +10,7 @@ describe('StrategyBacktestRun', () => {
       id: 'sbr_1', strategyProfileId: 'p1', strategyBundleId: 'mod_long_oi', bundleHash: 'sha256:abc',
       paramsHash: 'ph1', runKind: STRATEGY_RUN_KIND, platformRunId: 'run_1', correlationId: 'sanity',
       params: {}, status: 'submitted', metrics: null, platformRun: null, artifactRefs: [],
+      admission: null,
       platformContractVersion: 'pending', sdkContractVersion: 'builder-sdk-v0', backend: 'research_platform',
       submittedAt: 't', finishedAt: null, createdAt: 't', updatedAt: 't',
     };

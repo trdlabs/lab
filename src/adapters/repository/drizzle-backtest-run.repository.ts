@@ -25,6 +25,7 @@ function toDomain(row: Row): BacktestRun {
     backend: row.backend as 'sp4_mock' | 'research_platform', resumeToken: row.resumeToken,
     ...(row.taskId !== null ? { taskId: row.taskId } : {}),
     platformRun: (row.platformRun as import('../../ports/research-platform.port.ts').PlatformRunConfig | null) ?? null,
+    admission: (row.admission as import('../../ports/research-platform.port.ts').RunAdmissionEvidence | null) ?? null,
     metrics: metricsFromRow(row), baselineMetrics: (row.baselineMetrics as BacktestMetricBlock | null) ?? null,
     deltaNetPnlUsd: row.deltaNetPnlUsd, deltaMaxDrawdownPct: row.deltaMaxDrawdownPct, isFragile: row.isFragile,
     artifactRefs: row.artifactRefs, platformContractVersion: row.platformContractVersion, sdkContractVersion: row.sdkContractVersion,
@@ -55,6 +56,10 @@ export class DrizzleBacktestRunRepository implements BacktestRunRepository {
       expectancyUsd: c.metrics.expectancyUsd, sharpe: c.metrics.sharpe, topTradeContributionPct: c.metrics.topTradeContributionPct,
       isFragile: c.isFragile, baselineMetrics: c.baselineMetrics, deltaNetPnlUsd: c.deltaNetPnlUsd, deltaMaxDrawdownPct: c.deltaMaxDrawdownPct,
       artifactRefs: c.artifactRefs, platformContractVersion: c.platformContractVersion, finishedAt: new Date(c.finishedAt), updatedAt: new Date(),
+      // Д3 3.3в: допуск ложится ТЕМ ЖЕ UPDATE, что и метрики. Отдельной записью он
+      // мог бы разъехаться с завершением — остался бы прогон, завершённый без
+      // ответа на вопрос, чем он разрешён.
+      admission: c.admission ?? null,
     }).where(eq(backtestRun.id, id));
   }
 

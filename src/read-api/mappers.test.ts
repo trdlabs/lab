@@ -21,6 +21,7 @@ function hyp(over: Partial<HypothesisProposal> = {}): HypothesisProposal {
 }
 function backtest(over: Partial<BacktestRun> = {}): BacktestRun {
   return {
+    admission: null,
     id: 'r1', hypothesisBuildId: 'b1', hypothesisId: 'h1', strategyProfileId: 'p1', platformRunId: 'PLAT-SECRET',
     correlationId: 'CORR-SECRET', params: { foo: 'bar' }, paramsHash: 'HASH', bundleHash: 'BHASH', status: 'completed',
     baselineModuleId: 'MOD0', variantModuleId: 'MOD1',

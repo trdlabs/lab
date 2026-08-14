@@ -66,6 +66,7 @@ export class BacktesterExperimentRunExecutor implements ExperimentRunExecutor {
       isFragile: null,
       artifactRefs: [],
       platformContractVersion: 'pending',
+      admission: null,
       sdkContractVersion: SDK_CONTRACT_VERSION,
       backend: 'research_platform',
       taskId: req.experimentId,
@@ -110,6 +111,7 @@ export class BacktesterExperimentRunExecutor implements ExperimentRunExecutor {
       artifactRefs: [...outcome.artifactIds],
       platformContractVersion: c.platformContractVersion,
       finishedAt: this.d.now(),
+      ...(outcome.summary.evidence.admission !== undefined ? { admission: outcome.summary.evidence.admission } : {}),
     };
     await this.d.backtests.markCompleted(labRunId, completion);
     return { status: 'completed', runId: labRunId, platformRunId: handle.runId, comparison: c, totalTrades: c.variant.totalTrades };

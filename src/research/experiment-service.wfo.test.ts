@@ -204,6 +204,7 @@ async function seedBaseline(opts: {
     platformRunId: 'plat-baseline', correlationId: 'sanity', taskId: 'baseline-task',
     params: {}, status: 'submitted', metrics: null,
     platformRun: { ...RUN_CONFIG, period: DATASET_SCOPE.period },
+    admission: null,
     artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: '1', backend: 'research_platform',
     submittedAt: NOW, finishedAt: null, createdAt: NOW, updatedAt: NOW,
   });
@@ -234,6 +235,7 @@ async function seedBaseline(opts: {
       platformRunId: 'plat-baseline-train', correlationId: 'train', taskId: 'baseline-task',
       params: {}, status: 'submitted', metrics: null,
       platformRun: { ...RUN_CONFIG, period: trainPeriod },
+      admission: null,
       artifactRefs: [], platformContractVersion: 'pending', sdkContractVersion: '1', backend: 'research_platform',
       submittedAt: NOW, finishedAt: null, createdAt: NOW, updatedAt: NOW,
     });
