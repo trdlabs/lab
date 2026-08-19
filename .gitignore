@@ -36,3 +36,6 @@ docs/eval-outputs/
 # gortex daemon volatile sidecar (WAL/SHM) — never commit
 .gortex/sidecar.sqlite-shm
 .gortex/sidecar.sqlite-wal
+
+# Деревья, создаваемые Claude Code (`claude -w`) — тот же класс, что и .worktrees/.
+.claude/worktrees/
