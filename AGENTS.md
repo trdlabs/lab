@@ -115,3 +115,6 @@ pnpm db:migrate          # применение
 <!-- gortex:skills:end -->
 
 <!-- gortex:communities:end -->
+
+<!-- Перенесено из CLAUDE.md 2026-08-20 при сведении инструкций в один файл.
+     Держать ВНЕ маркеров gortex:*, иначе `gortex init` затрёт. -->
