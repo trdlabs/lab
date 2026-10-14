@@ -16,6 +16,7 @@ dist
 
 # Git worktrees (managed by tooling)
 .worktrees/
+.worktrees
 
 # Superpowers visual companion runtime state (keep brainstorm content/*.html)
 /.superpowers/brainstorm/*/state/
@@ -39,3 +40,4 @@ docs/eval-outputs/
 
 # Деревья, создаваемые Claude Code (`claude -w`) — тот же класс, что и .worktrees/.
 .claude/worktrees/
+.claude/worktrees
